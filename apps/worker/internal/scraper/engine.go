@@ -371,10 +371,6 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			}
 
 			for i := range items {
-				if items[i].Location != "" {
-					_ = e.db.UpdateItemSellerInfo(items[i].ID, items[i].Location, items[i].Rating)
-				}
-
 				if err := e.db.PublishItem(items[i]); err != nil {
 					log.Printf("[%d] publish error: %v", monitorID, err)
 				}
