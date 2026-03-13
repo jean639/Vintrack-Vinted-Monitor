@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon } from "lucide-react";
+import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
 import { toast } from "sonner";
@@ -48,7 +48,33 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
   const [msgOpen, setMsgOpen] = useState(false);
   const [msgText, setMsgText] = useState("");
   const [sending, setSending] = useState(false);
-  const [selectedImg, setSelectedImg] = useState<string | null>(null);
+  const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
+
+  const allImages = item.image_url ? [item.image_url, ...(item.extra_images || [])] : [];
+
+  const handleNextImage = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (selectedImgIndex === null) return;
+    setSelectedImgIndex((prev) => (prev! + 1) % allImages.length);
+  }, [selectedImgIndex, allImages.length]);
+
+  const handlePrevImage = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (selectedImgIndex === null) return;
+    setSelectedImgIndex((prev) => (prev! - 1 + allImages.length) % allImages.length);
+  }, [selectedImgIndex, allImages.length]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (selectedImgIndex !== null) {
+        if (e.key === "ArrowRight") handleNextImage();
+        if (e.key === "ArrowLeft") handlePrevImage();
+        if (e.key === "Escape") setSelectedImgIndex(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedImgIndex, handleNextImage, handlePrevImage]);
 
   const timeStr = new Date(item.found_at).toLocaleTimeString([], {
     hour: "2-digit",
@@ -132,7 +158,7 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
             <div className="w-full h-full flex gap-0.5">
               <div
                 className="flex-2 h-full overflow-hidden cursor-pointer"
-                onClick={() => setSelectedImg(item.image_url)}
+                onClick={() => setSelectedImgIndex(0)}
               >
                 <img
                   src={item.image_url}
@@ -146,7 +172,7 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
                   <div
                     key={idx}
                     className="flex-1 overflow-hidden bg-slate-200 cursor-pointer"
-                    onClick={() => setSelectedImg(img)}
+                    onClick={() => setSelectedImgIndex(idx + 1)}
                   >
                     <img
                       src={img}
@@ -161,7 +187,7 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
           ) : (
             <div
               className="w-full h-full cursor-pointer"
-              onClick={() => setSelectedImg(item.image_url)}
+              onClick={() => setSelectedImgIndex(0)}
             >
               <img
                 src={item.image_url}
@@ -334,17 +360,35 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedImg} onOpenChange={(open) => !open && setSelectedImg(null)}>
+      <Dialog open={selectedImgIndex !== null} onOpenChange={(open) => !open && setSelectedImgIndex(null)}>
         <DialogContent showCloseButton={false} className="max-w-[90vw] max-h-[90vh] p-0 border-none bg-transparent shadow-none flex items-center justify-center outline-none">
           <button 
-            onClick={() => setSelectedImg(null)}
+            onClick={() => setSelectedImgIndex(null)}
             className="fixed top-6 right-6 z-60 w-12 h-12 rounded-full bg-black/20 backdrop-blur-xl border border-white/10 text-white flex items-center justify-center hover:bg-black/40 transition-all hover:scale-110 active:scale-95 shadow-2xl group cursor-pointer"
           >
             <XIcon className="w-6 h-6 transition-transform group-hover:rotate-90" />
           </button>
-          {selectedImg && (
+          
+          {selectedImgIndex !== null && allImages.length > 1 && (
+            <>
+              <button 
+                onClick={handlePrevImage}
+                className="fixed left-6 top-1/2 -translate-y-1/2 z-60 w-12 h-12 rounded-full bg-black/20 backdrop-blur-xl border border-white/10 text-white flex items-center justify-center hover:bg-black/40 transition-all hover:scale-110 active:scale-95 shadow-2xl cursor-pointer"
+              >
+                <ChevronLeft className="w-6 h-6 pr-0.5" />
+              </button>
+              <button 
+                onClick={handleNextImage}
+                className="fixed right-6 top-1/2 -translate-y-1/2 z-60 w-12 h-12 rounded-full bg-black/20 backdrop-blur-xl border border-white/10 text-white flex items-center justify-center hover:bg-black/40 transition-all hover:scale-110 active:scale-95 shadow-2xl cursor-pointer"
+              >
+                <ChevronRight className="w-6 h-6 pl-0.5" />
+              </button>
+            </>
+          )}
+
+          {selectedImgIndex !== null && (
             <img
-              src={selectedImg}
+              src={allImages[selectedImgIndex]}
               alt="Preview"
               className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-300"
             />
