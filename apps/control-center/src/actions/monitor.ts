@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth"; 
+import { isValidDiscordWebhook } from "@/lib/validation";
 
 export async function createMonitor(formData: FormData) {
 
@@ -20,6 +21,7 @@ export async function createMonitor(formData: FormData) {
   const brandIds = (formData.get("brand_ids") as string) || null;
   const colorIds = (formData.get("color_ids") as string) || null;
   const region = (formData.get("region") as string) || "de";
+  const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
   if (!query) return;
@@ -54,6 +56,11 @@ export async function createMonitor(formData: FormData) {
     }
   }
 
+  const urlToSave = discordWebhook?.trim() || null;
+  if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
+    throw new Error("Invalid Discord Webhook URL");
+  }
+
   await db.monitors.create({
     data: {
       userId: session.user.id,
@@ -65,8 +72,10 @@ export async function createMonitor(formData: FormData) {
       brand_ids: brandIds || null,
       color_ids: colorIds || null,
       region,
+      discord_webhook: urlToSave,
       proxy_group_id: proxyGroupId,
       status: "active",
+      webhook_active: urlToSave ? true : false,
     },
   });
 
@@ -119,6 +128,11 @@ export async function updateMonitor(id: number, formData: FormData) {
     proxyGroupId = null;
   }
 
+  const urlToSave = discordWebhook?.trim() || null;
+  if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
+    throw new Error("Invalid Discord Webhook URL");
+  }
+
   await db.monitors.update({
     where: { id, userId: session.user.id },
     data: {
@@ -130,7 +144,7 @@ export async function updateMonitor(id: number, formData: FormData) {
       brand_ids: brandIds || null,
       color_ids: colorIds || null,
       region,
-      discord_webhook: discordWebhook?.trim() || null,
+      discord_webhook: urlToSave,
       proxy_group_id: proxyGroupId,
     },
   });

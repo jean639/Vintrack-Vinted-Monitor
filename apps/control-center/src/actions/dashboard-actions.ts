@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { isValidDiscordWebhook } from "@/lib/validation";
 
 export async function stopAllMonitors() {
   const session = await auth();
@@ -37,6 +38,10 @@ export async function updateMonitorWebhook(monitorId: number, webhookUrl: string
     if (!session?.user) throw new Error("Unauthorized");
     
     const urlToSave = webhookUrl.trim() === "" ? null : webhookUrl.trim();
+
+    if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
+        throw new Error("Invalid Discord Webhook URL");
+    }
 
     await db.monitors.update({
         where: { id: monitorId, userId: session.user.id },
