@@ -24,7 +24,8 @@ export async function createMonitor(formData: FormData) {
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
-  if (!query) return;
+  if (!query || query.trim().length === 0) return;
+  if (query.length > 255) throw new Error("Query is too long");
 
   let proxyGroupId: number | null = null;
 
@@ -98,7 +99,8 @@ export async function updateMonitor(id: number, formData: FormData) {
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
-  if (!query) return;
+  if (!query || query.trim().length === 0) return;
+  if (query.length > 255) throw new Error("Query is too long");
 
   // Verify the monitor belongs to this user
   const existing = await db.monitors.findFirst({

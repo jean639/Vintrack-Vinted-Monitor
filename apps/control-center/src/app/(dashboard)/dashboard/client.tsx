@@ -456,7 +456,11 @@ export function DashboardClient({
             <DialogTitle>Discord Webhook</DialogTitle>
             <DialogDescription>
               Configure notifications for{" "}
-              <strong>{selectedMonitor?.query}</strong>.
+              <strong>
+                {selectedMonitor?.query && selectedMonitor.query.length > 50
+                  ? selectedMonitor.query.slice(0, 50) + "..."
+                  : selectedMonitor?.query}
+              </strong>.
             </DialogDescription>
           </DialogHeader>
 

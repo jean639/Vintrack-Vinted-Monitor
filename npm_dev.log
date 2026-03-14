@@ -1,0 +1,48 @@
+
+> control-center@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.2:3000
+
+✓ Starting...
+✓ Ready in 1152ms
+○ Compiling /dashboard ...
+[31m[auth][error][0m MissingSecret: Please define a `secret`. Read more at https://errors.authjs.dev#missingsecret
+    at assertConfig (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:513:16)
+    at Auth (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:12709:234)
+    at runNextTicks (node:internal/process/task_queues:64:5)
+    at listOnTimeout (node:internal/timers:547:9)
+    at process.processTimers (node:internal/timers:521:7)
+[31m[auth][error][0m MissingSecret: Please define a `secret`. Read more at https://errors.authjs.dev#missingsecret
+    at assertConfig (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:513:16)
+    at Auth (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:12709:234)
+    at runNextTicks (node:internal/process/task_queues:64:5)
+    at listOnTimeout (node:internal/timers:547:9)
+    at process.processTimers (node:internal/timers:521:7)
+ GET /dashboard 307 in 5.6s (compile: 4.8s, render: 844ms)
+[31m[auth][error][0m MissingSecret: Please define a `secret`. Read more at https://errors.authjs.dev#missingsecret
+    at assertConfig (/app/apps/control-center/.next/dev/server/chunks/97170_@auth_core_06d4d0d3._.js:513:16)
+    at Auth (/app/apps/control-center/.next/dev/server/chunks/97170_@auth_core_06d4d0d3._.js:5330:236)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async AppRouteRouteModule.do (/app/apps/control-center/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:37866)
+ GET /api/auth/signin 500 in 3.0s (compile: 3.0s, render: 35ms)
+[31m[auth][error][0m MissingSecret: Please define a `secret`. Read more at https://errors.authjs.dev#missingsecret
+    at assertConfig (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:513:16)
+    at Auth (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:12709:234)
+    at runNextTicks (node:internal/process/task_queues:64:5)
+    at listOnTimeout (node:internal/timers:547:9)
+    at process.processTimers (node:internal/timers:521:7)
+[31m[auth][error][0m MissingSecret: Please define a `secret`. Read more at https://errors.authjs.dev#missingsecret
+    at assertConfig (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:513:16)
+    at Auth (/app/apps/control-center/.next/dev/server/chunks/ssr/[root-of-the-server]__d999a5d4._.js:12709:234)
+    at runNextTicks (node:internal/process/task_queues:64:5)
+    at listOnTimeout (node:internal/timers:547:9)
+    at process.processTimers (node:internal/timers:521:7)
+[31m[auth][error][0m MissingSecret: Please define a `secret`. Read more at https://errors.authjs.dev#missingsecret
+    at assertConfig (/app/apps/control-center/.next/dev/server/chunks/97170_@auth_core_06d4d0d3._.js:513:16)
+    at Auth (/app/apps/control-center/.next/dev/server/chunks/97170_@auth_core_06d4d0d3._.js:5330:236)
+    at async AppRouteRouteModule.do (/app/apps/control-center/node_modules/next/dist/compiled/next-server/app-route-turbo.runtime.dev.js:5:37866)
+ GET /api/auth/signin 500 in 36ms (compile: 27ms, render: 9ms)
+ GET /dashboard 307 in 173ms (compile: 8ms, render: 165ms)
