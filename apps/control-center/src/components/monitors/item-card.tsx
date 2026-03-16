@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
 import { toast } from "sonner";
@@ -48,6 +48,9 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
   const [msgOpen, setMsgOpen] = useState(false);
   const [msgText, setMsgText] = useState("");
   const [sending, setSending] = useState(false);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [offerPrice, setOfferPrice] = useState("");
+  const [sendingOffer, setSendingOffer] = useState(false);
   const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
 
   const allImages = item.image_url ? [item.image_url, ...(item.extra_images || [])] : [];
@@ -107,7 +110,7 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || `Like failed (${res.status})`);
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error("Network error — could not reach server");
     }
     setLiking(false);
@@ -142,6 +145,53 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
       toast.error("Network error — could not reach server");
     }
     setSending(false);
+  };
+
+  const handleSendOffer = async () => {
+    if (!linked) {
+      toast.error("Link your Vinted account first (Account tab)");
+      return;
+    }
+    const priceVal = parseFloat(offerPrice);
+    if (isNaN(priceVal) || priceVal <= 0) {
+      toast.error("Please enter a valid price");
+      return;
+    }
+    
+    // Vinted server-side minimum offer is 60% of the original item price
+    const currentPrice = parseFloat(item.price || "0");
+    if (!isNaN(currentPrice) && currentPrice > 0) {
+      const minPrice = currentPrice * 0.6;
+      if (priceVal < minPrice) {
+        toast.error(`Offer too low. Minimum allowed is €${minPrice.toFixed(2)}`);
+        return;
+      }
+    }
+
+    setSendingOffer(true);
+    try {
+      const res = await fetch("/api/offers/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item_id: Number(item.id),
+          seller_id: Number(item.seller_id),
+          price: priceVal.toString(),
+          currency: "EUR",
+        }),
+      });
+      if (res.ok) {
+        toast.success("Offer sent!");
+        setOfferOpen(false);
+        setOfferPrice("");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || `Offer failed (${res.status})`);
+      }
+    } catch {
+      toast.error("Network error — could not reach server");
+    }
+    setSendingOffer(false);
   };
 
   return (
@@ -240,17 +290,30 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
             </button>
           )}
           {linked && item.seller_id && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                setMsgOpen(true);
-              }}
-              className="w-7 h-7 rounded-full flex items-center justify-center shadow-md bg-white/90 text-slate-600 hover:text-blue-500 hover:bg-white transition-colors cursor-pointer"
-              title="Send message to seller"
-            >
-              <MessageCircle className="w-3.5 h-3.5" />
-            </button>
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setOfferOpen(true);
+                }}
+                className="w-7 h-7 rounded-full flex items-center justify-center shadow-md bg-white/90 text-slate-600 hover:text-emerald-500 hover:bg-white transition-colors cursor-pointer"
+                title="Make an offer"
+              >
+                <Tag className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setMsgOpen(true);
+                }}
+                className="w-7 h-7 rounded-full flex items-center justify-center shadow-md bg-white/90 text-slate-600 hover:text-blue-500 hover:bg-white transition-colors cursor-pointer"
+                title="Send message to seller"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -331,8 +394,72 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Send Message</DialogTitle>
-            <DialogDescription>
-              Send a message to the seller of &quot;{item.title || "this item"}&quot;
+            <DialogDescription asChild>
+              <div className="text-sm text-slate-500">
+                <div className="flex gap-5 mb-4">
+                  {item.image_url ? (
+                    <div className="relative w-20 h-24 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0 shadow-sm">
+                      <img 
+                        src={item.image_url} 
+                        alt={item.title || "Item preview"} 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-20 h-24 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                      <ImageOff className="w-8 h-8 text-slate-300" />
+                    </div>
+                  )}
+                  <div className="flex flex-col justify-center gap-1.5 min-w-0 overflow-hidden">
+                    <p className="font-semibold text-slate-900 line-clamp-2 leading-snug">
+                      {item.title || "this item"}
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {item.brand && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-slate-100 text-slate-600 font-medium">
+                          {item.brand}
+                        </span>
+                      )}
+                      {item.size && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-blue-50 text-blue-600 font-medium border border-blue-100/50">
+                          {item.size}
+                        </span>
+                      )}
+                      {item.condition && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-slate-50 text-slate-500 border border-slate-200/50">
+                          {item.condition}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {item.location && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-slate-50 text-slate-400">
+                          {item.location}
+                        </span>
+                      )}
+                      {item.rating && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-amber-50 text-amber-600 font-medium border border-amber-200/50">
+                          ★ {item.rating}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-100 flex justify-between items-center mb-4">
+                  <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Price</span>
+                  <div className="text-right">
+                    <span className="text-base font-bold text-slate-900">€{item.price || "0.00"}</span>
+                    {item.total_price && item.total_price !== item.price && (
+                      <span className="block text-[10px] text-slate-400">
+                        Incl. fees: €{item.total_price}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <p className="text-slate-500">
+                  Send a message to the seller of &quot;{item.title || "this item"}&quot;
+                </p>
+              </div>
             </DialogDescription>
           </DialogHeader>
           <textarea
@@ -355,6 +482,124 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
                 <Send className="w-4 h-4" />
               )}
               {sending ? "Sending..." : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={offerOpen} onOpenChange={setOfferOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Make an Offer</DialogTitle>
+            <DialogDescription asChild>
+              <div className="text-sm text-slate-500">
+                <div className="flex gap-5 mb-3">
+                  {item.image_url ? (
+                    <div className="relative w-20 h-24 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0 shadow-sm">
+                      <img 
+                        src={item.image_url} 
+                        alt={item.title || "Item preview"} 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-20 h-24 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                      <ImageOff className="w-8 h-8 text-slate-300" />
+                    </div>
+                  )}
+                  <div className="flex flex-col justify-center gap-1.5 min-w-0 overflow-hidden">
+                    <p className="font-semibold text-slate-900 line-clamp-2 leading-snug">
+                      {item.title || "this item"}
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {item.brand && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-slate-100 text-slate-600 font-medium">
+                          {item.brand}
+                        </span>
+                      )}
+                      {item.size && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-blue-50 text-blue-600 font-medium border border-blue-100/50">
+                          {item.size}
+                        </span>
+                      )}
+                      {item.condition && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-slate-50 text-slate-500 border border-slate-200/50">
+                          {item.condition}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {item.location && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-slate-50 text-slate-400">
+                          {item.location}
+                        </span>
+                      )}
+                      {item.rating && (
+                        <span className="text-[10px] px-1.5 h-4.5 flex items-center rounded bg-amber-50 text-amber-600 font-medium border border-amber-200/50">
+                          ★ {item.rating}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-100 flex justify-between items-center">
+                  <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Original Price</span>
+                  <div className="text-right">
+                    <span className="text-base font-bold text-slate-900">€{item.price || "0.00"}</span>
+                    {item.total_price && item.total_price !== item.price && (
+                      <span className="block text-[10px] text-slate-400">
+                        Incl. fees: €{item.total_price}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+            <input
+              type="number"
+              step="0.01"
+              min="1"
+              value={offerPrice}
+              onChange={(e) => setOfferPrice(e.target.value)}
+              placeholder={`e.g. ${(parseFloat(item.price || "0") * 0.9).toFixed(2)}`}
+              className="w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1"
+            />
+          </div>
+          <div className="flex gap-2 w-full pt-1">
+            {[5, 10, 15].map((discount) => {
+              const currentPrice = parseFloat(item.price || "0");
+              if (isNaN(currentPrice) || currentPrice <= 0) return null;
+              const discountedPrice = (currentPrice * (1 - discount / 100)).toFixed(2);
+              
+              return (
+                <Button
+                  key={discount}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setOfferPrice(discountedPrice)}
+                  className="flex-1 text-xs border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                >
+                  -{discount}% (€{discountedPrice})
+                </Button>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleSendOffer}
+              disabled={sendingOffer || !offerPrice.trim()}
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {sendingOffer ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Tag className="w-4 h-4" />
+              )}
+              {sendingOffer ? "Sending..." : "Send Offer"}
             </Button>
           </DialogFooter>
         </DialogContent>

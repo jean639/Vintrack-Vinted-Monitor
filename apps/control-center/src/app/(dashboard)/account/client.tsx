@@ -364,11 +364,8 @@ export function AccountClient({
                   — price offers to sellers
                 </span>
               </div>
-              <Badge
-                variant="secondary"
-                className="ml-auto text-[10px] bg-amber-100 text-amber-700"
-              >
-                Coming Soon
+              <Badge variant="outline" className="ml-auto text-[10px]">
+                Available
               </Badge>
             </li>
             <li className="flex items-center gap-3">
