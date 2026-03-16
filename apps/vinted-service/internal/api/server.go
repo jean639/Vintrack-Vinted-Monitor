@@ -33,6 +33,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
 
 	mux.HandleFunc("POST /api/messages/send", s.handleSendMessage)
+	mux.HandleFunc("POST /api/offers/send", s.handleSendOffer)
 
 	mux.HandleFunc("POST /api/account/refresh", s.handleRefreshToken)
 
@@ -392,6 +393,51 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	s.persistIfRefreshed(sess, client)
 
 	writeJSON(w, 200, map[string]interface{}{"status": "sent", "item_id": req.ItemID})
+}
+
+type sendOfferRequest struct {
+	ItemID   int64  `json:"item_id"`
+	SellerID int64  `json:"seller_id"`
+	Price    string `json:"price"`
+	Currency string `json:"currency"`
+}
+
+func (s *Server) handleSendOffer(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	var req sendOfferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+
+	if req.ItemID == 0 {
+		writeError(w, "item_id is required", 400)
+		return
+	}
+	if req.SellerID == 0 {
+		writeError(w, "seller_id is required", 400)
+		return
+	}
+	if req.Price == "" {
+		writeError(w, "price is required", 400)
+		return
+	}
+	if req.Currency == "" {
+		req.Currency = "EUR" // default
+	}
+
+	if err := client.SendOffer(req.ItemID, req.SellerID, req.Price, req.Currency); err != nil {
+		writeError(w, err.Error(), 502)
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+
+	writeJSON(w, 200, map[string]interface{}{"status": "sent", "item_id": req.ItemID, "price": req.Price})
 }
 
 func (s *Server) handleRefreshToken(w http.ResponseWriter, r *http.Request) {

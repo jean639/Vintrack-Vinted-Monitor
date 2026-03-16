@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"vintrack-vinted/internal/session"
 
@@ -55,6 +56,7 @@ func (c *Client) injectAuthCookie() {
 }
 
 func (c *Client) apiHeaders() http.Header {
+	now := time.Now().UnixMilli()
 	h := http.Header{
 		"User-Agent":         {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
 		"Accept":             {"application/json, text/plain, */*"},
@@ -62,6 +64,10 @@ func (c *Client) apiHeaders() http.Header {
 		"Cache-Control":      {"no-cache"},
 		"Pragma":             {"no-cache"},
 		"Locale":             {c.locale()},
+		"X-Platform":         {"web"},
+		"X-Portal":           {c.portal()},
+		"X-Debug-Info":       {"v4"},
+		"X-Local-Time":       {strconv.FormatInt(now, 10)},
 		"Origin":             {fmt.Sprintf("https://%s", c.session.Domain)},
 		"Referer":            {fmt.Sprintf("https://%s/", c.session.Domain)},
 		"Sec-Ch-Ua":          {`"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`},
@@ -78,6 +84,29 @@ func (c *Client) apiHeaders() http.Header {
 		h.Set("X-Anon-Id", c.anonID)
 	}
 	return h
+}
+
+func (c *Client) portal() string {
+	switch {
+	case strings.Contains(c.session.Domain, "vinted.de"):
+		return "de"
+	case strings.Contains(c.session.Domain, "vinted.fr"):
+		return "fr"
+	case strings.Contains(c.session.Domain, "vinted.es"):
+		return "es"
+	case strings.Contains(c.session.Domain, "vinted.it"):
+		return "it"
+	case strings.Contains(c.session.Domain, "vinted.nl"):
+		return "nl"
+	case strings.Contains(c.session.Domain, "vinted.pl"):
+		return "pl"
+	case strings.Contains(c.session.Domain, "vinted.co.uk"):
+		return "uk"
+	case strings.Contains(c.session.Domain, "vinted.com"):
+		return "com"
+	default:
+		return "de"
+	}
 }
 
 func (c *Client) apiHeadersWithBody() http.Header {
@@ -672,4 +701,112 @@ func (c *Client) doSendMessage(itemID, sellerID int64, message string) error {
 	}
 
 	return fmt.Errorf("send reply failed (HTTP %d): %s", resp2.StatusCode, truncate(bodyStr2, 300))
+}
+
+func (c *Client) SendOffer(itemID, sellerID int64, price string, currency string) error {
+	err := c.doSendOffer(itemID, sellerID, price, currency)
+	if err != nil && strings.Contains(err.Error(), "HTTP 401") && c.session.RefreshToken != "" {
+		log.Printf("[vinted] send offer got 401, attempting token refresh...")
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return err
+		}
+		return c.doSendOffer(itemID, sellerID, price, currency)
+	}
+	return err
+}
+
+func (c *Client) doSendOffer(itemID, sellerID int64, price string, currency string) error {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before send offer: %v", err)
+	}
+
+	convoURL := fmt.Sprintf("https://%s/api/v2/conversations", c.session.Domain)
+	convoPayload := map[string]interface{}{
+		"initiator":        "ask_seller",
+		"item_id":          fmt.Sprintf("%d", itemID),
+		"opposite_user_id": fmt.Sprintf("%d", sellerID),
+	}
+	body, _ := json.Marshal(convoPayload)
+
+	req, err := http.NewRequest("POST", convoURL, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("create conversation request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("conversation request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+
+	log.Printf("[vinted] POST /api/v2/conversations (for offer context) -> %d (%.300s)", resp.StatusCode, bodyStr)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("failed to get transaction/conversation context (HTTP %d): %s", resp.StatusCode, truncate(bodyStr, 300))
+	}
+
+	var convoResp struct {
+		Conversation struct {
+			Transaction struct {
+				ID int64 `json:"id"`
+			} `json:"transaction"`
+		} `json:"conversation"`
+	}
+
+	if err := json.Unmarshal(respBody, &convoResp); err != nil {
+		return fmt.Errorf("parse conversation response for tx id: %w", err)
+	}
+
+	txID := convoResp.Conversation.Transaction.ID
+	if txID == 0 {
+		return fmt.Errorf("could not extract transaction ID from conversation response: %.200s", bodyStr)
+	}
+
+	log.Printf("[vinted] found transaction ID %d for offer", txID)
+
+	offerURL := fmt.Sprintf("https://%s/api/v2/transactions/%d/offer_requests", c.session.Domain, txID)
+	offerPayload := map[string]interface{}{
+		"offer_request": map[string]string{
+			"price":    price,
+			"currency": currency,
+		},
+	}
+	offerBody, _ := json.Marshal(offerPayload)
+
+	req2, err := http.NewRequest("POST", offerURL, strings.NewReader(string(offerBody)))
+	if err != nil {
+		return fmt.Errorf("create offer request: %w", err)
+	}
+	req2.Header = c.apiHeadersWithBody()
+
+	resp2, err := c.httpClient.Do(req2)
+	if err != nil {
+		return fmt.Errorf("offer request failed: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	respBody2, _ := io.ReadAll(resp2.Body)
+	bodyStr2 := strings.TrimSpace(string(respBody2))
+
+	log.Printf("[vinted] POST /api/v2/transactions/%d/offer_requests -> %d (%.300s)", txID, resp2.StatusCode, bodyStr2)
+
+	if resp2.StatusCode >= 200 && resp2.StatusCode < 300 {
+		log.Printf("[vinted] offer sent for item %d (price: %s %s)", itemID, price, currency)
+		return nil
+	}
+
+	var errResp struct {
+		Message string `json:"message"`
+		Code    int    `json:"code"`
+	}
+	if err := json.Unmarshal(respBody2, &errResp); err == nil && errResp.Message != "" {
+		return fmt.Errorf("offer failed: %s", errResp.Message)
+	}
+
+	return fmt.Errorf("send offer failed (HTTP %d): %s", resp2.StatusCode, truncate(bodyStr2, 300))
 }

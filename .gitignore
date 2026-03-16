@@ -36,7 +36,7 @@ apps/worker/main
 
 # Test binaries
 *.test
-requests/
+/requests
 
 # Output of 'go coverage'
 *.out
