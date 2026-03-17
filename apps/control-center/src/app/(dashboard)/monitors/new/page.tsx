@@ -9,6 +9,7 @@ import { CategoryPicker } from "@/components/monitors/category-picker";
 import { BrandPicker } from "@/components/monitors/brand-picker";
 import { SizePicker } from "@/components/monitors/size-picker";
 import { RegionPicker } from "@/components/monitors/region-picker";
+import { CountryFilterPicker } from "@/components/monitors/country-filter-picker";
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { ArrowLeft, Plus } from "lucide-react";
 import Link from "next/link";
@@ -26,6 +27,7 @@ export default function NewMonitorPage() {
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const [selectedRegion, setSelectedRegion] = useState<string>("de");
+  const [selectedAllowedCountries, setSelectedAllowedCountries] = useState<string[]>([]);
   const [proxyGroups, setProxyGroups] = useState<ProxyGroupOption[]>([]);
   const [userRole, setUserRole] = useState<string>("free");
   const [selectedProxyGroup, setSelectedProxyGroup] = useState<string>("");
@@ -85,6 +87,23 @@ export default function NewMonitorPage() {
               <input type="hidden" name="region" value={selectedRegion} />
               <p className="text-[12px] text-muted-foreground">
                 Select which Vinted country to monitor. Default is Germany (vinted.de).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[13px]">
+                Strict Item Location Filter{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </Label>
+              <CountryFilterPicker
+                selected={selectedAllowedCountries}
+                onChange={setSelectedAllowedCountries}
+              />
+              <input type="hidden" name="allowed_countries" value={selectedAllowedCountries.join(",")} />
+              <p className="text-[12px] text-muted-foreground">
+                Only items located in these countries will be sent/saved. Leave empty to allow all countries.
               </p>
             </div>
 

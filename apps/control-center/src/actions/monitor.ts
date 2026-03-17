@@ -21,6 +21,7 @@ export async function createMonitor(formData: FormData) {
   const brandIds = (formData.get("brand_ids") as string) || null;
   const colorIds = (formData.get("color_ids") as string) || null;
   const region = (formData.get("region") as string) || "de";
+  const allowedCountries = (formData.get("allowed_countries") as string) || null;
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
@@ -73,6 +74,7 @@ export async function createMonitor(formData: FormData) {
       brand_ids: brandIds || null,
       color_ids: colorIds || null,
       region,
+      allowed_countries: allowedCountries || null,
       discord_webhook: urlToSave,
       proxy_group_id: proxyGroupId,
       status: "active",
@@ -96,6 +98,7 @@ export async function updateMonitor(id: number, formData: FormData) {
   const brandIds = (formData.get("brand_ids") as string) || null;
   const colorIds = (formData.get("color_ids") as string) || null;
   const region = (formData.get("region") as string) || "de";
+  const allowedCountries = (formData.get("allowed_countries") as string) || null;
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
@@ -146,8 +149,10 @@ export async function updateMonitor(id: number, formData: FormData) {
       brand_ids: brandIds || null,
       color_ids: colorIds || null,
       region,
+      allowed_countries: allowedCountries || null,
       discord_webhook: urlToSave,
       proxy_group_id: proxyGroupId,
+      ...(urlToSave ? { webhook_active: true } : {}),
     },
   });
 
