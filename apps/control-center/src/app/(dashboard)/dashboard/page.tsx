@@ -28,6 +28,7 @@ export default async function DashboardPage() {
     color_ids: m.color_ids ?? null,
     size_id: m.size_id ?? null,
     region: m.region ?? "de",
+    allowed_countries: m.allowed_countries ?? null,
     discord_webhook: m.discord_webhook ?? null,
     webhook_active: m.webhook_active ?? true, 
     proxy_group_name: m.proxy_group?.name ?? null,

@@ -42,3 +42,9 @@ export function getRegionLabel(code: string): string {
 export function getRegionFlag(code: string): string {
   return REGIONS_BY_CODE[code]?.flag ?? "🌐";
 }
+
+export function getRegionFlags(codesString: string): string[] {
+  if (!codesString) return [];
+  const codes = codesString.split(",").filter(Boolean);
+  return codes.map((code) => REGIONS_BY_CODE[code]?.flag || code.toUpperCase());
+}

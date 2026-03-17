@@ -72,6 +72,7 @@ model monitors {
   brand_ids  String?   @db.VarChar(500)
   color_ids  String?   @db.VarChar(500)
   region     String    @default("de") @db.VarChar(10)
+  allowed_countries String? @db.VarChar(500)
   status     String?   @default("active") @db.VarChar(50)
   created_at DateTime? @default(now()) @db.Timestamp(6)
   items      items[]
@@ -83,8 +84,8 @@ model monitors {
 }
 
 model items {
-  id           BigInt    @id
-  monitor_id   Int?
+  id           BigInt
+  monitor_id   Int
   title        String?   @db.VarChar(500)
   brand        String?   @db.VarChar(100)
   price        String?   @db.VarChar(50)
@@ -98,7 +99,9 @@ model items {
   image_url    String?
   extra_images String[]  @default([])
   found_at     DateTime? @default(now()) @db.Timestamp(6)
-  monitors     monitors? @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  monitors     monitors  @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+
+  @@id([id, monitor_id])
 }
 
 model proxy_groups {

@@ -42,7 +42,7 @@ import { getCategoryLabels } from "@/lib/categories";
 import { getBrandLabels } from "@/lib/brands";
 import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
-import { getRegionLabel } from "@/lib/regions";
+import { getRegionLabel, getRegionFlags } from "@/lib/regions";
 
 type MonitorHealth = {
   monitor_id: number;
@@ -63,6 +63,7 @@ export type Monitor = {
   color_ids: string | null;
   size_id: string | null;
   region: string;
+  allowed_countries: string | null;
   discord_webhook: string | null;
   webhook_active: boolean;
   proxy_group_name: string | null;
@@ -337,8 +338,16 @@ export function DashboardClient({
                   </div>
                 </div>
 
-                {(m.catalog_ids || m.brand_ids || m.color_ids || m.size_id) && (
+                {(m.catalog_ids || m.brand_ids || m.color_ids || m.size_id || m.allowed_countries) && (
                   <div className="flex flex-wrap gap-1 mb-3">
+                    {m.allowed_countries && (
+                      <span
+                        className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-200"
+                        title={`Only items from: ${m.allowed_countries}`}
+                      >
+                        {getRegionFlags(m.allowed_countries).join(" ")}
+                      </span>
+                    )}
                     {m.catalog_ids &&
                       getCategoryLabels(m.catalog_ids).map((label) => (
                         <span

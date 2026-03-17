@@ -10,7 +10,7 @@ import { getCategoryLabels } from "@/lib/categories";
 import { getBrandLabels } from "@/lib/brands";
 import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
-import { getRegionLabel } from "@/lib/regions";
+import { getRegionLabel, getRegionFlags } from "@/lib/regions";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 
 export default async function MonitorPage({
@@ -103,8 +103,16 @@ export default async function MonitorPage({
               )}
             </div>
 
-            {(monitor.catalog_ids || monitor.brand_ids || monitor.color_ids || monitor.size_id) && (
+            {(monitor.catalog_ids || monitor.brand_ids || monitor.color_ids || monitor.size_id || monitor.allowed_countries) && (
               <div className="flex flex-wrap gap-1 mt-2">
+                {monitor.allowed_countries && (
+                  <span
+                    className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-200"
+                    title={`Only items from: ${monitor.allowed_countries}`}
+                  >
+                    {getRegionFlags(monitor.allowed_countries).join(" ")}
+                  </span>
+                )}
                 {monitor.catalog_ids &&
                   getCategoryLabels(monitor.catalog_ids).map((label) => (
                     <span

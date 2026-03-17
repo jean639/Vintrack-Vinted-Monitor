@@ -27,11 +27,16 @@ func SendWebhook(webhookURL string, item model.Item, query string, proxySource s
 
 	dashLink := fmt.Sprintf("%s/monitors/%d", baseURL, item.MonitorID)
 
+	locationPrefix := ""
+	if item.Location != "" {
+		locationPrefix = item.Location + " "
+	}
+
 	description := fmt.Sprintf("%s\n\n**[🛒 View on Vinted](%s)** | **[📊 View on Dashboard](%s)**", item.Title, item.URL, dashLink)
 
 	embeds := []map[string]interface{}{
 		{
-			"title":       fmt.Sprintf("🇫🇷 %s | %s", item.Title, item.Price),
+			"title":       fmt.Sprintf("%s%s | %s", locationPrefix, item.Title, item.Price),
 			"url":         item.URL,
 			"color":       0x007782,
 			"description": description,

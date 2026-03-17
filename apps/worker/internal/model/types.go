@@ -16,6 +16,7 @@ type Monitor struct {
 	BrandIDs       *string
 	ColorIDs       *string
 	Region         string
+	AllowedCountries *string
 	Status         string
 	DiscordWebhook sql.NullString
 	WebhookActive  bool
