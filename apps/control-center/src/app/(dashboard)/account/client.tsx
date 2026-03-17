@@ -157,10 +157,10 @@ export function AccountClient({
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Vinted ID</span>
-                <div className="flex items-center gap-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+              <div className="bg-white/50 p-2 rounded-md">
+                <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">Vinted ID</span>
+                <div className="flex items-center gap-1 mt-0.5">
                   <p className="font-medium">
                     {isVintedIdVisible ? status.vinted_id : "••••••••••"}
                   </p>
@@ -176,30 +176,30 @@ export function AccountClient({
                   </button>
                 </div>
               </div>
-              <div>
-                <span className="text-muted-foreground">Linked</span>
-                <p className="font-medium">
+              <div className="bg-white/50 p-2 rounded-md">
+                <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">Linked</span>
+                <p className="font-medium mt-0.5">
                   {status.linked_at
                     ? new Date(status.linked_at).toLocaleDateString()
                     : "—"}
                 </p>
               </div>
-              <div>
-                <span className="text-muted-foreground">Last Check</span>
-                <p className="font-medium">
+              <div className="bg-white/50 p-2 rounded-md">
+                <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">Last Check</span>
+                <p className="font-medium mt-0.5">
                   {status.last_check
                     ? new Date(status.last_check).toLocaleString()
                     : "—"}
                 </p>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col xs:flex-row gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleRefresh}
                 disabled={isPending}
-                className="gap-1.5"
+                className="flex-1 sm:flex-none gap-1.5"
               >
                 <RefreshCw
                   className={cn("w-3.5 h-3.5", isPending && "animate-spin")}
@@ -211,7 +211,7 @@ export function AccountClient({
                 size="sm"
                 onClick={handleUnlink}
                 disabled={isPending}
-                className="gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
+                className="flex-1 sm:flex-none gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
               >
                 <Unlink className="w-3.5 h-3.5" />
                 Unlink Account
@@ -249,8 +249,8 @@ export function AccountClient({
             </div>
 
             <div className="space-y-2">
-              <Label>Region</Label>
-              <div className="grid grid-cols-4 gap-1.5">
+              <Label className="text-sm font-medium">Region</Label>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {REGIONS.slice(0, 12).map((region) => {
                   const isSelected = selectedRegion === region.code;
                   return (
@@ -265,7 +265,7 @@ export function AccountClient({
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                       )}
                     >
-                      <span className="text-sm">{region.flag}</span>
+                      <span className="text-sm shrink-0">{region.flag}</span>
                       <span className="truncate">{region.label}</span>
                     </button>
                   );

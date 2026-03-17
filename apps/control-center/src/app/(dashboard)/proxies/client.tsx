@@ -96,7 +96,7 @@ export function ProxiesClient({
 
   return (
     <div className="space-y-6 mx-auto max-w-4xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Proxy Groups</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -106,7 +106,7 @@ export function ProxiesClient({
         <Button
           onClick={() => setIsCreateOpen(true)}
           size="sm"
-          className="gap-1.5"
+          className="w-full sm:w-auto gap-1.5"
         >
           <Plus className="w-4 h-4" /> New Group
         </Button>

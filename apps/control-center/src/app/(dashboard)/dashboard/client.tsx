@@ -178,7 +178,7 @@ export function DashboardClient({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
             Welcome back, {userName}
@@ -188,26 +188,26 @@ export function DashboardClient({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           {activeCount > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={handleStopAll}
-              className="gap-1.5 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              className="flex-1 sm:flex-none gap-1.5 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
             >
               <StopCircle className="w-3.5 h-3.5" /> Stop All
             </Button>
           )}
-          <Link href="/monitors/new">
-            <Button size="sm" className="gap-1.5">
+          <Link href="/monitors/new" className="flex-1 sm:flex-none">
+            <Button size="sm" className="w-full gap-1.5">
               <Plus className="w-3.5 h-3.5" /> New Monitor
             </Button>
           </Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border border-slate-200/60 px-5 py-4">
           <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
             Total Monitors
