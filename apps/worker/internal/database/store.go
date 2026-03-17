@@ -219,7 +219,7 @@ func nilIfEmpty(v string) interface{} {
 
 func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.proxies
+		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.proxies
 		FROM monitors m
 		LEFT JOIN proxy_groups pg ON m.proxy_group_id = pg.id
 		WHERE m.status = 'active'`)
@@ -231,7 +231,7 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 	var monitors []model.Monitor
 	for rows.Next() {
 		var m model.Monitor
-		if err := rows.Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.Proxies); err != nil {
+		if err := rows.Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.Proxies); err != nil {
 			return nil, err
 		}
 		monitors = append(monitors, m)
@@ -242,11 +242,11 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 func (s *Store) GetMonitorByID(id int) (model.Monitor, error) {
 	var m model.Monitor
 	err := s.db.QueryRow(`
-		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.proxies
+		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.proxies
 		FROM monitors m
 		LEFT JOIN proxy_groups pg ON m.proxy_group_id = pg.id
 		WHERE m.id = $1`, id,
-	).Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.Proxies)
+	).Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.Proxies)
 	if err != nil {
 		return model.Monitor{}, err
 	}

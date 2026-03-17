@@ -343,7 +343,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		for _, item := range builtItems {
 			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
 		}
-		go func(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, scr *HTMLScraper, dom string) {
+		go func(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, scr *HTMLScraper, dom string, allowedCountries *string) {
 			if e.enrichSeller && scr != nil {
 				sem := make(chan struct{}, 10)
 				var wg sync.WaitGroup
@@ -378,6 +378,36 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				wg.Wait()
 			}
 
+			if allowedCountries != nil && *allowedCountries != "" {
+				allowedMap := make(map[string]bool)
+				for _, a := range strings.Split(strings.ToLower(*allowedCountries), ",") {
+					allowedMap[strings.TrimSpace(a)] = true
+				}
+
+				var filtered []model.Item
+				for _, it := range items {
+					if it.Location == "" {
+						continue
+					}
+					locLower := strings.ToLower(it.Location)
+					matched := false
+					for code := range allowedMap {
+						if strings.Contains(locLower, code) {
+							matched = true
+							break
+						}
+					}
+					if matched {
+						filtered = append(filtered, it)
+					}
+				}
+				items = filtered
+			}
+
+			if len(items) == 0 {
+				return
+			}
+
 			if err := e.db.BatchSaveItems(items); err != nil {
 				log.Printf("[%d] batch save error: %v", monitorID, err)
 			}
@@ -396,7 +426,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 					discord.SendWebhook(webhook, items[i], query, ps)
 				}
 			}
-		}(ctx, builtItems, newItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, scraper, domain)
+		}(ctx, builtItems, newItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, scraper, domain, m.AllowedCountries)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
