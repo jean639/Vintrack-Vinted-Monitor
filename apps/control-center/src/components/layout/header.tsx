@@ -1,9 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { ChevronRight, Github, Star } from "lucide-react";
+import { ChevronRight, Github, Star, Menu } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-export function Header() {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+export function Header({ onMenuClick }: HeaderProps) {
   const pathname = usePathname();
 
   const getBreadcrumbs = (): { label: string; isCurrent: boolean }[] => {
@@ -27,33 +32,42 @@ export function Header() {
   const breadcrumbs = getBreadcrumbs();
 
   return (
-    <header className="h-12 bg-white/80 backdrop-blur-sm border-b border-slate-100 px-6 flex items-center justify-between sticky top-0 z-40">
-      <nav className="flex items-center gap-1 text-sm">
-        {breadcrumbs.map((crumb, i) => (
-          <span key={i} className="flex items-center gap-1">
-            {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300" />}
-            <span
-              className={
-                crumb.isCurrent
-                  ? "font-medium text-slate-900"
-                  : "text-slate-400"
-              }
-            >
-              {crumb.label}
+    <header className="h-12 bg-white/80 backdrop-blur-sm border-b border-slate-100 px-4 md:px-6 flex items-center justify-between sticky top-0 z-40">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onMenuClick}
+          className="lg:hidden p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-50 rounded-md transition-colors"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        
+        <nav className="hidden sm:flex items-center gap-1 text-sm">
+          {breadcrumbs.map((crumb, i) => (
+            <span key={i} className="flex items-center gap-1">
+              {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300" />}
+              <span
+                className={
+                  crumb.isCurrent
+                    ? "font-medium text-slate-900"
+                    : "text-slate-400"
+                }
+              >
+                {crumb.label}
+              </span>
             </span>
-          </span>
-        ))}
-      </nav>
+          ))}
+        </nav>
+      </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 md:gap-4">
         <a
           href="https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-amber-600 transition-colors bg-slate-50 hover:bg-amber-50 px-2 py-1 rounded-md border border-slate-200 hover:border-amber-200"
+          className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-amber-600 transition-colors bg-slate-50 hover:bg-amber-50 px-2 py-1 rounded-md border border-slate-200 hover:border-amber-200"
         >
           <Github className="w-3.5 h-3.5" />
-          Star us on GitHub
+          <span className="hidden md:inline">Star us on GitHub</span>
           <Star className="w-3.5 h-3.5" />
         </a>
 
@@ -62,7 +76,7 @@ export function Header() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
           </span>
-          Connected
+          <span className="hidden xs:inline">Connected</span>
         </div>
       </div>
     </header>

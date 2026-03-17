@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ACCOUNT_SEEN_KEY = "vintrack:account-tab-seen";
@@ -22,9 +22,11 @@ const adminNavItems = [
 
 interface SidebarProps {
   user?: { name?: string | null; image?: string | null; email?: string | null; role?: string };
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const [showAccountBadge, setShowAccountBadge] = useState(false);
 
@@ -50,9 +52,12 @@ export function Sidebar({ user }: SidebarProps) {
     : "?";
 
   return (
-    <aside className="w-60 bg-white border-r border-slate-200/60 h-full flex flex-col fixed left-0 top-0 bottom-0 z-50">
+    <aside className={cn(
+      "w-60 bg-white border-r border-slate-200/60 h-full flex flex-col fixed left-0 top-0 bottom-0 z-50 transition-transform duration-300 lg:translate-x-0",
+      isOpen ? "translate-x-0" : "-translate-x-full"
+    )}>
 
-      <div className="h-14 flex items-center px-5 border-b border-slate-100">
+      <div className="h-14 flex items-center justify-between px-5 border-b border-slate-100">
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
             <span className="text-white text-xs font-bold">V</span>
@@ -61,11 +66,14 @@ export function Sidebar({ user }: SidebarProps) {
             <span className="font-semibold text-[15px] tracking-tight text-slate-900">
               Vintrack
             </span>
-            <span className="text-[10px] text-slate-400 font-medium">
-              v{process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0"}
-            </span>
           </div>
         </Link>
+        <button 
+          onClick={onClose}
+          className="lg:hidden p-1 text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       <nav className="flex-1 px-3 pt-4 space-y-0.5">

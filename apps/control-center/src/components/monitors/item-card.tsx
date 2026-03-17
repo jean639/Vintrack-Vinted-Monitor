@@ -6,6 +6,7 @@ import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, Che
 import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -274,19 +275,20 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
           </div>
         )}
 
-        <div className="absolute top-2.5 right-2.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <div className="absolute top-2.5 right-2.5 flex gap-1 opacity-0 sm:group-hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity z-10 sm:opacity-0 max-sm:opacity-100 md:group-hover:opacity-100">
           {linked && (
             <button
               onClick={handleLike}
               disabled={liking}
-              className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors cursor-pointer ${
+              className={cn(
+                "w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center shadow-md transition-colors cursor-pointer",
                 liked
                   ? "bg-red-500 text-white"
-                  : "bg-white/90 text-slate-600 hover:text-red-500 hover:bg-white"
-              }`}
+                  : "bg-white/95 text-slate-600 hover:text-red-500 hover:bg-white"
+              )}
               title={liked ? "Unlike" : "Like"}
             >
-              <Heart className={`w-3.5 h-3.5 ${liked ? "fill-current" : ""}`} />
+              <Heart className={cn("w-4 h-4 sm:w-3.5 sm:h-3.5", liked && "fill-current")} />
             </button>
           )}
           {linked && item.seller_id && (
@@ -297,10 +299,10 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
                   e.preventDefault();
                   setOfferOpen(true);
                 }}
-                className="w-7 h-7 rounded-full flex items-center justify-center shadow-md bg-white/90 text-slate-600 hover:text-emerald-500 hover:bg-white transition-colors cursor-pointer"
+                className="w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center shadow-md bg-white/95 text-slate-600 hover:text-emerald-500 hover:bg-white transition-colors cursor-pointer"
                 title="Make an offer"
               >
-                <Tag className="w-3.5 h-3.5" />
+                <Tag className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               </button>
               <button
                 onClick={(e) => {
@@ -308,10 +310,10 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
                   e.preventDefault();
                   setMsgOpen(true);
                 }}
-                className="w-7 h-7 rounded-full flex items-center justify-center shadow-md bg-white/90 text-slate-600 hover:text-blue-500 hover:bg-white transition-colors cursor-pointer"
+                className="w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center shadow-md bg-white/95 text-slate-600 hover:text-blue-500 hover:bg-white transition-colors cursor-pointer"
                 title="Send message to seller"
               >
-                <MessageCircle className="w-3.5 h-3.5" />
+                <MessageCircle className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               </button>
             </>
           )}
