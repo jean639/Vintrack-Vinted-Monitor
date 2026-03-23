@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"vintrack-vinted/internal/session"
@@ -200,6 +201,92 @@ type AccountInfo struct {
 	ItemCount   int    `json:"item_count"`
 	GivenRating string `json:"feedback_reputation"`
 	CountryCode string `json:"country_title"`
+}
+
+type SellerInfo struct {
+	Location string
+	Rating   string
+}
+
+type sellerInfoCache struct {
+	mu    sync.RWMutex
+	cache map[int64]SellerInfo
+}
+
+var globalSellerCache = &sellerInfoCache{
+	cache: make(map[int64]SellerInfo),
+}
+
+func (c *sellerInfoCache) Get(userID int64) (SellerInfo, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	info, ok := c.cache[userID]
+	return info, ok
+}
+
+func (c *sellerInfoCache) Set(userID int64, info SellerInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cache[userID] = info
+}
+
+type VintedPrice struct {
+	Amount   string `json:"amount"`
+	Currency string `json:"currency_code"`
+}
+
+type VintedPhoto struct {
+	Url string `json:"url"`
+}
+
+type VintedUser struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+}
+
+type FavoritesPagination struct {
+	CurrentPage   int         `json:"current_page"`
+	TotalPages    int         `json:"total_pages"`
+	TotalEntries  int         `json:"total_entries"`
+	PerPage       int         `json:"per_page"`
+	NextPageToken interface{} `json:"next_page_token,omitempty"`
+}
+
+type FavoritesItem struct {
+	ID             int64         `json:"id"`
+	Title          string        `json:"title"`
+	Price          VintedPrice   `json:"price"`
+	TotalItemPrice *VintedPrice  `json:"total_item_price,omitempty"`
+	Url            string        `json:"url"`
+	Photo          VintedPhoto   `json:"photo"`
+	Photos         []VintedPhoto `json:"photos,omitempty"`
+	SizeTitle      string        `json:"size_title"`
+	BrandTitle     string        `json:"brand_title,omitempty"`
+	Status         string        `json:"status"`
+	User           VintedUser    `json:"user"`
+	Location       string        `json:"location,omitempty"`
+	Rating         string        `json:"rating,omitempty"`
+}
+
+type VintedItemDetailResponse struct {
+	Item struct {
+		ID             int64         `json:"id"`
+		Photos         []VintedPhoto `json:"photos"`
+		TotalItemPrice *VintedPrice  `json:"total_item_price"`
+		User           struct {
+			ID                 int64   `json:"id"`
+			Login              string  `json:"login"`
+			CountryTitle       string  `json:"country_title"`
+			CountryCode        string  `json:"country_iso_code"`
+			FeedbackCount      int     `json:"feedback_count"`
+			FeedbackReputation float64 `json:"feedback_reputation"`
+		} `json:"user"`
+	} `json:"item"`
+}
+
+type FavoritesResponse struct {
+	Items      []FavoritesItem     `json:"items"`
+	Pagination FavoritesPagination `json:"pagination"`
 }
 
 type userWrapper struct {
@@ -596,6 +683,234 @@ func (c *Client) RefreshAccessToken() error {
 
 	log.Printf("[vinted] token refresh successful, new access token: %s...", truncate(newAccessToken, 20))
 	return nil
+}
+
+func (c *Client) GetFavourites(vintedUserID int64, page string) (*FavoritesResponse, error) {
+	favs, err := c.doGetFavourites(vintedUserID, page)
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] get favorites got %v, attempting token refresh...", err)
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, err
+		}
+		return c.doGetFavourites(vintedUserID, page)
+	}
+	return favs, err
+}
+
+func (c *Client) doGetFavourites(vintedUserID int64, page string) (*FavoritesResponse, error) {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed: %v", err)
+	}
+
+	u := fmt.Sprintf("https://%s/api/v2/users/%d/items/favourites", c.session.Domain, vintedUserID)
+	if page != "" {
+		u += "?page=" + page
+	}
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create favorites request: %w", err)
+	}
+
+	req.Header = c.apiHeaders()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do favorites request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] GET /api/v2/users/%d/items/favourites -> %d (%.200s)", vintedUserID, resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("vinted error: %d %s", resp.StatusCode, string(body))
+	}
+
+	var favs FavoritesResponse
+	if err := json.Unmarshal(body, &favs); err != nil {
+		return nil, fmt.Errorf("unmarshal favorites: %w", err)
+	}
+
+	return &favs, nil
+}
+
+var isoCountryMap = map[string]string{
+	"DE": "🇩🇪 DE", "FR": "🇫🇷 FR", "IT": "🇮🇹 IT", "ES": "🇪🇸 ES",
+	"NL": "🇳🇱 NL", "PL": "🇵🇱 PL", "AT": "🇦🇹 AT", "BE": "🇧🇪 BE",
+	"GB": "🇬🇧 UK", "UK": "🇬🇧 UK", "LU": "🇱🇺 LU", "PT": "🇵🇹 PT",
+	"CZ": "🇨🇿 CZ", "SK": "🇸🇰 SK", "LT": "🇱🇹 LT", "SE": "🇸🇪 SE",
+	"DK": "🇩🇰 DK", "RO": "🇷🇴 RO", "HU": "🇭🇺 HU", "HR": "🇭🇷 HR",
+	"FI": "🇫🇮 FI", "IE": "🇮🇪 IE", "SI": "🇸🇮 SI", "EE": "🇪🇪 EE",
+	"LV": "🇱🇻 LV", "GR": "🇬🇷 GR",
+}
+
+var countryMap = map[string]string{
+	"DEUTSCHLAND": "🇩🇪 DE", "GERMANY": "🇩🇪 DE",
+	"FRANCE": "🇫🇷 FR", "FRANKREICH": "🇫🇷 FR",
+	"ITALIA": "🇮🇹 IT", "ITALY": "🇮🇹 IT", "ITALIEN": "🇮🇹 IT",
+	"ESPAÑA": "🇪🇸 ES", "SPAIN": "🇪🇸 ES", "SPANIEN": "🇪🇸 ES",
+	"NEDERLAND": "🇳🇱 NL", "NETHERLANDS": "🇳🇱 NL", "NIEDERLANDE": "🇳🇱 NL",
+	"POLSKA": "🇵🇱 PL", "POLAND": "🇵🇱 PL", "POLEN": "🇵🇱 PL",
+	"ÖSTERREICH": "🇦🇹 AT", "AUSTRIA": "🇦🇹 AT",
+	"BELGIË": "🇧🇪 BE", "BELGIUM": "🇧🇪 BE", "BELGIEN": "🇧🇪 BE",
+	"UNITED KINGDOM": "🇬🇧 UK", "GROSSBRITANNIEN": "🇬🇧 UK",
+	"LUXEMBOURG": "🇱🇺 LU", "LUXEMBURG": "🇱🇺 LU",
+	"PORTUGAL":        "🇵🇹 PT",
+	"ČESKÁ REPUBLIKA": "🇨🇿 CZ", "TSCHECHIEN": "🇨🇿 CZ",
+	"SLOVENSKO": "🇸🇰 SK", "SLOWAKEI": "🇸🇰 SK",
+	"LIETUVA": "🇱🇹 LT", "LITAUEN": "🇱🇹 LT",
+	"SVERIGE": "🇸🇪 SE", "SCHWEDEN": "🇸🇪 SE",
+	"DANMARK": "🇩🇰 DK", "DÄNEMARK": "🇩🇰 DK",
+	"ROMÂNIA": "🇷🇴 RO", "RUMÄNIEN": "🇷🇴 RO",
+	"MAGYARORSZÁG": "🇭🇺 HU", "UNGARN": "🇭🇺 HU",
+	"HRVATSKA": "🇭🇷 HR", "KROATIEN": "🇭🇷 HR",
+	"SUOMI": "🇫🇮 FI", "FINLAND": "🇫🇮 FI", "FINNLAND": "🇫🇮 FI",
+	"IRELAND": "🇮🇪 IE", "IRLAND": "🇮🇪 IE",
+	"SLOVENIJA": "🇸🇮 SI", "SLOWENIEN": "🇸🇮 SI",
+	"EESTI": "🇪🇪 EE", "ESTLAND": "🇪🇪 EE",
+	"LATVIJA": "🇱🇻 LV", "LETTLAND": "🇱🇻 LV",
+	"ΕΛΛΆΔΑ": "🇬🇷 GR", "GREECE": "🇬🇷 GR", "GRIECHENLAND": "🇬🇷 GR",
+}
+
+func (c *Client) GetItem(itemID int64) (*VintedItemDetailResponse, error) {
+	u := fmt.Sprintf("https://%s/api/v2/items/%d?localization=%s", c.session.Domain, itemID, c.locale())
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header = c.apiHeaders()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/items/%d", c.session.Domain, itemID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("item detail error: %d (%.100s)", resp.StatusCode, string(body))
+	}
+
+	var detail VintedItemDetailResponse
+	if err := json.Unmarshal(body, &detail); err != nil {
+		var alt struct {
+			ID     int64         `json:"id"`
+			Photos []VintedPhoto `json:"photos"`
+			User   struct {
+				ID                 int64   `json:"id"`
+				CountryCode        string  `json:"country_iso_code"`
+				FeedbackCount      int     `json:"feedback_count"`
+				FeedbackReputation float64 `json:"feedback_reputation"`
+			} `json:"user"`
+		}
+		if err2 := json.Unmarshal(body, &alt); err2 == nil && alt.ID != 0 {
+			detail.Item.ID = alt.ID
+			detail.Item.Photos = alt.Photos
+			detail.Item.User.ID = alt.User.ID
+			detail.Item.User.CountryCode = alt.User.CountryCode
+			detail.Item.User.FeedbackCount = alt.User.FeedbackCount
+			detail.Item.User.FeedbackReputation = alt.User.FeedbackReputation
+			return &detail, nil
+		}
+		return nil, fmt.Errorf("unmarshal item detail: %w", err)
+	}
+
+	if detail.Item.ID == 0 {
+		detail.Item.ID = itemID
+	}
+
+	return &detail, nil
+}
+
+func (c *Client) GetSellerInfo(userID int64) (*SellerInfo, error) {
+	if info, ok := globalSellerCache.Get(userID); ok {
+		return &info, nil
+	}
+
+	u := fmt.Sprintf("https://%s/api/v2/users/%d?localization=%s", c.session.Domain, userID, c.locale())
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header = c.apiHeaders()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("user detail error: %d", resp.StatusCode)
+	}
+
+	var wrapper struct {
+		User struct {
+			CountryCode        string  `json:"country_iso_code"`
+			CountryTitle       string  `json:"country_title"`
+			FeedbackReputation float64 `json:"feedback_reputation"`
+			FeedbackCount      int     `json:"feedback_count"`
+		} `json:"user"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&wrapper); err != nil {
+		return nil, err
+	}
+
+	info := SellerInfo{
+		Location: "Unknown",
+		Rating:   "No rating",
+	}
+
+	code := strings.ToUpper(wrapper.User.CountryCode)
+	if flag, ok := isoCountryMap[code]; ok {
+		info.Location = flag
+	} else if wrapper.User.CountryTitle != "" {
+		if flag, ok := countryMap[strings.ToUpper(wrapper.User.CountryTitle)]; ok {
+			info.Location = flag
+		}
+	}
+
+	if wrapper.User.FeedbackCount > 0 {
+		r := wrapper.User.FeedbackReputation * 5.0
+		info.Rating = fmt.Sprintf("⭐ %.1f (%d)", r, wrapper.User.FeedbackCount)
+	}
+
+	globalSellerCache.Set(userID, info)
+	return &info, nil
+}
+
+func (c *Client) EnrichFavorites(favs *FavoritesResponse) {
+	if favs == nil || len(favs.Items) == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+
+	log.Printf("[vinted] enriching %d favorites with seller info for user %d...", len(favs.Items), c.session.VintedUserID)
+
+	for i := range favs.Items {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			item := &favs.Items[idx]
+
+			sInfo, err := c.GetSellerInfo(item.User.ID)
+			if err == nil {
+				item.Location = sInfo.Location
+				item.Rating = sInfo.Rating
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
 
 func (c *Client) SendMessage(itemID, sellerID int64, message string) error {

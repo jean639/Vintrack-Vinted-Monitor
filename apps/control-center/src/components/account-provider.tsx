@@ -8,6 +8,7 @@ type AccountContextType = {
   likedIds: Set<number>;
   addLike: (id: number) => void;
   removeLike: (id: number) => void;
+  syncLikes: (ids: number[]) => void;
 };
 
 const AccountContext = createContext<AccountContextType>({
@@ -16,6 +17,7 @@ const AccountContext = createContext<AccountContextType>({
   likedIds: new Set(),
   addLike: () => {},
   removeLike: () => {},
+  syncLikes: () => {},
 });
 
 export function AccountProvider({ children }: { children: React.ReactNode }) {
@@ -56,8 +58,22 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const syncLikes = useCallback((ids: number[]) => {
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      ids.forEach((id) => {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
   return (
-    <AccountContext.Provider value={{ linked, loading, likedIds, addLike, removeLike }}>
+    <AccountContext.Provider value={{ linked, loading, likedIds, addLike, removeLike, syncLikes }}>
       {children}
     </AccountContext.Provider>
   );

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -12,6 +12,7 @@ const ACCOUNT_SEEN_KEY = "vintrack:account-tab-seen";
 const navItems = [
   { href: "/dashboard", label: "Monitors", icon: LayoutDashboard },
   { href: "/feed", label: "Live Feed", icon: Radio },
+  { href: "/liked", label: "Liked Items", icon: Heart },
   { href: "/proxies", label: "Proxy Groups", icon: Globe },
   { href: "/account", label: "Account", icon: User },
   { href: "/guide", label: "Guide", icon: BookOpen },

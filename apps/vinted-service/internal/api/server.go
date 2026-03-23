@@ -31,6 +31,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/items/like", s.handleLike)
 	mux.HandleFunc("POST /api/items/unlike", s.handleUnlike)
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
+	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
 
 	mux.HandleFunc("POST /api/messages/send", s.handleSendMessage)
 	mux.HandleFunc("POST /api/offers/send", s.handleSendOffer)
@@ -334,6 +335,25 @@ func (s *Server) handleLikedItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{"item_ids": ids})
+}
+
+func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	page := r.URL.Query().Get("page")
+	favs, err := client.GetFavourites(sess.VintedUserID, page)
+	if err != nil {
+		writeError(w, "failed to fetch favorites: "+err.Error(), 502)
+		return
+	}
+
+	client.EnrichFavorites(favs)
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, favs)
 }
 
 func (s *Server) persistIfRefreshed(original *session.VintedSession, client *vinted.Client) {
