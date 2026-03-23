@@ -61,9 +61,6 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
             <span className="text-[15px] font-semibold tracking-tight">
               Vintrack
             </span>
-            <span className="text-[10px] font-medium text-sidebar-foreground/45">
-              v{process.env.NEXT_PUBLIC_APP_VERSION}
-            </span>
           </div>
         </Link>
         <button 
