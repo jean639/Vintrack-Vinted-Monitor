@@ -322,6 +322,30 @@ type InboxResponse struct {
 	WebsocketUserID string              `json:"websocket_user_id,omitempty"`
 }
 
+type NotificationPhoto struct {
+	URL string `json:"url"`
+}
+
+type NotificationEntry struct {
+	ID            string             `json:"id"`
+	Body          string             `json:"body"`
+	EntryType     int                `json:"entry_type"`
+	IsRead        bool               `json:"is_read"`
+	Link          string             `json:"link"`
+	URL           string             `json:"url,omitempty"`
+	Photo         *NotificationPhoto `json:"photo,omitempty"`
+	SmallPhotoURL string             `json:"small_photo_url,omitempty"`
+	SubjectID     int64              `json:"subject_id,omitempty"`
+	UpdatedAt     string             `json:"updated_at,omitempty"`
+	UserID        int64              `json:"user_id,omitempty"`
+}
+
+type NotificationsResponse struct {
+	Code          int                 `json:"code,omitempty"`
+	Notifications []NotificationEntry `json:"notifications"`
+	Pagination    FavoritesPagination `json:"pagination"`
+}
+
 type userWrapper struct {
 	User AccountInfo `json:"user"`
 }
@@ -972,6 +996,19 @@ func (c *Client) GetInbox(page, perPage int) (*InboxResponse, error) {
 	return inbox, err
 }
 
+func (c *Client) GetNotifications(page, perPage int) (*NotificationsResponse, error) {
+	notifications, err := c.doGetNotifications(page, perPage)
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] get notifications got %v, attempting token refresh...", err)
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, err
+		}
+		return c.doGetNotifications(page, perPage)
+	}
+	return notifications, err
+}
+
 func (c *Client) doGetInbox(page, perPage int) (*InboxResponse, error) {
 	if err := c.WarmUp(); err != nil {
 		log.Printf("[vinted] warmup failed before get inbox: %v", err)
@@ -1011,6 +1048,117 @@ func (c *Client) doGetInbox(page, perPage int) (*InboxResponse, error) {
 	}
 
 	return &inbox, nil
+}
+
+func (c *Client) doGetNotifications(page, perPage int) (*NotificationsResponse, error) {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before get notifications: %v", err)
+	}
+
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 5
+	}
+
+	apiDomain := strings.TrimPrefix(c.session.Domain, "www.")
+	u := fmt.Sprintf("https://api.%s/inbox-notifications/v1/notifications?page=%d&per_page=%d", apiDomain, page, perPage)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create notifications request: %w", err)
+	}
+	req.Header = c.apiHeaders()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/", c.session.Domain))
+	req.Header.Set("X-Next-App", "marketplace-web")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("notifications request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] GET /inbox-notifications/v1/notifications?page=%d&per_page=%d -> %d (%.300s)", page, perPage, resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var notifications NotificationsResponse
+	if err := json.Unmarshal(body, &notifications); err != nil {
+		return nil, fmt.Errorf("parse notifications response: %w", err)
+	}
+
+	for i := range notifications.Notifications {
+		notifications.Notifications[i].URL = c.notificationWebURL(notifications.Notifications[i].Link)
+	}
+
+	return &notifications, nil
+}
+
+func (c *Client) notificationWebURL(rawLink string) string {
+	if rawLink == "" {
+		return ""
+	}
+	if strings.HasPrefix(rawLink, "/") {
+		return fmt.Sprintf("https://%s%s", c.session.Domain, rawLink)
+	}
+	if strings.HasPrefix(rawLink, "http://") || strings.HasPrefix(rawLink, "https://") {
+		return rawLink
+	}
+	if !strings.Contains(rawLink, "://") {
+		return rawLink
+	}
+
+	parsed, err := url.Parse(rawLink)
+	if err != nil {
+		return rawLink
+	}
+
+	portalDomain := c.session.Domain
+	if portal := strings.TrimSpace(parsed.Query().Get("portal")); portal != "" {
+		portalDomain = domainForPortal(portal)
+	}
+
+	switch parsed.Host {
+	case "messaging":
+		itemID := strings.TrimSpace(parsed.Query().Get("item_id"))
+		if itemID != "" {
+			return fmt.Sprintf("https://%s/items/%s", portalDomain, itemID)
+		}
+		return fmt.Sprintf("https://%s/inbox", portalDomain)
+	case "item":
+		itemID := strings.TrimSpace(parsed.Query().Get("item_id"))
+		if itemID != "" {
+			return fmt.Sprintf("https://%s/items/%s", portalDomain, itemID)
+		}
+	}
+
+	return fmt.Sprintf("https://%s/", portalDomain)
+}
+
+func domainForPortal(portal string) string {
+	switch strings.ToLower(strings.TrimSpace(portal)) {
+	case "de":
+		return "www.vinted.de"
+	case "fr":
+		return "www.vinted.fr"
+	case "es":
+		return "www.vinted.es"
+	case "it":
+		return "www.vinted.it"
+	case "nl":
+		return "www.vinted.nl"
+	case "pl":
+		return "www.vinted.pl"
+	case "uk":
+		return "www.vinted.co.uk"
+	case "com":
+		return "www.vinted.com"
+	default:
+		return "www.vinted.de"
+	}
 }
 
 func (c *Client) GetConversationReplies(conversationID int64, page, perPage int) (map[string]interface{}, error) {
