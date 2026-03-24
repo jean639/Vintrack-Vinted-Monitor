@@ -207,7 +207,7 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
             </div>
           </div>
           <Link
-            href="/api/auth/signout"
+            href="/logout"
             className="p-1 text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground"
             title="Sign out"
           >

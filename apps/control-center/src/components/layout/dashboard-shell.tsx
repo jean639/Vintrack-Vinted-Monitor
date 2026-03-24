@@ -35,7 +35,7 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
       <div className="flex min-w-0 flex-1 flex-col lg:ml-60">
         <Header onMenuClick={() => setSidebarOpen(true)} />
         <main className="flex-1 p-4 md:p-6 overflow-y-auto">
-          <div className="max-w-350 mx-auto">
+          <div className="mx-auto max-w-[88rem]">
             {children}
           </div>
         </main>

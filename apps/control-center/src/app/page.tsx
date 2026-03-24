@@ -25,7 +25,7 @@ export default async function Home() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle compact />
-          <Link href="/api/auth/signin">
+          <Link href="/login">
             <Button variant="outline" size="sm">
               Sign In
             </Button>
@@ -51,7 +51,7 @@ export default async function Home() {
           </p>
 
           <div className="flex gap-3 justify-center pt-2">
-            <Link href="/api/auth/signin">
+            <Link href="/login">
               <Button size="lg" className="gap-2">
                 Get Started <ArrowRight className="w-4 h-4" />
               </Button>

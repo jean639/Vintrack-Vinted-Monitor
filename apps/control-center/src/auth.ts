@@ -6,6 +6,10 @@ import { db } from "@/lib/db"
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
   providers: [Discord],
+  pages: {
+    signIn: "/login",
+    signOut: "/logout",
+  },
   callbacks: {
     async session({ session, user }) {
       if (session.user) {
@@ -14,7 +18,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: { id: user.id },
           select: { role: true },
         });
-        (session.user as any).role = dbUser?.role ?? "free";
+        session.user.role = dbUser?.role ?? "free";
       }
       return session;
     },
