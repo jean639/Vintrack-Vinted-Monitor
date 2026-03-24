@@ -35,6 +35,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
 
 	mux.HandleFunc("GET /api/messages/inbox", s.handleInbox)
+	mux.HandleFunc("GET /api/notifications", s.handleNotifications)
 	mux.HandleFunc("GET /api/messages/conversations/{id}", s.handleConversationReplies)
 	mux.HandleFunc("POST /api/messages/send", s.handleSendMessage)
 	mux.HandleFunc("POST /api/messages/reply", s.handleReplyToConversation)
@@ -388,6 +389,36 @@ func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
 
 	s.persistIfRefreshed(sess, client)
 	writeJSON(w, 200, inbox)
+}
+
+func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	page := 1
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	perPage := 5
+	if raw := strings.TrimSpace(r.URL.Query().Get("per_page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 50 {
+			perPage = parsed
+		}
+	}
+
+	notifications, err := client.GetNotifications(page, perPage)
+	if err != nil {
+		writeError(w, "failed to fetch notifications: "+err.Error(), 502)
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, notifications)
 }
 
 func (s *Server) handleConversationReplies(w http.ResponseWriter, r *http.Request) {
