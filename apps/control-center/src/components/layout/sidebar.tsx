@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/proxies", label: "Proxy Groups", icon: Globe },
   { href: "/account", label: "Account", icon: User },
   { href: "/liked", label: "Liked Items", icon: Heart },
+  { href: "/chats", label: "Chats", icon: MessageCircle },
   { href: "/guide", label: "Guide", icon: BookOpen },
 ];
 
@@ -206,7 +207,7 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
             </div>
           </div>
           <Link
-            href="/api/auth/signout"
+            href="/logout"
             className="p-1 text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground"
             title="Sign out"
           >

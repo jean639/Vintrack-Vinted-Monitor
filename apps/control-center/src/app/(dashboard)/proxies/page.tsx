@@ -5,7 +5,7 @@ import { ProxiesClient } from "./client";
 
 export default async function ProxiesPage() {
   const session = await auth();
-  if (!session?.user?.id) redirect("/api/auth/signin");
+  if (!session?.user?.id) redirect("/login");
 
   const proxyGroups = await db.proxy_groups.findMany({
     where: { userId: session.user.id },

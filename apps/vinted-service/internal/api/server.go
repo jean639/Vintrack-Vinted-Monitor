@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +34,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
 	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
 
+	mux.HandleFunc("GET /api/messages/inbox", s.handleInbox)
+	mux.HandleFunc("GET /api/messages/conversations/{id}", s.handleConversationReplies)
 	mux.HandleFunc("POST /api/messages/send", s.handleSendMessage)
+	mux.HandleFunc("POST /api/messages/reply", s.handleReplyToConversation)
 	mux.HandleFunc("POST /api/offers/send", s.handleSendOffer)
 
 	mux.HandleFunc("POST /api/account/refresh", s.handleRefreshToken)
@@ -356,6 +360,74 @@ func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, favs)
 }
 
+func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	page := 1
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	perPage := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("per_page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			perPage = parsed
+		}
+	}
+
+	inbox, err := client.GetInbox(page, perPage)
+	if err != nil {
+		writeError(w, "failed to fetch inbox: "+err.Error(), 502)
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, inbox)
+}
+
+func (s *Server) handleConversationReplies(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	conversationID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || conversationID == 0 {
+		writeError(w, "invalid conversation id", 400)
+		return
+	}
+
+	page := 1
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	perPage := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("per_page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 200 {
+			perPage = parsed
+		}
+	}
+
+	payload, err := client.GetConversationReplies(conversationID, page, perPage)
+	if err != nil {
+		writeError(w, "failed to fetch conversation replies: "+err.Error(), 502)
+		return
+	}
+
+	payload["current_user_id"] = sess.VintedUserID
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, payload)
+}
+
 func (s *Server) persistIfRefreshed(original *session.VintedSession, client *vinted.Client) {
 	updated := client.GetSession()
 	if updated.AccessToken != original.AccessToken {
@@ -373,6 +445,11 @@ type sendMessageRequest struct {
 	ItemID   int64  `json:"item_id"`
 	SellerID int64  `json:"seller_id"`
 	Message  string `json:"message"`
+}
+
+type replyToConversationRequest struct {
+	ConversationID int64  `json:"conversation_id"`
+	Message        string `json:"message"`
 }
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -413,6 +490,43 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	s.persistIfRefreshed(sess, client)
 
 	writeJSON(w, 200, map[string]interface{}{"status": "sent", "item_id": req.ItemID})
+}
+
+func (s *Server) handleReplyToConversation(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	var req replyToConversationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+
+	if req.ConversationID == 0 {
+		writeError(w, "conversation_id is required", 400)
+		return
+	}
+
+	msg := strings.TrimSpace(req.Message)
+	if msg == "" {
+		writeError(w, "message is required", 400)
+		return
+	}
+	if len(msg) > 2000 {
+		writeError(w, "message too long (max 2000 characters)", 400)
+		return
+	}
+
+	if err := client.ReplyToConversation(req.ConversationID, msg); err != nil {
+		writeError(w, "send reply failed: "+err.Error(), 502)
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+
+	writeJSON(w, 200, map[string]interface{}{"status": "sent", "conversation_id": req.ConversationID})
 }
 
 type sendOfferRequest struct {

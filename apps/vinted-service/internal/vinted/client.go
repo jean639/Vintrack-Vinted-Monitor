@@ -289,6 +289,39 @@ type FavoritesResponse struct {
 	Pagination FavoritesPagination `json:"pagination"`
 }
 
+type InboxUserPhoto struct {
+	URL string `json:"url"`
+}
+
+type InboxUser struct {
+	ID    int64           `json:"id"`
+	Login string          `json:"login"`
+	Photo *InboxUserPhoto `json:"photo,omitempty"`
+}
+
+type InboxItemPhoto struct {
+	ID  int64  `json:"id"`
+	URL string `json:"url"`
+}
+
+type InboxConversation struct {
+	ID                   int64            `json:"id"`
+	ItemCount            int              `json:"item_count"`
+	IsDeletionRestricted bool             `json:"is_deletion_restricted"`
+	Description          string           `json:"description"`
+	Unread               bool             `json:"unread"`
+	UpdatedAt            string           `json:"updated_at"`
+	OppositeUser         InboxUser        `json:"opposite_user"`
+	ItemPhotos           []InboxItemPhoto `json:"item_photos"`
+}
+
+type InboxResponse struct {
+	Code            int                 `json:"code,omitempty"`
+	Conversations   []InboxConversation `json:"conversations"`
+	Pagination      FavoritesPagination `json:"pagination"`
+	WebsocketUserID string              `json:"websocket_user_id,omitempty"`
+}
+
 type userWrapper struct {
 	User AccountInfo `json:"user"`
 }
@@ -924,6 +957,163 @@ func (c *Client) SendMessage(itemID, sellerID int64, message string) error {
 		return c.doSendMessage(itemID, sellerID, message)
 	}
 	return err
+}
+
+func (c *Client) GetInbox(page, perPage int) (*InboxResponse, error) {
+	inbox, err := c.doGetInbox(page, perPage)
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] get inbox got %v, attempting token refresh...", err)
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, err
+		}
+		return c.doGetInbox(page, perPage)
+	}
+	return inbox, err
+}
+
+func (c *Client) doGetInbox(page, perPage int) (*InboxResponse, error) {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before get inbox: %v", err)
+	}
+
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 20
+	}
+
+	u := fmt.Sprintf("https://%s/api/v2/inbox?page=%d&per_page=%d", c.session.Domain, page, perPage)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create inbox request: %w", err)
+	}
+	req.Header = c.apiHeaders()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/inbox", c.session.Domain))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("inbox request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] GET /api/v2/inbox?page=%d&per_page=%d -> %d (%.300s)", page, perPage, resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var inbox InboxResponse
+	if err := json.Unmarshal(body, &inbox); err != nil {
+		return nil, fmt.Errorf("parse inbox response: %w", err)
+	}
+
+	return &inbox, nil
+}
+
+func (c *Client) GetConversationReplies(conversationID int64, page, perPage int) (map[string]interface{}, error) {
+	data, err := c.doGetConversationReplies(conversationID, page, perPage)
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] get conversation replies got %v, attempting token refresh...", err)
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, err
+		}
+		return c.doGetConversationReplies(conversationID, page, perPage)
+	}
+	return data, err
+}
+
+func (c *Client) doGetConversationReplies(conversationID int64, page, perPage int) (map[string]interface{}, error) {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before get conversation replies: %v", err)
+	}
+	return c.getConversationDetail(conversationID)
+}
+
+func (c *Client) getConversationDetail(conversationID int64) (map[string]interface{}, error) {
+	u := fmt.Sprintf("https://%s/api/v2/conversations/%d", c.session.Domain, conversationID)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create conversation detail request: %w", err)
+	}
+	req.Header = c.apiHeaders()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/inbox/%d", c.session.Domain, conversationID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("conversation detail request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] GET /api/v2/conversations/%d -> %d (%.300s)", conversationID, resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse conversation detail response: %w", err)
+	}
+
+	return payload, nil
+}
+
+func (c *Client) ReplyToConversation(conversationID int64, message string) error {
+	err := c.doReplyToConversation(conversationID, message)
+	if err != nil && strings.Contains(err.Error(), "HTTP 401") && c.session.RefreshToken != "" {
+		log.Printf("[vinted] reply to conversation got 401, attempting token refresh...")
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return err
+		}
+		return c.doReplyToConversation(conversationID, message)
+	}
+	return err
+}
+
+func (c *Client) doReplyToConversation(conversationID int64, message string) error {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before reply to conversation: %v", err)
+	}
+
+	replyURL := fmt.Sprintf("https://%s/api/v2/conversations/%d/replies", c.session.Domain, conversationID)
+	replyPayload := map[string]interface{}{
+		"reply": map[string]interface{}{
+			"body":                                   message,
+			"photo_temp_uuids":                       nil,
+			"is_personal_data_sharing_check_skipped": false,
+		},
+	}
+	replyBody, _ := json.Marshal(replyPayload)
+
+	req, err := http.NewRequest("POST", replyURL, strings.NewReader(string(replyBody)))
+	if err != nil {
+		return fmt.Errorf("create conversation reply request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/inbox/%d", c.session.Domain, conversationID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("conversation reply request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+
+	log.Printf("[vinted] POST /api/v2/conversations/%d/replies -> %d (%.300s)", conversationID, resp.StatusCode, bodyStr)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	return fmt.Errorf("send reply failed (HTTP %d): %s", resp.StatusCode, truncate(bodyStr, 300))
 }
 
 func (c *Client) doSendMessage(itemID, sellerID int64, message string) error {

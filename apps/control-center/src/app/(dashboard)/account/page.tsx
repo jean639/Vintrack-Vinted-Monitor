@@ -6,7 +6,7 @@ import { getAccountStatus } from "@/actions/account";
 
 export default async function AccountPage() {
   const session = await auth();
-  if (!session?.user) redirect("/api/auth/signin");
+  if (!session?.user) redirect("/login");
 
   const status: AccountStatus = await getAccountStatus();
 
