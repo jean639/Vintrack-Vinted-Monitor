@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 	"vintrack-worker/internal/model"
@@ -199,5 +200,70 @@ func TestBuildItems_MultipleItems(t *testing.T) {
 		if item.MonitorID != 5 {
 			t.Errorf("Item %d: MonitorID = %d, want 5", i, item.MonitorID)
 		}
+	}
+}
+
+func TestResolveRedirectURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		current  string
+		location string
+		want     string
+	}{
+		{
+			name:     "relative path",
+			current:  "https://www.vinted.co.uk/api/v2/catalog/items?order=newest_first",
+			location: "/member/general?ref=%2Fapi%2Fv2%2Fcatalog%2Fitems",
+			want:     "https://www.vinted.co.uk/member/general?ref=%2Fapi%2Fv2%2Fcatalog%2Fitems",
+		},
+		{
+			name:     "absolute url",
+			current:  "https://www.vinted.co.uk/api/v2/catalog/items",
+			location: "https://www.vinted.co.uk/session-refresh?ref_url=%2F",
+			want:     "https://www.vinted.co.uk/session-refresh?ref_url=%2F",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveRedirectURL(tt.current, tt.location)
+			if err != nil {
+				t.Fatalf("resolveRedirectURL() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveRedirectURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAcceptLanguageForDomain(t *testing.T) {
+	tests := []struct {
+		domain string
+		want   string
+	}{
+		{"www.vinted.co.uk", "en-GB,en;q=0.9"},
+		{"www.vinted.ie", "en-IE,en;q=0.9"},
+		{"www.vinted.fr", "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"},
+		{"www.vinted.de", "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"},
+	}
+
+	for _, tt := range tests {
+		if got := acceptLanguageForDomain(tt.domain); got != tt.want {
+			t.Errorf("acceptLanguageForDomain(%q) = %q, want %q", tt.domain, got, tt.want)
+		}
+	}
+}
+
+func TestHostFromURL(t *testing.T) {
+	server := httptest.NewServer(nil)
+	defer server.Close()
+
+	if got := hostFromURL(server.URL+"/path", "fallback.example"); got == "fallback.example" {
+		t.Errorf("hostFromURL() should prefer parsed host, got %q", got)
+	}
+
+	if got := hostFromURL("::bad-url::", "fallback.example"); got != "fallback.example" {
+		t.Errorf("hostFromURL() fallback = %q, want %q", got, "fallback.example")
 	}
 }

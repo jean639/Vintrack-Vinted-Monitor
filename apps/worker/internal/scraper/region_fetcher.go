@@ -208,9 +208,6 @@ func (s *HTMLScraper) addClient() {
 		log.Printf("scraper client creation: %v", err)
 		return
 	}
-	if err := client.WarmUpRegion(s.domain); err != nil {
-		log.Printf("scraper warmup: %v", err)
-	}
 	s.clients = append(s.clients, client)
 }
 
@@ -235,7 +232,6 @@ func (s *HTMLScraper) replaceClient(bad *Client) {
 				if err != nil {
 					return
 				}
-				_ = nc.WarmUpRegion(domain)
 				s.mu.Lock()
 				if idx < len(s.clients) {
 					s.clients[idx] = nc

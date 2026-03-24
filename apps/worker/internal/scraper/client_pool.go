@@ -40,9 +40,6 @@ func NewClientPool(pm *proxy.Manager, domain string, size int) *ClientPool {
 				log.Printf("pool: client creation failed: %v", err)
 				return
 			}
-			if err := c.WarmUpRegion(domain); err != nil {
-				log.Printf("pool: warmup warning: %v", err)
-			}
 			mu.Lock()
 			pool.clients = append(pool.clients, c)
 			mu.Unlock()
@@ -53,7 +50,6 @@ func NewClientPool(pm *proxy.Manager, domain string, size int) *ClientPool {
 	if len(pool.clients) == 0 {
 		c, err := NewClient(pm.Next())
 		if err == nil {
-			_ = c.WarmUpRegion(domain)
 			pool.clients = append(pool.clients, c)
 		}
 	}
@@ -93,7 +89,6 @@ func (p *ClientPool) Replace(bad *Client) {
 			log.Printf("pool: replace failed: %v", err)
 			return
 		}
-		_ = c.WarmUpRegion(p.domain)
 
 		p.mu.Lock()
 		defer p.mu.Unlock()

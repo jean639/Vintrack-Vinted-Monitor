@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -224,6 +225,10 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			case r := <-resultCh:
 				remaining--
 				if r.err != nil {
+					pool.Replace(r.client)
+					if checks <= 3 || checks%5 == 0 {
+						log.Printf("[%d] fetch error for %s via %s: %v", m.ID, domain, r.client.ProxyLabel(), r.err)
+					}
 					continue
 				}
 				if r.status == 200 && !gotSuccess {
@@ -248,6 +253,8 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 					break collectLoop
 				} else if r.status == 403 {
 					pool.Replace(r.client)
+				} else if r.status != 0 && (checks <= 3 || checks%5 == 0) {
+					log.Printf("[%d] fetch status for %s via %s: %d", m.ID, domain, r.client.ProxyLabel(), r.status)
 				}
 			case <-timeout.C:
 				if remaining > 0 {
@@ -459,30 +466,71 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 
 func (e *Engine) fetchCatalog(ctx context.Context, client *Client, apiURL string, domain string) ([]model.VintedItem, int, error) {
 	reqURL := apiURL + "&_=" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+
+	if err := client.EnsureWarm(domain); err != nil {
+		return nil, 0, fmt.Errorf("warmup %s via %s: %w", domain, client.ProxyLabel(), err)
+	}
+
+	for redirects := 0; redirects < 3; redirects++ {
+		currentDomain := hostFromURL(reqURL, domain)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		req.Header = newAPIHeaders(currentDomain)
+
+		resp, err := client.HttpClient.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			location := resp.Header.Get("Location")
+			resp.Body.Close()
+			if location == "" {
+				return nil, resp.StatusCode, nil
+			}
+
+			nextURL, err := resolveRedirectURL(reqURL, location)
+			if err != nil {
+				return nil, 0, err
+			}
+			reqURL = nextURL
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			return nil, resp.StatusCode, nil
+		}
+
+		limitedReader := io.LimitReader(resp.Body, maxAPIResponseBytes)
+		var data model.VintedResponse
+		if err := json.NewDecoder(limitedReader).Decode(&data); err != nil {
+			resp.Body.Close()
+			return nil, 0, fmt.Errorf("json decode: %w", err)
+		}
+		resp.Body.Close()
+		return data.Items, 200, nil
+	}
+
+	return nil, 0, nil
+}
+
+func resolveRedirectURL(currentURL string, location string) (string, error) {
+	base, err := url.Parse(currentURL)
 	if err != nil {
-		return nil, 0, err
+		return "", err
 	}
-	req.Header = newAPIHeaders(domain)
 
-	resp, err := client.HttpClient.Do(req)
+	next, err := url.Parse(location)
 	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, resp.StatusCode, nil
+		return "", err
 	}
 
-	limitedReader := io.LimitReader(resp.Body, maxAPIResponseBytes)
-	var data model.VintedResponse
-	if err := json.NewDecoder(limitedReader).Decode(&data); err != nil {
-		return nil, 0, fmt.Errorf("json decode: %w", err)
-	}
-
-	return data.Items, 200, nil
+	return base.ResolveReference(next).String(), nil
 }
 
 func (e *Engine) buildItems(m model.Monitor, vItems []model.VintedItem) []model.Item {
