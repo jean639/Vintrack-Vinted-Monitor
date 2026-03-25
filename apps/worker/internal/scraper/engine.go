@@ -185,10 +185,8 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 					log.Printf("[%d] paused via dashboard", m.ID)
 					return
 				}
-				if updated.Query != m.Query || updated.Region != m.Region ||
-					(updated.Proxies.Valid != m.Proxies.Valid) ||
-					(updated.Proxies.Valid && updated.Proxies.String != m.Proxies.String) {
-					log.Printf("[%d] config changed (query/region/proxy), will be restarted by sync loop", m.ID)
+				if monitorConfigFingerprint(updated) != monitorConfigFingerprint(m) {
+					log.Printf("[%d] config changed, will be restarted by sync loop", m.ID)
 					return
 				}
 				m.DiscordWebhook = updated.DiscordWebhook

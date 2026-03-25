@@ -2,12 +2,10 @@ package scraper
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"sync"
 
 	"vintrack-worker/internal/database"
-	"vintrack-worker/internal/model"
 )
 
 type Manager struct {
@@ -27,14 +25,6 @@ func NewManager(store *database.Store, engine *Engine) *Manager {
 	}
 }
 
-func (m *Manager) monitorHash(mon model.Monitor) string {
-	proxyStr := ""
-	if mon.Proxies.Valid {
-		proxyStr = mon.Proxies.String
-	}
-	return fmt.Sprintf("%s|%s|%s", mon.Query, mon.Region, proxyStr)
-}
-
 func (m *Manager) Sync(ctx context.Context) {
 	monitors, err := m.store.GetActiveMonitors()
 	if err != nil {
@@ -49,7 +39,7 @@ func (m *Manager) Sync(ctx context.Context) {
 
 	for _, mon := range monitors {
 		activeIDs[mon.ID] = true
-		hash := m.monitorHash(mon)
+		hash := monitorConfigFingerprint(mon)
 
 		if cancelFn, exists := m.running[mon.ID]; exists {
 			if oldHash, ok := m.monitorCfg[mon.ID]; ok && oldHash != hash {
