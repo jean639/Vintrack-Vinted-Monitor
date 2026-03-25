@@ -43,7 +43,7 @@ func SendWebhook(webhookURL string, item model.Item, query string, proxySource s
 			"image":       map[string]string{"url": item.ImageURL},
 			"fields":      buildFields(item),
 			"footer": map[string]string{
-				"text": fmt.Sprintf("Vintrack • Monitor #%d • %s", item.MonitorID, proxySource),
+				"text":     fmt.Sprintf("Vintrack • Monitor #%d • %s", item.MonitorID, proxySource),
 				"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
 			},
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -98,6 +98,39 @@ func SendWebhook(webhookURL string, item model.Item, query string, proxySource s
 	}
 }
 
+func SendStartupWebhook(webhookURL string, query string) {
+	if webhookURL == "" {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"username":   "Vintrack Monitor",
+		"avatar_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+		"embeds": []map[string]interface{}{
+			{
+				"title":       "⏳ Monitor Starting Up",
+				"description": fmt.Sprintf("The monitor **%s** is initializing in the backend. The initial scan is muted to avoid startup spam.", query),
+				"color":       3447003,
+				"footer": map[string]string{
+					"text":     "Vintrack • Startup",
+					"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+				},
+				"timestamp": time.Now().Format(time.RFC3339),
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	resp, err := httpClient.Post(webhookURL, "application/json", bytes.NewReader(body))
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
 func buildFields(item model.Item) []map[string]interface{} {
 	priceValue := fmt.Sprintf("**%s**", item.Price)
 	if item.TotalPrice != "" {
@@ -139,7 +172,7 @@ func SendProxyWarningWebhook(webhookURL string, query string, consecutiveErrors 
 				"description": fmt.Sprintf("The monitor **%s** is experiencing repeated proxy errors. Currently at **%d consecutive errors**.", query, consecutiveErrors),
 				"color":       16753920, // Orange
 				"footer": map[string]string{
-					"text": "Vintrack • Health Warning",
+					"text":     "Vintrack • Health Warning",
 					"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
 				},
 				"timestamp": time.Now().Format(time.RFC3339),
@@ -172,7 +205,7 @@ func SendAutoStopWebhook(webhookURL string, query string, consecutiveErrors int)
 				"description": fmt.Sprintf("The monitor **%s** was automatically stopped due to reaching the maximum limit of **%d consecutive errors**.\nPlease check your proxy group.", query, consecutiveErrors),
 				"color":       15548997, // Red
 				"footer": map[string]string{
-					"text": "Vintrack • System Alert",
+					"text":     "Vintrack • System Alert",
 					"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
 				},
 				"timestamp": time.Now().Format(time.RFC3339),

@@ -143,9 +143,13 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	raceFetchers := getEnvInt("RACE_FETCHERS", 2)
 	consecutiveErrors := 0
 	checks := 0
+	initialized := false
 	var totalErrors int64
 
 	log.Printf("[%d] started | query=%q | race=%d | url=%s", m.ID, m.Query, raceFetchers, apiURL)
+	if m.WebhookActive && m.DiscordWebhook.String != "" {
+		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Query)
+	}
 
 	reportHealth := func(lastErr string) {
 		h := model.MonitorHealth{
@@ -318,6 +322,10 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 
 		if len(items) == 0 {
+			if !initialized {
+				initialized = true
+				log.Printf("[%d] initial scan completed with no items", m.ID)
+			}
 			if checks%10 == 0 {
 				log.Printf("[%d] #%d | 0 items returned by Vinted", m.ID, checks)
 			}
@@ -334,26 +342,43 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 
 		newMap := e.db.BatchIsNew(m.ID, ids)
 
-		var newItems []model.VintedItem
-		for _, item := range items {
-			if newMap[item.ID] {
-				newItems = append(newItems, item)
-			}
-		}
+		processItems, seedItems := splitIncomingItems(items, newMap, initialized)
 
-		if len(newItems) == 0 {
+		if len(seedItems) > 0 {
+			log.Printf("[%d] initial scan seeded %d items without notifications", m.ID, len(seedItems))
+
+			seedIDs := make([]int64, len(seedItems))
+			for i, item := range seedItems {
+				seedIDs[i] = item.ID
+			}
+			e.db.MarkItemsSeen(m.ID, seedIDs)
+
+			seedBuiltItems := e.buildItems(m, seedItems)
+			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.Query, proxySource, scraper, domain, m.AllowedCountries, false)
+
+			initialized = true
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 				time.Sleep(remaining)
 			}
 			continue
 		}
 
-		log.Printf("[%d] #%d | %d items | %d new | %dms", m.ID, checks, len(items), len(newItems), time.Since(cycleStart).Milliseconds())
+		if len(processItems) == 0 {
+			if !initialized {
+				initialized = true
+			}
+			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
+				time.Sleep(remaining)
+			}
+			continue
+		}
 
-		builtItems := e.buildItems(m, newItems)
+		log.Printf("[%d] #%d | %d items | %d new | %dms", m.ID, checks, len(items), len(processItems), time.Since(cycleStart).Milliseconds())
+
+		builtItems := e.buildItems(m, processItems)
 
 		if e.enrichSeller {
-			for i, vItem := range newItems {
+			for i, vItem := range processItems {
 				if info, ok := LookupCachedSellerInfo(e.db, vItem.User.ID); ok {
 					builtItems[i].Location = info.Region
 					builtItems[i].Rating = info.Rating
@@ -365,99 +390,14 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
 		}
 
-		newIDs := make([]int64, len(newItems))
-		for i, item := range newItems {
+		newIDs := make([]int64, len(processItems))
+		for i, item := range processItems {
 			newIDs[i] = item.ID
 		}
 		e.db.MarkItemsSeen(m.ID, newIDs)
+		initialized = true
 
-		go func(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, scr *HTMLScraper, dom string, allowedCountries *string) {
-			if e.enrichSeller && scr != nil {
-				sem := make(chan struct{}, 10)
-				var wg sync.WaitGroup
-				for i := range items {
-					if items[i].Location != "" {
-						continue
-					}
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					itemURL := vItems[i].Url
-					if !strings.HasPrefix(itemURL, "http") {
-						itemURL = fmt.Sprintf("https://%s%s", dom, itemURL)
-					}
-
-					wg.Add(1)
-					go func(idx int, url string, userID int64) {
-						defer wg.Done()
-						sem <- struct{}{}
-						defer func() { <-sem }()
-
-						info := scr.FetchSellerInfo(url, userID)
-						if info.Region != "" && info.Region != "NaN" {
-							items[idx].Location = info.Region
-							items[idx].Rating = info.Rating
-						}
-					}(i, itemURL, vItems[i].User.ID)
-				}
-				wg.Wait()
-			}
-
-			if allowedCountries != nil && *allowedCountries != "" {
-				allowedMap := make(map[string]bool)
-				for _, a := range strings.Split(strings.ToLower(*allowedCountries), ",") {
-					allowedMap[strings.TrimSpace(a)] = true
-				}
-
-				var filtered []model.Item
-				for _, it := range items {
-					if it.Location == "" {
-						log.Printf("[%d] Item %d dropped: location unknown (enrichment failed)", monitorID, it.ID)
-						continue
-					}
-					locLower := strings.ToLower(it.Location)
-					matched := false
-					for code := range allowedMap {
-						if strings.Contains(locLower, code) {
-							matched = true
-							break
-						}
-					}
-					if matched {
-						filtered = append(filtered, it)
-					} else {
-						log.Printf("[%d] Item %d dropped: location %q not in %q", monitorID, it.ID, it.Location, *allowedCountries)
-					}
-				}
-				items = filtered
-			}
-
-			if len(items) == 0 {
-				return
-			}
-
-			if err := e.db.BatchSaveItems(items); err != nil {
-				log.Printf("[%d] batch save error: %v", monitorID, err)
-			}
-
-			for i := range items {
-				if err := e.db.PublishItem(items[i]); err != nil {
-					log.Printf("[%d] publish error: %v", monitorID, err)
-				}
-
-				if webhook != "" && webhookActive {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-					discord.SendWebhook(webhook, items[i], query, ps)
-				}
-			}
-		}(ctx, builtItems, newItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, scraper, domain, m.AllowedCountries)
+		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, scraper, domain, m.AllowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -532,6 +472,113 @@ func resolveRedirectURL(currentURL string, location string) (string, error) {
 	}
 
 	return base.ResolveReference(next).String(), nil
+}
+
+func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, scr *HTMLScraper, dom string, allowedCountries *string, publish bool) {
+	if e.enrichSeller && scr != nil {
+		sem := make(chan struct{}, 10)
+		var wg sync.WaitGroup
+		for i := range items {
+			if items[i].Location != "" {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			itemURL := vItems[i].Url
+			if !strings.HasPrefix(itemURL, "http") {
+				itemURL = fmt.Sprintf("https://%s%s", dom, itemURL)
+			}
+
+			wg.Add(1)
+			go func(idx int, url string, userID int64) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				info := scr.FetchSellerInfo(url, userID)
+				if info.Region != "" && info.Region != "NaN" {
+					items[idx].Location = info.Region
+					items[idx].Rating = info.Rating
+				}
+			}(i, itemURL, vItems[i].User.ID)
+		}
+		wg.Wait()
+	}
+
+	if allowedCountries != nil && *allowedCountries != "" {
+		allowedMap := make(map[string]bool)
+		for _, a := range strings.Split(strings.ToLower(*allowedCountries), ",") {
+			allowedMap[strings.TrimSpace(a)] = true
+		}
+
+		var filtered []model.Item
+		for _, it := range items {
+			if it.Location == "" {
+				log.Printf("[%d] Item %d dropped: location unknown (enrichment failed)", monitorID, it.ID)
+				continue
+			}
+			locLower := strings.ToLower(it.Location)
+			matched := false
+			for code := range allowedMap {
+				if strings.Contains(locLower, code) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				filtered = append(filtered, it)
+			} else {
+				log.Printf("[%d] Item %d dropped: location %q not in %q", monitorID, it.ID, it.Location, *allowedCountries)
+			}
+		}
+		items = filtered
+	}
+
+	if len(items) == 0 {
+		return
+	}
+
+	if err := e.db.BatchSaveItems(items); err != nil {
+		log.Printf("[%d] batch save error: %v", monitorID, err)
+	}
+
+	if !publish {
+		return
+	}
+
+	for i := range items {
+		if err := e.db.PublishItem(items[i]); err != nil {
+			log.Printf("[%d] publish error: %v", monitorID, err)
+		}
+
+		if webhook != "" && webhookActive {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			discord.SendWebhook(webhook, items[i], query, ps)
+		}
+	}
+}
+
+func splitIncomingItems(items []model.VintedItem, newMap map[int64]bool, initialized bool) ([]model.VintedItem, []model.VintedItem) {
+	if !initialized {
+		return nil, items
+	}
+
+	newItems := make([]model.VintedItem, 0, len(items))
+	for _, item := range items {
+		if newMap[item.ID] {
+			newItems = append(newItems, item)
+		}
+	}
+
+	return newItems, nil
 }
 
 func (e *Engine) buildItems(m model.Monitor, vItems []model.VintedItem) []model.Item {

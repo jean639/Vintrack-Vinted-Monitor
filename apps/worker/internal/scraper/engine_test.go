@@ -203,6 +203,51 @@ func TestBuildItems_MultipleItems(t *testing.T) {
 	}
 }
 
+func TestSplitIncomingItems_InitialScanMuted(t *testing.T) {
+	items := []model.VintedItem{
+		{ID: 1},
+		{ID: 2},
+	}
+	newMap := map[int64]bool{
+		1: true,
+		2: true,
+	}
+
+	processItems, seedItems := splitIncomingItems(items, newMap, false)
+
+	if len(processItems) != 0 {
+		t.Fatalf("processItems = %d, want 0 during initial scan", len(processItems))
+	}
+	if len(seedItems) != 2 {
+		t.Fatalf("seedItems = %d, want 2 during initial scan", len(seedItems))
+	}
+}
+
+func TestSplitIncomingItems_AfterInitializationOnlyNewItems(t *testing.T) {
+	items := []model.VintedItem{
+		{ID: 1},
+		{ID: 2},
+		{ID: 3},
+	}
+	newMap := map[int64]bool{
+		1: false,
+		2: true,
+		3: false,
+	}
+
+	processItems, seedItems := splitIncomingItems(items, newMap, true)
+
+	if len(seedItems) != 0 {
+		t.Fatalf("seedItems = %d, want 0 after initialization", len(seedItems))
+	}
+	if len(processItems) != 1 {
+		t.Fatalf("processItems = %d, want 1 after initialization", len(processItems))
+	}
+	if processItems[0].ID != 2 {
+		t.Fatalf("processItems[0].ID = %d, want 2", processItems[0].ID)
+	}
+}
+
 func TestResolveRedirectURL(t *testing.T) {
 	tests := []struct {
 		name     string
