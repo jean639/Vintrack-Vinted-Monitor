@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"sync"
@@ -154,15 +155,49 @@ func (c *Client) WarmUp() error {
 }
 
 func (c *Client) WarmUpRegion(domain string) error {
-	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/", domain), nil)
-	req.Header = newWarmupHeaders(domain)
+	currentURL := fmt.Sprintf("https://%s/", domain)
 
-	resp, err := c.HttpClient.Do(req)
-	if err != nil {
-		return err
+	for redirects := 0; redirects < 3; redirects++ {
+		currentDomain := hostFromURL(currentURL, domain)
+
+		req, err := http.NewRequest("GET", currentURL, nil)
+		if err != nil {
+			return err
+		}
+		req.Header = newWarmupHeaders(currentDomain)
+
+		resp, err := c.HttpClient.Do(req)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			location := resp.Header.Get("Location")
+			resp.Body.Close()
+			if location == "" {
+				return fmt.Errorf("warmup redirect without location for %s", currentDomain)
+			}
+
+			nextURL, err := resolveRedirectURL(currentURL, location)
+			if err != nil {
+				return fmt.Errorf("warmup redirect resolve: %w", err)
+			}
+			currentURL = nextURL
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			return fmt.Errorf("warmup %s returned %d", currentDomain, resp.StatusCode)
+		}
+
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		return nil
 	}
-	resp.Body.Close()
-	return nil
+
+	return fmt.Errorf("warmup too many redirects for %s", domain)
 }
 
 func (c *Client) EnsureWarm(domain string) error {
@@ -181,4 +216,10 @@ func (c *Client) EnsureWarm(domain string) error {
 	c.warmed[domain] = true
 	c.warmedMu.Unlock()
 	return nil
+}
+
+func (c *Client) ResetWarm(domain string) {
+	c.warmedMu.Lock()
+	delete(c.warmed, domain)
+	c.warmedMu.Unlock()
 }

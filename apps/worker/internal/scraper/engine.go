@@ -239,7 +239,8 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 							for i := 0; i < n; i++ {
 								select {
 								case r := <-ch:
-									if r.status == 403 {
+									if shouldReplaceClientForStatus(r.status) {
+										r.client.ResetWarm(domain)
 										p.Replace(r.client)
 									}
 								case <-drain.C:
@@ -249,7 +250,8 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 						}(resultCh, remaining, pool)
 					}
 					break collectLoop
-				} else if r.status == 403 {
+				} else if shouldReplaceClientForStatus(r.status) {
+					r.client.ResetWarm(domain)
 					pool.Replace(r.client)
 				} else if r.status != 0 && (checks <= 3 || checks%5 == 0) {
 					log.Printf("[%d] fetch status for %s via %s: %d", m.ID, domain, r.client.ProxyLabel(), r.status)
@@ -262,7 +264,8 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 						for i := 0; i < n; i++ {
 							select {
 							case r := <-ch:
-								if r.status == 403 {
+								if shouldReplaceClientForStatus(r.status) {
+									r.client.ResetWarm(domain)
 									p.Replace(r.client)
 								}
 							case <-drain.C:
