@@ -5,6 +5,7 @@ Thumbs.db
 GEMINI.md
 .gemini
 .claude
+.codex
 AGENTS.md
 
 # --- Environment & Secrets ---
