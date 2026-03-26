@@ -1,10 +1,28 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Shield, Crown, User, Monitor, Globe } from "lucide-react";
+import {
+  Shield,
+  Crown,
+  User,
+  Monitor,
+  Globe,
+  Search,
+  Users,
+  Sparkles,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -51,6 +69,24 @@ export function AdminClient({
   const [selected, setSelected] = useState<UserRow | null>(null);
   const [pendingRole, setPendingRole] = useState<string>("");
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredUsers = users.filter((user) => {
+    if (!normalizedQuery) return true;
+
+    const searchable = [
+      user.name ?? "",
+      user.email ?? "",
+      user.role,
+    ].join(" ").toLowerCase();
+
+    return searchable.includes(normalizedQuery);
+  });
+
+  const totalUsers = users.length;
+  const premiumUsers = users.filter((u) => u.role === "premium").length;
+  const adminUsers = users.filter((u) => u.role === "admin").length;
 
   const openRoleDialog = (user: UserRow) => {
     setSelected(user);
@@ -86,44 +122,104 @@ export function AdminClient({
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Manage roles and view user statistics.
-        </p>
-      </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight">
+            User Management
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Search users, review access levels, and update roles from one place.
+          </p>
+        </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-card rounded-xl border border-border/60 px-5 py-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Total Users
-          </p>
-          <p className="text-2xl font-bold text-foreground mt-1">
-            {users.length}
-          </p>
-        </div>
-        <div className="bg-card rounded-xl border border-border/60 px-5 py-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Premium
-          </p>
-          <p className="text-2xl font-bold text-amber-600 dark:text-amber-500 mt-1">
-            {users.filter((u) => u.role === "premium").length}
-          </p>
-        </div>
-        <div className="bg-card rounded-xl border border-border/60 px-5 py-4">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            Admins
-          </p>
-          <p className="text-2xl font-bold text-red-600 dark:text-red-500 mt-1">
-            {users.filter((u) => u.role === "admin").length}
-          </p>
+        <div className="w-full max-w-sm">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by name, email or role..."
+              className="h-10 rounded-xl border-border/60 bg-card pl-9"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="bg-card rounded-xl border border-border/60 overflow-hidden">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="border-border/60 bg-linear-to-br from-card to-muted/30 py-0">
+          <CardHeader className="pb-3 pt-3">
+            <div className="flex items-center justify-between">
+              <CardDescription>Total Users</CardDescription>
+              <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                <Users className="h-4 w-4" />
+              </div>
+            </div>
+            <CardTitle className="text-3xl">{totalUsers}</CardTitle>
+          </CardHeader>
+          <CardContent className="pb-6 text-xs text-muted-foreground">
+            Active accounts visible in this workspace.
+          </CardContent>
+        </Card>
+
+        <Card className="border-amber-200/70 bg-linear-to-br from-amber-50 to-card py-0 dark:border-amber-500/20 dark:from-amber-500/10">
+          <CardHeader className="pb-3 pt-3">
+            <div className="flex items-center justify-between">
+              <CardDescription>Premium</CardDescription>
+              <div className="rounded-lg bg-amber-500/10 p-2 text-amber-600 dark:text-amber-400">
+                <Crown className="h-4 w-4" />
+              </div>
+            </div>
+            <CardTitle className="text-3xl text-amber-600 dark:text-amber-400">
+              {premiumUsers}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-6 text-xs text-muted-foreground">
+            Users with access to server proxy features.
+          </CardContent>
+        </Card>
+
+        <Card className="border-red-200/70 bg-linear-to-br from-red-50 to-card py-0 dark:border-red-500/20 dark:from-red-500/10">
+          <CardHeader className="pb-3 pt-3">
+            <div className="flex items-center justify-between">
+              <CardDescription>Admins</CardDescription>
+              <div className="rounded-lg bg-red-500/10 p-2 text-red-600 dark:text-red-400">
+                <Sparkles className="h-4 w-4" />
+              </div>
+            </div>
+            <CardTitle className="text-3xl text-red-600 dark:text-red-400">
+              {adminUsers}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-6 text-xs text-muted-foreground">
+            Full dashboard access including role management.
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              Team Members
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {filteredUsers.length} of {totalUsers} users shown
+            </p>
+          </div>
+          {normalizedQuery ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 self-start px-2 text-xs sm:self-auto"
+              onClick={() => setSearchQuery("")}
+            >
+              Clear search
+            </Button>
+          ) : null}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead>
+            <thead className="bg-muted/30">
               <tr className="border-b border-border">
                 <th className="text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider px-5 py-3">
                   User
@@ -143,21 +239,23 @@ export function AdminClient({
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {users.map((user) => (
+              {filteredUsers.map((user) => (
                 <tr
                   key={user.id}
-                  className="hover:bg-muted/50 transition-colors"
+                  className="transition-colors hover:bg-muted/40"
                 >
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
                       {user.image ? (
-                        <img
+                        <Image
                           src={user.image}
                           alt=""
-                          className="w-8 h-8 rounded-full"
+                          width={40}
+                          height={40}
+                          className="h-10 w-10 rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-bold">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
                           {user.name?.[0]?.toUpperCase() ?? "?"}
                         </div>
                       )}
@@ -186,12 +284,17 @@ export function AdminClient({
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     {user.id === currentUserId ? (
-                      <span className="text-xs text-muted-foreground italic">You</span>
+                      <Badge
+                        variant="outline"
+                        className="rounded-full text-[10px] uppercase tracking-wide"
+                      >
+                        You
+                      </Badge>
                     ) : (
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-7 text-xs"
+                        className="h-8 rounded-lg text-xs"
                         onClick={() => openRoleDialog(user)}
                       >
                         Change Role
@@ -200,6 +303,26 @@ export function AdminClient({
                   </td>
                 </tr>
               ))}
+              {filteredUsers.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-5 py-12 text-center"
+                  >
+                    <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                      <div className="rounded-full bg-muted p-3 text-muted-foreground">
+                        <Search className="h-5 w-5" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground">
+                        No users match your search
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Try a different name, email address, or role.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
