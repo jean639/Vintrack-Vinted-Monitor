@@ -4,17 +4,32 @@ import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { ItemCard, ItemCardSkeleton, type ItemData } from "@/components/monitors/item-card";
 
+type FeedSummary = {
+  activeMonitors: number;
+  totalMonitors: number;
+};
+
 export default function FeedPage() {
   const [items, setItems] = useState<ItemData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<FeedSummary | null>(null);
 
   useEffect(() => {
     const fetchFeed = async () => {
       try {
-        const res = await fetch("/api/feed");
-        if (res.ok) {
-          const data: ItemData[] = await res.json();
+        const [feedRes, summaryRes] = await Promise.all([
+          fetch("/api/feed"),
+          fetch("/api/monitors/summary"),
+        ]);
+
+        if (feedRes.ok) {
+          const data: ItemData[] = await feedRes.json();
           setItems(data.map((i) => ({ ...i, isLive: false })));
+        }
+
+        if (summaryRes.ok) {
+          const data: FeedSummary = await summaryRes.json();
+          setSummary(data);
         }
       } catch (err) {
         console.error(err);
@@ -72,6 +87,12 @@ export default function FeedPage() {
     return () => eventSource.close();
   }, []);
 
+  const activeMonitorCount = summary?.activeMonitors ?? 0;
+  const hasActiveMonitors = activeMonitorCount > 0;
+  const liveBadgeClassName = hasActiveMonitors
+    ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+    : "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -81,12 +102,20 @@ export default function FeedPage() {
             Real-time stream across all your monitors.
           </p>
         </div>
-        <div className="flex items-center gap-1.5 self-start rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 sm:self-auto">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-          </span>
-          Live
+        <div
+          className={`flex items-center gap-1.5 self-start rounded-full border px-3 py-1.5 text-[11px] font-medium sm:self-auto ${liveBadgeClassName}`}
+        >
+          {hasActiveMonitors ? (
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+          ) : (
+            <span className="h-2 w-2 rounded-full bg-amber-500/80" />
+          )}
+          {hasActiveMonitors
+            ? `Live · ${activeMonitorCount} monitor${activeMonitorCount === 1 ? "" : "s"}`
+            : "No monitor active"}
         </div>
       </div>
 

@@ -340,9 +340,9 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
           {showMonitor ? (
             <Link
               href={`/monitors/${item.monitor_id}`}
-              className="hover:underline z-10"
+              className="z-10 max-w-[calc(100%-4.5rem)]"
             >
-              <span className="block max-w-35 truncate text-[11px] font-medium text-muted-foreground transition-colors hover:text-blue-400">
+              <span className="inline-flex max-w-full items-center rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:border-blue-500/30 hover:bg-blue-500/8 hover:text-blue-400">
                 {getMonitorLabel(item)}
               </span>
             </Link>
