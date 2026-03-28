@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { ItemCard, ItemCardSkeleton, type ItemData } from "@/components/monitors/item-card";
+import { useMonitorLiveContext } from "@/components/monitors/monitor-live-context";
 
 export function LiveFeed({ monitorId }: { monitorId: number }) {
   const [items, setItems] = useState<ItemData[]>([]);
   const [loading, setLoading] = useState(true);
+  const { incrementItemCount } = useMonitorLiveContext();
+  const seenItemIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchItems = async () => {
@@ -14,6 +17,7 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
         const res = await fetch(`/api/monitors/${monitorId}/items`);
         if (res.ok) {
           const data: ItemData[] = await res.json();
+          seenItemIds.current = new Set(data.map((item) => String(item.id)));
           setItems(data.map((i) => ({ ...i, isLive: false })));
         }
       } catch (err) {
@@ -23,7 +27,7 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
       }
     };
     fetchItems();
-  }, [monitorId]);
+  }, [incrementItemCount, monitorId]);
 
   useEffect(() => {
     const eventSource = new EventSource("/api/stream");
@@ -33,10 +37,16 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
         const newItem: ItemData = JSON.parse(event.data);
 
         if (newItem.monitor_id === monitorId) {
-          const liveItem: ItemData = { ...newItem, id: String(newItem.id), isLive: true };
+          const newId = String(newItem.id);
+          const liveItem: ItemData = { ...newItem, id: newId, isLive: true };
+          const isExisting = seenItemIds.current.has(newId);
+
+          if (!isExisting) {
+            seenItemIds.current.add(newId);
+            incrementItemCount();
+          }
 
           setItems((prev) => {
-            const newId = String(newItem.id);
             const existingIdx = prev.findIndex((i) => String(i.id) === newId);
             if (existingIdx !== -1) {
               const existing = prev[existingIdx];
@@ -69,7 +79,7 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
     };
 
     return () => eventSource.close();
-  }, [monitorId]);
+  }, [incrementItemCount, monitorId]);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">

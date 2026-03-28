@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import Link from "next/link";
@@ -30,7 +30,7 @@ export type ItemData = {
   image_url: string | null;
   extra_images?: string[] | null;
   found_at: string;
-  monitor_name?: string;
+  monitor_name?: string | null;
   isLive?: boolean;
   location: string | null;
   rating: string | null;
@@ -42,7 +42,12 @@ interface ItemCardProps {
   showMonitor?: boolean;
 }
 
-export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
+function getMonitorLabel(item: ItemData) {
+  const name = item.monitor_name?.trim();
+  return name ? `${name} (${item.monitor_id})` : `Monitor #${item.monitor_id}`;
+}
+
+function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
   const { linked, likedIds, addLike, removeLike } = useVintedAccount();
   const liked = likedIds.has(Number(item.id));
   const [liking, setLiking] = useState(false);
@@ -335,10 +340,10 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
           {showMonitor ? (
             <Link
               href={`/monitors/${item.monitor_id}`}
-              className="hover:underline z-10"
+              className="z-10 max-w-[calc(100%-4.5rem)]"
             >
-              <span className="block max-w-35 truncate text-[11px] font-medium text-muted-foreground transition-colors hover:text-blue-400">
-                {item.monitor_name || `Monitor #${item.monitor_id}`}
+              <span className="inline-flex max-w-full items-center rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:border-blue-500/30 hover:bg-blue-500/8 hover:text-blue-400">
+                {getMonitorLabel(item)}
               </span>
             </Link>
           ) : (
@@ -655,6 +660,15 @@ export function ItemCard({ item, showMonitor = false }: ItemCardProps) {
     </div>
   );
 }
+
+export const ItemCard = memo(
+  ItemCardComponent,
+  (prevProps, nextProps) =>
+    prevProps.showMonitor === nextProps.showMonitor &&
+    prevProps.item === nextProps.item
+);
+
+ItemCard.displayName = "ItemCard";
 
 export function ItemCardSkeleton() {
   return (

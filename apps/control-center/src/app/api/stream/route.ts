@@ -13,9 +13,10 @@ export async function GET(req: NextRequest) {
 
   const userMonitors = await db.monitors.findMany({
     where: { userId: session.user.id },
-    select: { id: true },
+    select: { id: true, query: true },
   });
   const monitorIds = new Set(userMonitors.map(m => m.id));
+  const monitorNames = new Map(userMonitors.map((monitor) => [monitor.id, monitor.query]));
 
   const encoder = new TextEncoder();
   const stream = new TransformStream();
@@ -36,8 +37,15 @@ export async function GET(req: NextRequest) {
     if (channel === 'vinted:new_items') {
       try {
         const parsed = JSON.parse(message);
-        if (parsed.monitor_id && monitorIds.has(parsed.monitor_id)) {
-          const data = `data: ${message}\n\n`;
+        const monitorId = Number(parsed.monitor_id);
+
+        if (Number.isInteger(monitorId) && monitorIds.has(monitorId)) {
+          const enrichedPayload = JSON.stringify({
+            ...parsed,
+            monitor_id: monitorId,
+            monitor_name: monitorNames.get(monitorId) || parsed.monitor_name || null,
+          });
+          const data = `data: ${enrichedPayload}\n\n`;
           writer.write(encoder.encode(data));
         }
       } catch {

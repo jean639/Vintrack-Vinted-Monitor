@@ -12,6 +12,8 @@ import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
 import { getRegionLabel, getRegionFlags } from "@/lib/regions";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
+import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
+import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
 
 export default async function MonitorPage({
   params,
@@ -41,7 +43,8 @@ export default async function MonitorPage({
   const deleteAction = deleteMonitor.bind(null, monitor.id);
 
   return (
-    <div className="space-y-6">
+    <MonitorLiveProvider initialItemCount={monitor._count.items}>
+      <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-3">
           <Link href="/dashboard">
@@ -88,7 +91,7 @@ export default async function MonitorPage({
                 </>
               )}
               <span className="text-muted-foreground/50">·</span>
-              <span>{monitor._count.items.toLocaleString()} items</span>
+              <MonitorItemCount />
               <span className="text-muted-foreground/50">·</span>
               <span>{getRegionLabel(monitor.region)}</span>
               <span className="text-muted-foreground/50">·</span>
@@ -203,10 +206,11 @@ export default async function MonitorPage({
         <ProxyHealthCard monitorId={monitor.id} />
       )}
 
-      <div>
-        <h2 className="text-lg font-semibold mb-4">Latest Results</h2>
-        <LiveFeed monitorId={monitor.id} />
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Latest Results</h2>
+          <LiveFeed monitorId={monitor.id} />
+        </div>
       </div>
-    </div>
+    </MonitorLiveProvider>
   );
 }
