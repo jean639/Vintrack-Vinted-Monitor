@@ -53,25 +53,6 @@ func newWarmupHeaders(domain string) http.Header {
 	}
 }
 
-func newPageHeaders(domain string) http.Header {
-	return http.Header{
-		"Authority":                 {domain},
-		"User-Agent":                {chromeUA},
-		"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"},
-		"Accept-Language":           {acceptLanguageForDomain(domain)},
-		"Cache-Control":             {"no-cache"},
-		"Pragma":                    {"no-cache"},
-		"Sec-Ch-Ua":                 {`"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`},
-		"Sec-Ch-Ua-Mobile":          {"?0"},
-		"Sec-Ch-Ua-Platform":        {`"macOS"`},
-		"Sec-Fetch-Dest":            {"document"},
-		"Sec-Fetch-Mode":            {"navigate"},
-		"Sec-Fetch-Site":            {"same-origin"},
-		"Sec-Fetch-User":            {"?1"},
-		"Upgrade-Insecure-Requests": {"1"},
-	}
-}
-
 func newAPIHeaders(domain string) http.Header {
 	return http.Header{
 		"User-Agent":         {chromeUA},
@@ -117,7 +98,7 @@ func NewClient(proxyURL string) (*Client, error) {
 	return &Client{HttpClient: httpClient, ProxyURL: proxyURL, warmed: make(map[string]bool)}, nil
 }
 
-func NewHTMLClient(proxyURL string) (*Client, error) {
+func NewSellerClient(proxyURL string) (*Client, error) {
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(10),
 		tls_client.WithClientProfile(profiles.Chrome_131),
