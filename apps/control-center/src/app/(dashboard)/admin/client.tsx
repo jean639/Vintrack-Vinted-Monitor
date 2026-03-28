@@ -1,6 +1,4 @@
 "use client";
-
-import Image from "next/image";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -247,11 +245,9 @@ export function AdminClient({
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
                       {user.image ? (
-                        <Image
+                        <img
                           src={user.image}
                           alt=""
-                          width={40}
-                          height={40}
                           className="h-10 w-10 rounded-full object-cover"
                         />
                       ) : (
