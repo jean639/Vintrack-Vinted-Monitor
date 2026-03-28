@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,8 +16,6 @@ import (
 
 	http "github.com/bogdanfinn/fhttp"
 )
-
-const maxHTMLResponseBytes = 1 * 1024 * 1024 // 1 MB
 
 type SellerInfo struct {
 	Region string
@@ -105,16 +102,6 @@ func (c *sellerInfoCache) Set(userID int64, info SellerInfo) {
 	c.cache[userID] = sellerCacheEntry{info: info, counter: n}
 }
 
-var ariaLabelRatingRegex = regexp.MustCompile(`(?i)aria-label="[^"]*?(\d+(?:[.,]\d+)?)\s*(?:von|out of|sur|di|van)\s*5[^"]*?(?:Stern|star|étoi|stell)[^"]*?"`)
-var ratingLabelRegex = regexp.MustCompile(`(?i)Rating__label[^>]*>\s*<[^>]*>\s*(\d{1,5})\s*<`)
-var reviewCountLabelRegex = regexp.MustCompile(`(?i)(\d{1,5})\s*(?:Bewertung|review|avis|recens)`)
-
-var jsonCountryTitleRegex = regexp.MustCompile(`"country_title"\s*:\s*"([^"]{2,50})"`)
-var jsonAddressCountryRegex = regexp.MustCompile(`"addressCountry"\s*:\s*"([A-Z]{2})"`)
-var jsonCityRegex = regexp.MustCompile(`"city"\s*:\s*"[^"]+"[^}]{0,200}?"country_title"\s*:\s*"([^"]{2,50})"`)
-var jsonReputationRegex = regexp.MustCompile(`"feedback_reputation"\s*:\s*([\d.]+)`)
-var jsonFeedbackCountRegex = regexp.MustCompile(`"feedback_count"\s*:\s*(\d+)`)
-
 var isoCountryMap = map[string]string{
 	"DE": "🇩🇪 DE", "FR": "🇫🇷 FR", "IT": "🇮🇹 IT", "ES": "🇪🇸 ES",
 	"NL": "🇳🇱 NL", "PL": "🇵🇱 PL", "AT": "🇦🇹 AT", "BE": "🇧🇪 BE",
@@ -125,61 +112,20 @@ var isoCountryMap = map[string]string{
 	"LV": "🇱🇻 LV", "GR": "🇬🇷 GR",
 }
 
-func parseSellerInfoFromHTML(htmlBody []byte) SellerInfo {
-	html := string(htmlBody)
-	var info SellerInfo
-
-	if m := jsonCountryTitleRegex.FindStringSubmatch(html); len(m) > 1 {
-		country := strings.ToUpper(strings.TrimSpace(m[1]))
-		if code, ok := countryMap[country]; ok {
-			info.Region = code
-		}
-	}
-
-	if info.Region == "" {
-		if m := jsonAddressCountryRegex.FindStringSubmatch(html); len(m) > 1 {
-			if code, ok := isoCountryMap[m[1]]; ok {
-				info.Region = code
-			}
-		}
-	}
-
-	if info.Region == "" {
-		upperHTML := strings.ToUpper(html)
-		for name, code := range countryMap {
-			if strings.Contains(upperHTML, ", "+name) ||
-				strings.Contains(upperHTML, ">"+name+"<") ||
-				strings.Contains(upperHTML, "> "+name+"<") {
-				info.Region = code
-				break
-			}
-		}
-	}
-
-	if m := jsonReputationRegex.FindStringSubmatch(html); len(m) > 1 {
-		info.Rating = "⭐ " + m[1]
-		if mc := jsonFeedbackCountRegex.FindStringSubmatch(html); len(mc) > 1 {
-			info.Rating += " (" + mc[1] + ")"
-		}
-	}
-
-	if info.Rating == "" {
-		if matches := ariaLabelRatingRegex.FindStringSubmatch(html); len(matches) > 1 {
-			rating := strings.Replace(matches[1], ",", ".", 1)
-			info.Rating = "⭐ " + rating
-
-			if m := ratingLabelRegex.FindStringSubmatch(html); len(m) > 1 {
-				info.Rating += " (" + m[1] + ")"
-			} else if m := reviewCountLabelRegex.FindStringSubmatch(html); len(m) > 1 {
-				info.Rating += " (" + m[1] + ")"
-			}
-		}
-	}
-
-	return info
+func logSellerEnrichmentSuccess(source string, userID int64, info SellerInfo) {
+	log.Printf("[seller-enrich] user=%d source=%s success region=%q rating=%q", userID, source, info.Region, info.Rating)
 }
 
-type HTMLScraper struct {
+func logSellerEnrichmentFailure(source string, userID int64, format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	log.Printf("[seller-enrich] user=%d source=%s failed %s", userID, source, msg)
+}
+
+func isSellerInfoComplete(info SellerInfo) bool {
+	return info.Region != "" && info.Rating != ""
+}
+
+type SellerEnricher struct {
 	clients []*Client
 	pm      *proxy.Manager
 	db      *database.Store
@@ -188,30 +134,30 @@ type HTMLScraper struct {
 	idx     int
 }
 
-func NewHTMLScraper(pm *proxy.Manager, db *database.Store, domain string, poolSize int) *HTMLScraper {
+func NewSellerEnricher(pm *proxy.Manager, db *database.Store, domain string, poolSize int) *SellerEnricher {
 	if pm.Count() < poolSize {
 		poolSize = pm.Count()
 	}
 	if poolSize < 1 {
 		poolSize = 1
 	}
-	s := &HTMLScraper{pm: pm, db: db, domain: domain, clients: make([]*Client, 0, poolSize)}
+	s := &SellerEnricher{pm: pm, db: db, domain: domain, clients: make([]*Client, 0, poolSize)}
 	for i := 0; i < poolSize; i++ {
 		s.addClient()
 	}
 	return s
 }
 
-func (s *HTMLScraper) addClient() {
-	client, err := NewHTMLClient(s.pm.Next())
+func (s *SellerEnricher) addClient() {
+	client, err := NewSellerClient(s.pm.Next())
 	if err != nil {
-		log.Printf("scraper client creation: %v", err)
+		log.Printf("seller enricher client creation: %v", err)
 		return
 	}
 	s.clients = append(s.clients, client)
 }
 
-func (s *HTMLScraper) nextClient() *Client {
+func (s *SellerEnricher) nextClient() *Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.clients) == 0 {
@@ -222,13 +168,13 @@ func (s *HTMLScraper) nextClient() *Client {
 	return c
 }
 
-func (s *HTMLScraper) replaceClient(bad *Client) {
+func (s *SellerEnricher) replaceClient(bad *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, c := range s.clients {
 		if c == bad {
-			go func(idx int, domain string) {
-				nc, err := NewHTMLClient(s.pm.Next())
+			go func(idx int) {
+				nc, err := NewSellerClient(s.pm.Next())
 				if err != nil {
 					return
 				}
@@ -237,7 +183,7 @@ func (s *HTMLScraper) replaceClient(bad *Client) {
 					s.clients[idx] = nc
 				}
 				s.mu.Unlock()
-			}(i, s.domain)
+			}(i)
 			return
 		}
 	}
@@ -248,37 +194,39 @@ func LookupCachedSellerInfo(db *database.Store, userID int64) (SellerInfo, bool)
 		return SellerInfo{}, false
 	}
 	if info, ok := sellerCache.Get(userID); ok {
+		if isSellerInfoComplete(info) {
+			logSellerEnrichmentSuccess("memory-cache", userID, info)
+		} else {
+			log.Printf("[seller-enrich] user=%d source=memory-cache partial region=%q rating=%q", userID, info.Region, info.Rating)
+		}
 		return info, true
 	}
 	if region, ok := db.GetUserRegion(userID); ok && region != "" {
 		info := SellerInfo{Region: region}
-		sellerCache.Set(userID, info)
+		log.Printf("[seller-enrich] user=%d source=db-cache partial region=%q rating=%q", userID, info.Region, info.Rating)
 		return info, true
 	}
 	return SellerInfo{}, false
 }
 
-func (s *HTMLScraper) FetchSellerInfo(itemURL string, userID int64) SellerInfo {
+func (s *SellerEnricher) FetchSellerInfo(userID int64) SellerInfo {
 	if userID > 0 {
 		if info, ok := sellerCache.Get(userID); ok {
-			return info
+			if isSellerInfoComplete(info) {
+				logSellerEnrichmentSuccess("memory-cache", userID, info)
+				return info
+			}
+			log.Printf("[seller-enrich] user=%d source=memory-cache partial region=%q rating=%q continuing remote fetch", userID, info.Region, info.Rating)
 		}
 	}
 
 	if userID > 0 {
 		if region, ok := s.db.GetUserRegion(userID); ok && region != "" {
-			info := SellerInfo{Region: region}
-			sellerCache.Set(userID, info)
-			return info
+			log.Printf("[seller-enrich] user=%d source=db-cache partial region=%q rating=%q continuing remote fetch", userID, region, "")
 		}
 	}
 
-	scrapeURL := itemURL
-	if userID > 0 {
-		scrapeURL = fmt.Sprintf("https://%s/member/%d", s.domain, userID)
-	}
-	info := s.scrapeWithRetry(scrapeURL, userID)
-
+	info := s.fetchWithRetry(userID)
 	if userID > 0 && info.Region != "" && info.Region != "NaN" {
 		sellerCache.Set(userID, info)
 		s.db.SetUserRegion(userID, info.Region)
@@ -287,13 +235,14 @@ func (s *HTMLScraper) FetchSellerInfo(itemURL string, userID int64) SellerInfo {
 	return info
 }
 
-func (s *HTMLScraper) scrapeWithRetry(itemURL string, userID int64) SellerInfo {
+func (s *SellerEnricher) fetchWithRetry(userID int64) SellerInfo {
 	client := s.nextClient()
 	if client == nil {
+		logSellerEnrichmentFailure("seller-client", userID, "no client available")
 		return SellerInfo{Region: "NaN"}
 	}
 
-	info, status := s.doScrape(client, itemURL, userID)
+	info, status := s.fetchFromAPI(client, userID)
 	if info.Region != "" {
 		return info
 	}
@@ -304,7 +253,8 @@ func (s *HTMLScraper) scrapeWithRetry(itemURL string, userID int64) SellerInfo {
 
 	client2 := s.nextClient()
 	if client2 != nil && client2 != client {
-		info, status2 := s.doScrape(client2, itemURL, userID)
+		logSellerEnrichmentFailure("retry", userID, "retrying with a replacement client after status=%d", status)
+		info, status2 := s.fetchFromAPI(client2, userID)
 		if info.Region != "" {
 			return info
 		}
@@ -313,61 +263,73 @@ func (s *HTMLScraper) scrapeWithRetry(itemURL string, userID int64) SellerInfo {
 		}
 	}
 
+	logSellerEnrichmentFailure("seller-api", userID, "no region resolved after retries")
 	return SellerInfo{Region: "NaN"}
 }
 
-func (s *HTMLScraper) doScrape(client *Client, scrapeURL string, userID int64) (SellerInfo, int) {
-	if client == nil {
+func (s *SellerEnricher) fetchFromAPI(client *Client, userID int64) (SellerInfo, int) {
+	if client == nil || userID <= 0 {
 		return SellerInfo{}, 0
 	}
 
-	if userID > 0 {
-		apiURL := fmt.Sprintf("https://%s/api/v2/users/%d", s.domain, userID)
-		body, status := s.fetchBody(client, apiURL, true)
-		if status == 200 && len(body) > 0 {
-			var resp model.VintedUserDetailResponse
-			if err := json.Unmarshal(body, &resp); err == nil && resp.User.ID > 0 {
-				info := SellerInfo{}
-				if code, ok := isoCountryMap[resp.User.CountryCode]; ok {
+	apiURL := fmt.Sprintf("https://%s/api/v2/users/%d", s.domain, userID)
+	body, status := s.fetchAPIBody(client, apiURL, userID)
+	if status == 200 && len(body) > 0 {
+		var resp model.VintedUserDetailResponse
+		if err := json.Unmarshal(body, &resp); err == nil && resp.User.ID > 0 {
+			info := SellerInfo{}
+			if code, ok := isoCountryMap[resp.User.CountryCode]; ok {
+				info.Region = code
+			} else if resp.User.CountryTitle != "" {
+				if code, ok := countryMap[strings.ToUpper(resp.User.CountryTitle)]; ok {
 					info.Region = code
-				} else if resp.User.CountryTitle != "" {
-					if code, ok := countryMap[strings.ToUpper(resp.User.CountryTitle)]; ok {
-						info.Region = code
-					}
-				}
-
-				if resp.User.FeedbackCount > 0 {
-					rating := resp.User.FeedbackReputation * 5.0
-					info.Rating = fmt.Sprintf("⭐ %.1f (%d)", rating, resp.User.FeedbackCount)
-				} else {
-					info.Rating = "No rating"
-				}
-
-				if info.Region != "" {
-					return info, 200
 				}
 			}
+
+			if resp.User.FeedbackCount > 0 {
+				rating := resp.User.FeedbackReputation * 5.0
+				info.Rating = fmt.Sprintf("⭐ %.1f (%d)", rating, resp.User.FeedbackCount)
+			} else {
+				info.Rating = "No rating"
+			}
+
+			if info.Region != "" {
+				logSellerEnrichmentSuccess("seller-api", userID, info)
+				return info, 200
+			}
+
+			logSellerEnrichmentFailure(
+				"seller-api",
+				userID,
+				"response had no usable region (country_code=%q country_title=%q feedback_count=%d)",
+				resp.User.CountryCode,
+				resp.User.CountryTitle,
+				resp.User.FeedbackCount,
+			)
+		} else if err != nil {
+			logSellerEnrichmentFailure("seller-api", userID, "json decode error: %v", err)
+		} else {
+			logSellerEnrichmentFailure("seller-api", userID, "response did not contain a valid user")
 		}
-		if status == 403 || status == 429 {
-			return SellerInfo{}, status
-		}
+	} else if status == 200 {
+		logSellerEnrichmentFailure("seller-api", userID, "empty response body")
+	} else {
+		logSellerEnrichmentFailure("seller-api", userID, "http status=%d", status)
 	}
 
-	body, status := s.fetchBody(client, scrapeURL, false)
-	if status != 200 || len(body) == 0 {
-		return SellerInfo{}, status
-	}
-
-	info := parseSellerInfoFromHTML(body)
-	return info, 200
+	return SellerInfo{}, status
 }
 
-func (s *HTMLScraper) fetchBody(client *Client, targetURL string, isAPI bool) ([]byte, int) {
+func (s *SellerEnricher) fetchAPIBody(client *Client, targetURL string, userID int64) ([]byte, int) {
 	currentURL := targetURL
-
 	domain := s.domain
 	if parsed, err := url.Parse(targetURL); err == nil && parsed.Host != "" {
 		domain = parsed.Host
+	}
+
+	if err := client.EnsureWarm(domain); err != nil {
+		logSellerEnrichmentFailure("warmup", userID, "domain=%s via=%s error=%v", domain, client.ProxyLabel(), err)
+		return nil, 0
 	}
 
 	for redirects := 0; redirects < 3; redirects++ {
@@ -375,12 +337,7 @@ func (s *HTMLScraper) fetchBody(client *Client, targetURL string, isAPI bool) ([
 		if err != nil {
 			return nil, 0
 		}
-
-		if isAPI {
-			req.Header = newAPIHeaders(domain)
-		} else {
-			req.Header = newPageHeaders(domain)
-		}
+		req.Header = newAPIHeaders(domain)
 
 		resp, err := client.HttpClient.Do(req)
 		if err != nil {
@@ -405,11 +362,7 @@ func (s *HTMLScraper) fetchBody(client *Client, targetURL string, isAPI bool) ([
 			return nil, resp.StatusCode
 		}
 
-		limit := maxHTMLResponseBytes
-		if isAPI {
-			limit = 512 * 1024
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(limit)))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 		resp.Body.Close()
 		return body, 200
 	}

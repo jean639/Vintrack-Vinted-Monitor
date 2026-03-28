@@ -30,8 +30,8 @@ type Engine struct {
 	poolSize     int
 	pools        map[string]*ClientPool
 	poolsMu      sync.RWMutex
-	scrapers     map[string]*HTMLScraper
-	scrapersMu   sync.RWMutex
+	enrichers    map[string]*SellerEnricher
+	enrichersMu  sync.RWMutex
 }
 
 func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
@@ -44,31 +44,31 @@ func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
 		enrichSeller: enrich,
 		poolSize:     poolSize,
 		pools:        make(map[string]*ClientPool),
-		scrapers:     make(map[string]*HTMLScraper),
+		enrichers:    make(map[string]*SellerEnricher),
 	}
 }
 
-func (e *Engine) GetOrCreateScraper(pm *proxy.Manager, domain string, proxySource string) *HTMLScraper {
+func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxySource string) *SellerEnricher {
 	key := fmt.Sprintf("%s:%s", domain, proxySource)
 
-	e.scrapersMu.RLock()
-	s, ok := e.scrapers[key]
-	e.scrapersMu.RUnlock()
+	e.enrichersMu.RLock()
+	s, ok := e.enrichers[key]
+	e.enrichersMu.RUnlock()
 
 	if ok {
 		return s
 	}
 
-	e.scrapersMu.Lock()
-	defer e.scrapersMu.Unlock()
+	e.enrichersMu.Lock()
+	defer e.enrichersMu.Unlock()
 
-	if s, ok = e.scrapers[key]; ok {
+	if s, ok = e.enrichers[key]; ok {
 		return s
 	}
 
-	log.Printf("Creating new HTML scraper for %s (source: %s)", domain, proxySource)
-	s = NewHTMLScraper(pm, e.db, domain, e.poolSize)
-	e.scrapers[key] = s
+	log.Printf("Creating new seller enricher for %s (source: %s)", domain, proxySource)
+	s = NewSellerEnricher(pm, e.db, domain, e.poolSize)
+	e.enrichers[key] = s
 	return s
 }
 
@@ -131,9 +131,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	pool := e.GetOrCreatePool(pm, domain, proxySource)
 	log.Printf("[%d] using client pool: %d clients", m.ID, pool.Size())
 
-	var scraper *HTMLScraper
+	var enricher *SellerEnricher
 	if e.enrichSeller {
-		scraper = e.GetOrCreateScraper(pm, domain, proxySource)
+		enricher = e.GetOrCreateEnricher(pm, domain, proxySource)
 	}
 
 	apiURL := BuildVintedURL(m)
@@ -354,7 +354,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			e.db.MarkItemsSeen(m.ID, seedIDs)
 
 			seedBuiltItems := e.buildItems(m, seedItems)
-			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.Query, proxySource, scraper, domain, m.AllowedCountries, false)
+			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.Query, proxySource, enricher, domain, m.AllowedCountries, false)
 
 			initialized = true
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
@@ -397,7 +397,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		e.db.MarkItemsSeen(m.ID, newIDs)
 		initialized = true
 
-		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, scraper, domain, m.AllowedCountries, true)
+		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, enricher, domain, m.AllowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -474,12 +474,12 @@ func resolveRedirectURL(currentURL string, location string) (string, error) {
 	return base.ResolveReference(next).String(), nil
 }
 
-func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, scr *HTMLScraper, dom string, allowedCountries *string, publish bool) {
-	if e.enrichSeller && scr != nil {
+func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
+	if e.enrichSeller && enricher != nil {
 		sem := make(chan struct{}, 10)
 		var wg sync.WaitGroup
 		for i := range items {
-			if items[i].Location != "" {
+			if items[i].Location != "" && items[i].Rating != "" {
 				continue
 			}
 			select {
@@ -488,23 +488,18 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 			default:
 			}
 
-			itemURL := vItems[i].Url
-			if !strings.HasPrefix(itemURL, "http") {
-				itemURL = fmt.Sprintf("https://%s%s", dom, itemURL)
-			}
-
 			wg.Add(1)
-			go func(idx int, url string, userID int64) {
+			go func(idx int, userID int64) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				info := scr.FetchSellerInfo(url, userID)
+				info := enricher.FetchSellerInfo(userID)
 				if info.Region != "" && info.Region != "NaN" {
 					items[idx].Location = info.Region
 					items[idx].Rating = info.Rating
 				}
-			}(i, itemURL, vItems[i].User.ID)
+			}(i, vItems[i].User.ID)
 		}
 		wg.Wait()
 	}
