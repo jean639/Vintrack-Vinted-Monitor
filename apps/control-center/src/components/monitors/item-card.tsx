@@ -60,6 +60,8 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
   const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
 
   const allImages = item.image_url ? [item.image_url, ...(item.extra_images || [])] : [];
+  const hasDifferentTotalPrice =
+    Boolean(item.total_price) && item.total_price !== item.price;
 
   const handleNextImage = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -212,7 +214,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
 
   return (
     <div
-      className={`group relative flex flex-col overflow-hidden rounded-xl border border-border/75 bg-card/90 transition-all duration-300 hover:border-border hover:shadow-xl hover:shadow-slate-950/10 dark:hover:shadow-black/20 ${
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/92 transition-all duration-300 hover:-translate-y-0.5 hover:border-border hover:shadow-[0_20px_50px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.28)] ${
         item.isLive
           ? "animate-in slide-in-from-top-2 fade-in duration-500 ring-2 ring-emerald-500/30 shadow-md shadow-emerald-500/10"
           : ""
@@ -269,19 +271,29 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
           </div>
         )}
 
-        <div className="absolute bottom-2.5 right-2.5 flex flex-col items-end gap-1">
-          <span className="rounded-lg bg-background/92 px-2.5 py-1 text-sm font-bold text-foreground shadow-sm backdrop-blur-sm">
-            {item.price}
-          </span>
-          {item.total_price && (
-            <span className="rounded-md bg-slate-950/70 px-2 py-1 text-[12px] font-medium text-white/90 backdrop-blur-sm dark:bg-white/15">
-              {item.total_price} inkl.
-            </span>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-linear-to-t from-slate-950/82 via-slate-950/34 to-transparent" />
+
+        <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
+          <div className="rounded-xl bg-slate-950/66 px-3 py-2 text-white shadow-lg backdrop-blur-md">
+            <div className="text-lg font-semibold tracking-tight text-white">
+              {item.price}
+            </div>
+            {hasDifferentTotalPrice && (
+              <div className="mt-0.5 text-[11px] font-medium text-white/72">
+                {item.total_price} total
+              </div>
+            )}
+          </div>
+
+          {allImages.length > 1 && (
+            <div className="rounded-full border border-white/14 bg-black/30 px-2.5 py-1 text-[11px] font-medium text-white/88 backdrop-blur-sm">
+              {allImages.length} photos
+            </div>
           )}
         </div>
 
         {item.isLive && (
-          <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 bg-emerald-500 text-white text-[10px] font-semibold px-2 py-1 rounded-md shadow-lg">
+          <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-full bg-emerald-500 px-2.5 py-1 text-[10px] font-semibold text-white shadow-lg">
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/50 dark:bg-emerald-400/50 opacity-75" />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500 dark:bg-emerald-400" />
@@ -296,10 +308,10 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
               onClick={handleLike}
               disabled={liking}
               className={cn(
-                "w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center shadow-md transition-colors cursor-pointer",
+                "flex h-8 w-8 items-center justify-center rounded-full border border-white/12 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors cursor-pointer sm:h-7 sm:w-7",
                 liked
-                  ? "bg-red-500 text-white"
-                  : "bg-background/92 text-muted-foreground hover:bg-background hover:text-red-500"
+                  ? "border-red-400/30 bg-red-500 text-white"
+                  : "hover:bg-slate-950/80 hover:text-red-300"
               )}
               title={liked ? "Unlike" : "Like"}
             >
@@ -314,7 +326,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                   e.preventDefault();
                   setOfferOpen(true);
                 }}
-                className="w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center bg-background/92 text-muted-foreground shadow-md transition-colors hover:bg-background hover:text-emerald-500 cursor-pointer"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/12 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-emerald-300 cursor-pointer sm:h-7 sm:w-7"
                 title="Make an offer"
               >
                 <Tag className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
@@ -325,7 +337,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                   e.preventDefault();
                   setMsgOpen(true);
                 }}
-                className="w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center bg-background/92 text-muted-foreground shadow-md transition-colors hover:bg-background hover:text-blue-500 cursor-pointer"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/12 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-sky-300 cursor-pointer sm:h-7 sm:w-7"
                 title="Send message to seller"
               >
                 <MessageCircle className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
@@ -335,65 +347,62 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
         </div>
       </div>
 
-      <div className="p-3.5 flex flex-col flex-1 gap-2">
-        <div className="flex justify-between items-center">
-          {showMonitor ? (
-            <Link
-              href={`/monitors/${item.monitor_id}`}
-              className="z-10 max-w-[calc(100%-4.5rem)]"
-            >
-              <span className="inline-flex max-w-full items-center rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:border-blue-500/30 hover:bg-blue-500/8 hover:text-blue-400">
-                {getMonitorLabel(item)}
-              </span>
-            </Link>
-          ) : (
-            <span className="text-[11px] font-mono text-muted-foreground">
-              {timeStr}
-            </span>
-          )}
-          {showMonitor && (
-            <span className="text-[11px] font-mono text-muted-foreground">
-              {timeStr}
-            </span>
-          )}
-        </div>
-
+      <div className="flex flex-1 flex-col gap-2 p-3.5">
         <h3
-          className="min-h-10 line-clamp-2 text-[13px] font-semibold leading-snug text-foreground"
+          className="min-h-11 line-clamp-2 text-[13px] font-semibold leading-snug text-foreground"
           title={item.title || ""}
         >
           {item.title || "Untitled"}
         </h3>
 
-        <div className="flex flex-wrap gap-1.5 mt-auto pt-1">
+        <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
           {item.brand && (
-            <span className="flex h-5 items-center rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
+            <span className="flex h-5 items-center rounded-md border border-border/60 bg-muted/40 px-1.5 text-[10px] font-medium text-muted-foreground">
               {item.brand}
             </span>
           )}
           {item.size && (
             <Badge
               variant="secondary"
-              className="h-5 border-0 bg-blue-500/12 px-1.5 text-[10px] font-normal text-blue-300"
+              className="h-5 rounded-md border border-blue-500/20 bg-blue-500/10 px-1.5 text-[10px] font-medium text-blue-300"
             >
               {item.size}
             </Badge>
           )}
           {item.location && (
-            <span className="flex h-5 items-center rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+            <span className="flex h-5 items-center rounded-md border border-border/60 bg-muted/40 px-1.5 text-[10px] text-muted-foreground">
               {item.location}
             </span>
           )}
           {item.rating && (
-            <span className="text-[10px] px-1.5 h-5 flex items-center rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 font-medium">
+            <span className="flex h-5 items-center rounded-md border border-amber-200/70 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-700 dark:border-amber-500/20 dark:bg-amber-900/20 dark:text-amber-300">
               {item.rating}
             </span>
           )}
           {item.condition && (
-            <span className="flex h-5 items-center rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+            <span className="flex h-5 items-center rounded-md border border-border/60 bg-muted/40 px-1.5 text-[10px] text-muted-foreground">
               {item.condition}
             </span>
           )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 pt-1">
+          {showMonitor ? (
+            <Link
+              href={`/monitors/${item.monitor_id}`}
+              className="z-10 min-w-0 max-w-[calc(100%-4.5rem)]"
+            >
+              <span className="inline-flex max-w-full truncate text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:text-blue-400">
+                {getMonitorLabel(item)}
+              </span>
+            </Link>
+          ) : (
+            <span />
+          )}
+
+          <span className="shrink-0 text-[10px] font-mono uppercase tracking-[0.16em] text-muted-foreground">
+            {timeStr}
+          </span>
         </div>
       </div>
 
@@ -466,7 +475,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                   <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Price</span>
                   <div className="text-right">
                     <span className="text-base font-bold text-foreground">€{item.price || "0.00"}</span>
-                    {item.total_price && item.total_price !== item.price && (
+                    {hasDifferentTotalPrice && (
                       <span className="block text-[10px] text-muted-foreground">
                         Incl. fees: €{item.total_price}
                       </span>
@@ -564,7 +573,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                   <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Original Price</span>
                   <div className="text-right">
                     <span className="text-base font-bold text-foreground">€{item.price || "0.00"}</span>
-                    {item.total_price && item.total_price !== item.price && (
+                    {hasDifferentTotalPrice && (
                       <span className="block text-[10px] text-muted-foreground">
                         Incl. fees: €{item.total_price}
                       </span>
