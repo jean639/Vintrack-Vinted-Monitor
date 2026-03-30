@@ -363,7 +363,7 @@ export function DashboardClient({
                   <div className="flex flex-wrap gap-1 mb-3">
                     {m.allowed_countries && (
                       <span
-                        className="inline-flex items-center rounded-md border border-emerald-500/20 bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+                        className="inline-flex items-center rounded-md border border-emerald-500/20 bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500"
                         title={`Only items from: ${m.allowed_countries}`}
                       >
                         {getRegionFlags(m.allowed_countries).join(" ")}
@@ -373,7 +373,7 @@ export function DashboardClient({
                       getCategoryLabels(m.catalog_ids).map((label) => (
                         <span
                           key={`cat-${label}`}
-                          className="inline-flex items-center rounded-md border border-violet-500/20 bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-medium text-violet-300"
+                          className="inline-flex items-center rounded-md border border-violet-500/20 bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-medium text-violet-400"
                         >
                           {label}
                         </span>
@@ -382,7 +382,7 @@ export function DashboardClient({
                       getBrandLabels(m.brand_ids).map((label) => (
                         <span
                           key={`brand-${label}`}
-                          className="inline-flex items-center rounded-md border border-blue-500/20 bg-blue-500/12 px-1.5 py-0.5 text-[10px] font-medium text-blue-300"
+                          className="inline-flex items-center rounded-md border border-blue-500/20 bg-blue-500/12 px-1.5 py-0.5 text-[10px] font-medium text-blue-400"
                         >
                           {label}
                         </span>
@@ -391,7 +391,7 @@ export function DashboardClient({
                       getColorLabels(m.color_ids).map((label) => (
                         <span
                           key={`color-${label}`}
-                          className="inline-flex items-center rounded-md border border-pink-500/20 bg-pink-500/12 px-1.5 py-0.5 text-[10px] font-medium text-pink-300"
+                          className="inline-flex items-center rounded-md border border-pink-500/20 bg-pink-500/12 px-1.5 py-0.5 text-[10px] font-medium text-pink-400"
                         >
                           {label}
                         </span>
@@ -400,7 +400,7 @@ export function DashboardClient({
                       getSizeLabels(m.size_id).map((label) => (
                         <span
                           key={`size-${label}`}
-                          className="inline-flex items-center rounded-md border border-amber-500/20 bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
+                          className="inline-flex items-center rounded-md border border-amber-500/20 bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
                         >
                           {label}
                         </span>
