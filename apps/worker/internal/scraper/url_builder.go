@@ -71,5 +71,15 @@ func BuildVintedURL(m model.Monitor) string {
 		}
 	}
 
+	if m.StatusIDs != nil && *m.StatusIDs != "" {
+		statuses := strings.Split(*m.StatusIDs, ",")
+		for _, s := range statuses {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				params.Add("status_ids[]", s)
+			}
+		}
+	}
+
 	return fmt.Sprintf("%s?%s", baseURL, params.Encode())
 }
