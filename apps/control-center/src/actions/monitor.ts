@@ -255,6 +255,24 @@ export async function deleteMonitor(id: number) {
   redirect("/dashboard");
 }
 
+export async function deleteMonitorAndReturn(id: number) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  await db.monitors.deleteMany({
+    where: {
+      id,
+      userId: session.user.id,
+    },
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/monitors/${id}`);
+  revalidatePath(`/monitors/${id}/edit`);
+
+  return { success: true };
+}
+
 export async function testDiscordWebhook(url: string) {
   if (!url || !isValidDiscordWebhook(url)) {
     return { error: "Invalid Discord Webhook URL" };

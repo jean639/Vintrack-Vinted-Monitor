@@ -1,6 +1,6 @@
 "use client";
 
-import { deleteMonitor, updateMonitor, testDiscordWebhook } from "@/actions/monitor";
+import { deleteMonitorAndReturn, updateMonitor, testDiscordWebhook } from "@/actions/monitor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import { StatusPicker } from "@/components/monitors/status-picker";
 import { ArrowLeft, Loader2, Save, Send, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 type ProxyGroupOption = {
@@ -42,6 +42,7 @@ type MonitorData = {
 
 export default function EditMonitorPage() {
   const params = useParams();
+  const router = useRouter();
   const monitorId = Number(params.id);
 
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
@@ -120,7 +121,16 @@ export default function EditMonitorPage() {
   }
 
   const boundUpdate = updateMonitor.bind(null, monitorId);
-  const boundDelete = deleteMonitor.bind(null, monitorId);
+  const handleDelete = async () => {
+    await toast.promise(deleteMonitorAndReturn(monitorId), {
+      loading: "Deleting monitor...",
+      success: "Monitor deleted",
+      error: "Failed to delete monitor",
+    });
+
+    router.push("/dashboard");
+    router.refresh();
+  };
 
   return (
     <div className="space-y-6 mx-auto max-w-4xl">
@@ -396,8 +406,8 @@ export default function EditMonitorPage() {
 
             <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
               <Button
-                type="submit"
-                formAction={boundDelete}
+                type="button"
+                onClick={handleDelete}
                 variant="outline"
                 className="w-full gap-1.5 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:w-auto"
               >
