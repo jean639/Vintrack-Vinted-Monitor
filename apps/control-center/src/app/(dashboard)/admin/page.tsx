@@ -30,6 +30,32 @@ export default async function AdminPage() {
           proxy_groups: true,
         },
       },
+      monitors: {
+        orderBy: [
+          { status: "asc" },
+          { created_at: "desc" },
+        ],
+        select: {
+          id: true,
+          query: true,
+          status: true,
+          region: true,
+          created_at: true,
+          price_max: true,
+          discord_webhook: true,
+          webhook_active: true,
+          proxy_group: {
+            select: {
+              name: true,
+            },
+          },
+          _count: {
+            select: {
+              items: true,
+            },
+          },
+        },
+      },
     },
   });
 
