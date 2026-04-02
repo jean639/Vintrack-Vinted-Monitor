@@ -126,22 +126,23 @@ func isSellerInfoComplete(info SellerInfo) bool {
 }
 
 type SellerEnricher struct {
-	clients []*Client
-	pm      *proxy.Manager
-	db      *database.Store
-	domain  string
-	mu      sync.Mutex
-	idx     int
+	clients         []*Client
+	pm              *proxy.Manager
+	db              *database.Store
+	domain          string
+	trafficRecorder func(txBytes int64, rxBytes int64)
+	mu              sync.Mutex
+	idx             int
 }
 
-func NewSellerEnricher(pm *proxy.Manager, db *database.Store, domain string, poolSize int) *SellerEnricher {
+func NewSellerEnricher(pm *proxy.Manager, db *database.Store, domain string, poolSize int, trafficRecorder func(txBytes int64, rxBytes int64)) *SellerEnricher {
 	if pm.Count() < poolSize {
 		poolSize = pm.Count()
 	}
 	if poolSize < 1 {
 		poolSize = 1
 	}
-	s := &SellerEnricher{pm: pm, db: db, domain: domain, clients: make([]*Client, 0, poolSize)}
+	s := &SellerEnricher{pm: pm, db: db, domain: domain, trafficRecorder: trafficRecorder, clients: make([]*Client, 0, poolSize)}
 	for i := 0; i < poolSize; i++ {
 		s.addClient()
 	}
@@ -149,7 +150,7 @@ func NewSellerEnricher(pm *proxy.Manager, db *database.Store, domain string, poo
 }
 
 func (s *SellerEnricher) addClient() {
-	client, err := NewSellerClient(s.pm.Next())
+	client, err := NewSellerClient(s.pm.Next(), s.trafficRecorder)
 	if err != nil {
 		log.Printf("seller enricher client creation: %v", err)
 		return
@@ -174,7 +175,7 @@ func (s *SellerEnricher) replaceClient(bad *Client) {
 	for i, c := range s.clients {
 		if c == bad {
 			go func(idx int) {
-				nc, err := NewSellerClient(s.pm.Next())
+				nc, err := NewSellerClient(s.pm.Next(), s.trafficRecorder)
 				if err != nil {
 					return
 				}
@@ -341,12 +342,15 @@ func (s *SellerEnricher) fetchAPIBody(client *Client, targetURL string, userID i
 
 		resp, err := client.HttpClient.Do(req)
 		if err != nil {
+			client.FlushTrackedTraffic()
 			return nil, 0
 		}
 
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			location := resp.Header.Get("Location")
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			client.FlushTrackedTraffic()
 			if location == "" {
 				return nil, resp.StatusCode
 			}
@@ -358,12 +362,15 @@ func (s *SellerEnricher) fetchAPIBody(client *Client, targetURL string, userID i
 		}
 
 		if resp.StatusCode != 200 {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			client.FlushTrackedTraffic()
 			return nil, resp.StatusCode
 		}
 
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 		resp.Body.Close()
+		client.FlushTrackedTraffic()
 		return body, 200
 	}
 

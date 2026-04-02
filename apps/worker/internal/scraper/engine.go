@@ -48,8 +48,8 @@ func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
 	}
 }
 
-func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxySource string) *SellerEnricher {
-	key := fmt.Sprintf("%s:%s", domain, proxySource)
+func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxyKey string, trafficRecorder func(txBytes int64, rxBytes int64), proxyLabel string) *SellerEnricher {
+	key := fmt.Sprintf("%s:%s", domain, proxyKey)
 
 	e.enrichersMu.RLock()
 	s, ok := e.enrichers[key]
@@ -66,14 +66,14 @@ func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxySour
 		return s
 	}
 
-	log.Printf("Creating new seller enricher for %s (source: %s)", domain, proxySource)
-	s = NewSellerEnricher(pm, e.db, domain, e.poolSize)
+	log.Printf("Creating new seller enricher for %s (source: %s)", domain, proxyLabel)
+	s = NewSellerEnricher(pm, e.db, domain, e.poolSize, trafficRecorder)
 	e.enrichers[key] = s
 	return s
 }
 
-func (e *Engine) GetOrCreatePool(pm *proxy.Manager, domain string, proxySource string) *ClientPool {
-	key := fmt.Sprintf("%s:%s", domain, proxySource)
+func (e *Engine) GetOrCreatePool(pm *proxy.Manager, domain string, proxyKey string, trafficRecorder func(txBytes int64, rxBytes int64), proxyLabel string) *ClientPool {
+	key := fmt.Sprintf("%s:%s", domain, proxyKey)
 
 	e.poolsMu.RLock()
 	pool, ok := e.pools[key]
@@ -91,8 +91,8 @@ func (e *Engine) GetOrCreatePool(pm *proxy.Manager, domain string, proxySource s
 		return pool
 	}
 
-	log.Printf("Creating new client pool for %s (source: %s)", domain, proxySource)
-	pool = NewClientPool(pm, domain, e.poolSize)
+	log.Printf("Creating new client pool for %s (source: %s)", domain, proxyLabel)
+	pool = NewClientPool(pm, domain, e.poolSize, trafficRecorder)
 	e.pools[key] = pool
 	return pool
 }
@@ -109,8 +109,17 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	domain := model.RegionDomain(m.Region)
 
 	proxySource := "server"
+	proxyKey := "server"
+	var trafficRecorder func(txBytes int64, rxBytes int64)
 	if m.ProxyGroupName.Valid && m.ProxyGroupName.String != "" {
 		proxySource = fmt.Sprintf("group:%s", m.ProxyGroupName.String)
+	}
+	if m.ProxyGroupID != nil {
+		groupID := *m.ProxyGroupID
+		proxyKey = fmt.Sprintf("group:%d", groupID)
+		trafficRecorder = func(txBytes int64, rxBytes int64) {
+			e.db.RecordProxyGroupBandwidth(groupID, txBytes, rxBytes)
+		}
 	}
 
 	if pm.Count() == 0 {
@@ -128,12 +137,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	}
 	log.Printf("[%d] proxy source: %s (%d proxies)", m.ID, proxySource, pm.Count())
 
-	pool := e.GetOrCreatePool(pm, domain, proxySource)
+	pool := e.GetOrCreatePool(pm, domain, proxyKey, trafficRecorder, proxySource)
 	log.Printf("[%d] using client pool: %d clients", m.ID, pool.Size())
 
 	var enricher *SellerEnricher
 	if e.enrichSeller {
-		enricher = e.GetOrCreateEnricher(pm, domain, proxySource)
+		enricher = e.GetOrCreateEnricher(pm, domain, proxyKey, trafficRecorder, proxySource)
 	}
 
 	apiURL := BuildVintedURL(m)
@@ -183,6 +192,20 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 
 		checks++
 
+		if e.isProxyGroupBandwidthLimitReached(m) {
+			log.Printf("[%d] proxy group limit reached for %s, pausing monitor", m.ID, proxySource)
+			e.db.UpdateMonitorHealth(model.MonitorHealth{
+				MonitorID:       m.ID,
+				TotalChecks:     int64(checks),
+				TotalErrors:     totalErrors,
+				ConsecutiveErrs: consecutiveErrors,
+				LastError:       "proxy group bandwidth limit reached",
+				UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
+			})
+			e.db.SetMonitorStatus(m.ID, "paused")
+			return
+		}
+
 		if checks%20 == 0 {
 			if updated, err := e.db.GetMonitorByID(m.ID); err == nil {
 				if updated.Status != "active" {
@@ -196,6 +219,10 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				m.DiscordWebhook = updated.DiscordWebhook
 				m.WebhookActive = updated.WebhookActive
 				m.Status = updated.Status
+				m.ProxyGroupLimitBytes = updated.ProxyGroupLimitBytes
+				m.ProxyGroupRxBytes = updated.ProxyGroupRxBytes
+				m.ProxyGroupTxBytes = updated.ProxyGroupTxBytes
+				m.ProxyGroupResetAt = updated.ProxyGroupResetAt
 			}
 		}
 
@@ -423,12 +450,15 @@ func (e *Engine) fetchCatalog(ctx context.Context, client *Client, apiURL string
 
 		resp, err := client.HttpClient.Do(req)
 		if err != nil {
+			client.FlushTrackedTraffic()
 			return nil, 0, err
 		}
 
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			location := resp.Header.Get("Location")
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			client.FlushTrackedTraffic()
 			if location == "" {
 				return nil, resp.StatusCode, nil
 			}
@@ -444,6 +474,7 @@ func (e *Engine) fetchCatalog(ctx context.Context, client *Client, apiURL string
 		if resp.StatusCode != 200 {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			client.FlushTrackedTraffic()
 			return nil, resp.StatusCode, nil
 		}
 
@@ -451,13 +482,29 @@ func (e *Engine) fetchCatalog(ctx context.Context, client *Client, apiURL string
 		var data model.VintedResponse
 		if err := json.NewDecoder(limitedReader).Decode(&data); err != nil {
 			resp.Body.Close()
+			client.FlushTrackedTraffic()
 			return nil, 0, fmt.Errorf("json decode: %w", err)
 		}
 		resp.Body.Close()
+		client.FlushTrackedTraffic()
 		return data.Items, 200, nil
 	}
 
 	return nil, 0, nil
+}
+
+func (e *Engine) isProxyGroupBandwidthLimitReached(m model.Monitor) bool {
+	if m.ProxyGroupID == nil || m.ProxyGroupLimitBytes == nil || *m.ProxyGroupLimitBytes <= 0 {
+		return false
+	}
+
+	txBytes, rxBytes, ok := e.db.GetProxyGroupBandwidthUsage(*m.ProxyGroupID)
+	if !ok {
+		txBytes = m.ProxyGroupTxBytes
+		rxBytes = m.ProxyGroupRxBytes
+	}
+
+	return txBytes+rxBytes >= *m.ProxyGroupLimitBytes
 }
 
 func resolveRedirectURL(currentURL string, location string) (string, error) {

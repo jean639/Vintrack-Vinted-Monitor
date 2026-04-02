@@ -7,23 +7,27 @@ import (
 
 // Monitor represents a user-configured search monitor.
 type Monitor struct {
-	ID             int
-	Query          string
-	PriceMin       *int
-	PriceMax       *int
-	SizeID         *string
-	CatalogIDs     *string
-	BrandIDs       *string
-	ColorIDs       *string
-	Region         string
-	AllowedCountries *string
-	Status         string
-	DiscordWebhook sql.NullString
-	WebhookActive  bool
-	ProxyGroupID   *int
-	ProxyGroupName sql.NullString
-	Proxies        sql.NullString
-	CreatedAt      time.Time
+	ID                   int
+	Query                string
+	PriceMin             *int
+	PriceMax             *int
+	SizeID               *string
+	CatalogIDs           *string
+	BrandIDs             *string
+	ColorIDs             *string
+	Region               string
+	AllowedCountries     *string
+	Status               string
+	DiscordWebhook       sql.NullString
+	WebhookActive        bool
+	ProxyGroupID         *int
+	ProxyGroupName       sql.NullString
+	ProxyGroupLimitBytes *int64
+	ProxyGroupRxBytes    int64
+	ProxyGroupTxBytes    int64
+	ProxyGroupResetAt    sql.NullTime
+	Proxies              sql.NullString
+	CreatedAt            time.Time
 }
 
 var regionDomains = map[string]string{

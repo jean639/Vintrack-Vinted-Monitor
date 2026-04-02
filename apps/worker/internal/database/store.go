@@ -21,6 +21,22 @@ type Store struct {
 	cache          *cache.RedisCache
 	healthErrLog   map[int]time.Time
 	healthErrLogMu sync.Mutex
+	trafficMu      sync.Mutex
+	trafficTotals  map[int]proxyGroupBandwidthDelta
+	trafficUsage   map[int]proxyGroupBandwidthState
+	trafficStop    chan struct{}
+	trafficDone    chan struct{}
+}
+
+type proxyGroupBandwidthDelta struct {
+	txBytes int64
+	rxBytes int64
+}
+
+type proxyGroupBandwidthState struct {
+	txBytes int64
+	rxBytes int64
+	resetAt time.Time
 }
 
 func NewStore(connStr string, redisCache *cache.RedisCache) (*Store, error) {
@@ -41,7 +57,19 @@ func NewStore(connStr string, redisCache *cache.RedisCache) (*Store, error) {
 
 	log.Printf("PostgreSQL connected (pool: %d max, %d idle)", maxConns, maxConns/2)
 
-	return &Store{db: db, cache: redisCache, healthErrLog: make(map[int]time.Time)}, nil
+	store := &Store{
+		db:            db,
+		cache:         redisCache,
+		healthErrLog:  make(map[int]time.Time),
+		trafficTotals: make(map[int]proxyGroupBandwidthDelta),
+		trafficUsage:  make(map[int]proxyGroupBandwidthState),
+		trafficStop:   make(chan struct{}),
+		trafficDone:   make(chan struct{}),
+	}
+
+	go store.bandwidthFlushLoop()
+
+	return store, nil
 }
 
 func (s *Store) BatchIsNew(monitorID int, itemIDs []int64) map[int64]bool {
@@ -219,7 +247,7 @@ func nilIfEmpty(v string) interface{} {
 
 func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.proxies
+		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.bandwidth_limit_bytes, COALESCE(pg.bandwidth_rx_bytes, 0), COALESCE(pg.bandwidth_tx_bytes, 0), pg.bandwidth_reset_at, pg.proxies
 		FROM monitors m
 		LEFT JOIN proxy_groups pg ON m.proxy_group_id = pg.id
 		WHERE m.status = 'active'`)
@@ -231,9 +259,10 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 	var monitors []model.Monitor
 	for rows.Next() {
 		var m model.Monitor
-		if err := rows.Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.Proxies); err != nil {
+		if err := rows.Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.ProxyGroupLimitBytes, &m.ProxyGroupRxBytes, &m.ProxyGroupTxBytes, &m.ProxyGroupResetAt, &m.Proxies); err != nil {
 			return nil, err
 		}
+		s.SyncProxyGroupBandwidthState(m)
 		monitors = append(monitors, m)
 	}
 	return monitors, nil
@@ -242,22 +271,137 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 func (s *Store) GetMonitorByID(id int) (model.Monitor, error) {
 	var m model.Monitor
 	err := s.db.QueryRow(`
-		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.proxies
+		SELECT m.id, m.query, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, m.proxy_group_id, pg.name, pg.bandwidth_limit_bytes, COALESCE(pg.bandwidth_rx_bytes, 0), COALESCE(pg.bandwidth_tx_bytes, 0), pg.bandwidth_reset_at, pg.proxies
 		FROM monitors m
 		LEFT JOIN proxy_groups pg ON m.proxy_group_id = pg.id
 		WHERE m.id = $1`, id,
-	).Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.Proxies)
+	).Scan(&m.ID, &m.Query, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.ProxyGroupID, &m.ProxyGroupName, &m.ProxyGroupLimitBytes, &m.ProxyGroupRxBytes, &m.ProxyGroupTxBytes, &m.ProxyGroupResetAt, &m.Proxies)
 	if err != nil {
 		return model.Monitor{}, err
 	}
+	s.SyncProxyGroupBandwidthState(m)
 	return m, nil
 }
 
 func (s *Store) Close() error {
+	close(s.trafficStop)
+	<-s.trafficDone
 	if s.cache != nil {
 		s.cache.Close()
 	}
 	return s.db.Close()
+}
+
+func (s *Store) RecordProxyGroupBandwidth(groupID int, txBytes int64, rxBytes int64) {
+	if groupID <= 0 || (txBytes <= 0 && rxBytes <= 0) {
+		return
+	}
+
+	s.trafficMu.Lock()
+	current := s.trafficTotals[groupID]
+	current.txBytes += txBytes
+	current.rxBytes += rxBytes
+	s.trafficTotals[groupID] = current
+	usage := s.trafficUsage[groupID]
+	usage.txBytes += txBytes
+	usage.rxBytes += rxBytes
+	s.trafficUsage[groupID] = usage
+	s.trafficMu.Unlock()
+}
+
+func (s *Store) SyncProxyGroupBandwidthState(m model.Monitor) {
+	if m.ProxyGroupID == nil {
+		return
+	}
+
+	groupID := *m.ProxyGroupID
+	var resetAt time.Time
+	if m.ProxyGroupResetAt.Valid {
+		resetAt = m.ProxyGroupResetAt.Time.UTC()
+	}
+
+	s.trafficMu.Lock()
+	defer s.trafficMu.Unlock()
+
+	current, exists := s.trafficUsage[groupID]
+	if !exists || resetAt.After(current.resetAt) {
+		s.trafficUsage[groupID] = proxyGroupBandwidthState{
+			txBytes: m.ProxyGroupTxBytes,
+			rxBytes: m.ProxyGroupRxBytes,
+			resetAt: resetAt,
+		}
+		s.trafficTotals[groupID] = proxyGroupBandwidthDelta{}
+		return
+	}
+
+	if m.ProxyGroupTxBytes > current.txBytes {
+		current.txBytes = m.ProxyGroupTxBytes
+	}
+	if m.ProxyGroupRxBytes > current.rxBytes {
+		current.rxBytes = m.ProxyGroupRxBytes
+	}
+	s.trafficUsage[groupID] = current
+}
+
+func (s *Store) GetProxyGroupBandwidthUsage(groupID int) (txBytes int64, rxBytes int64, ok bool) {
+	s.trafficMu.Lock()
+	defer s.trafficMu.Unlock()
+
+	usage, exists := s.trafficUsage[groupID]
+	if !exists {
+		return 0, 0, false
+	}
+
+	return usage.txBytes, usage.rxBytes, true
+}
+
+func (s *Store) bandwidthFlushLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	defer close(s.trafficDone)
+
+	for {
+		select {
+		case <-ticker.C:
+			s.flushProxyGroupBandwidth()
+		case <-s.trafficStop:
+			s.flushProxyGroupBandwidth()
+			return
+		}
+	}
+}
+
+func (s *Store) flushProxyGroupBandwidth() {
+	s.trafficMu.Lock()
+	if len(s.trafficTotals) == 0 {
+		s.trafficMu.Unlock()
+		return
+	}
+
+	pending := s.trafficTotals
+	s.trafficTotals = make(map[int]proxyGroupBandwidthDelta)
+	s.trafficMu.Unlock()
+
+	for groupID, delta := range pending {
+		if delta.txBytes <= 0 && delta.rxBytes <= 0 {
+			continue
+		}
+		if _, err := s.db.Exec(`
+			UPDATE proxy_groups
+			SET bandwidth_tx_bytes = bandwidth_tx_bytes + $2,
+			    bandwidth_rx_bytes = bandwidth_rx_bytes + $3
+			WHERE id = $1`,
+			groupID, delta.txBytes, delta.rxBytes,
+		); err != nil {
+			log.Printf("proxy group bandwidth flush failed for %d: %v", groupID, err)
+			s.trafficMu.Lock()
+			current := s.trafficTotals[groupID]
+			current.txBytes += delta.txBytes
+			current.rxBytes += delta.rxBytes
+			s.trafficTotals[groupID] = current
+			s.trafficMu.Unlock()
+		}
+	}
 }
 
 func (s *Store) UpdateMonitorHealth(health model.MonitorHealth) {

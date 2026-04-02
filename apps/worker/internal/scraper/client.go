@@ -72,18 +72,23 @@ func newAPIHeaders(domain string) http.Header {
 }
 
 type Client struct {
-	HttpClient tls_client.HttpClient
-	ProxyURL   string
-	warmedMu   sync.Mutex
-	warmed     map[string]bool
+	HttpClient      tls_client.HttpClient
+	ProxyURL        string
+	trafficRecorder func(txBytes int64, rxBytes int64)
+	trackerMu       sync.Mutex
+	lastTxBytes     int64
+	lastRxBytes     int64
+	warmedMu        sync.Mutex
+	warmed          map[string]bool
 }
 
-func NewClient(proxyURL string) (*Client, error) {
+func NewClient(proxyURL string, trafficRecorder func(txBytes int64, rxBytes int64)) (*Client, error) {
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(3),
 		tls_client.WithClientProfile(profiles.Chrome_131),
 		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+		tls_client.WithBandwidthTracker(),
 	}
 
 	if proxyURL != "" {
@@ -95,15 +100,16 @@ func NewClient(proxyURL string) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{HttpClient: httpClient, ProxyURL: proxyURL, warmed: make(map[string]bool)}, nil
+	return &Client{HttpClient: httpClient, ProxyURL: proxyURL, trafficRecorder: trafficRecorder, warmed: make(map[string]bool)}, nil
 }
 
-func NewSellerClient(proxyURL string) (*Client, error) {
+func NewSellerClient(proxyURL string, trafficRecorder func(txBytes int64, rxBytes int64)) (*Client, error) {
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(10),
 		tls_client.WithClientProfile(profiles.Chrome_131),
 		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+		tls_client.WithBandwidthTracker(),
 	}
 
 	if proxyURL != "" {
@@ -115,7 +121,7 @@ func NewSellerClient(proxyURL string) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{HttpClient: httpClient, ProxyURL: proxyURL, warmed: make(map[string]bool)}, nil
+	return &Client{HttpClient: httpClient, ProxyURL: proxyURL, trafficRecorder: trafficRecorder, warmed: make(map[string]bool)}, nil
 }
 
 func (c *Client) ProxyLabel() string {
@@ -149,12 +155,15 @@ func (c *Client) WarmUpRegion(domain string) error {
 
 		resp, err := c.HttpClient.Do(req)
 		if err != nil {
+			c.FlushTrackedTraffic()
 			return err
 		}
 
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			location := resp.Header.Get("Location")
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			c.FlushTrackedTraffic()
 			if location == "" {
 				return fmt.Errorf("warmup redirect without location for %s", currentDomain)
 			}
@@ -170,11 +179,13 @@ func (c *Client) WarmUpRegion(domain string) error {
 		if resp.StatusCode != 200 {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			c.FlushTrackedTraffic()
 			return fmt.Errorf("warmup %s returned %d", currentDomain, resp.StatusCode)
 		}
 
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 		resp.Body.Close()
+		c.FlushTrackedTraffic()
 		return nil
 	}
 
@@ -203,4 +214,37 @@ func (c *Client) ResetWarm(domain string) {
 	c.warmedMu.Lock()
 	delete(c.warmed, domain)
 	c.warmedMu.Unlock()
+}
+
+func (c *Client) RecordTraffic(txBytes int64, rxBytes int64) {
+	if c == nil || c.trafficRecorder == nil {
+		return
+	}
+	if txBytes <= 0 && rxBytes <= 0 {
+		return
+	}
+	c.trafficRecorder(txBytes, rxBytes)
+}
+
+func (c *Client) FlushTrackedTraffic() {
+	if c == nil || c.HttpClient == nil {
+		return
+	}
+
+	c.trackerMu.Lock()
+	defer c.trackerMu.Unlock()
+
+	tracker := c.HttpClient.GetBandwidthTracker()
+	if tracker == nil {
+		return
+	}
+
+	currentTx := tracker.GetWriteBytes()
+	currentRx := tracker.GetReadBytes()
+	deltaTx := currentTx - c.lastTxBytes
+	deltaRx := currentRx - c.lastRxBytes
+	c.lastTxBytes = currentTx
+	c.lastRxBytes = currentRx
+
+	c.RecordTraffic(deltaTx, deltaRx)
 }

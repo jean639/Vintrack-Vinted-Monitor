@@ -8,14 +8,15 @@ import (
 )
 
 type ClientPool struct {
-	clients []*Client
-	index   int
-	mu      sync.Mutex
-	pm      *proxy.Manager
-	domain  string
+	clients         []*Client
+	index           int
+	mu              sync.Mutex
+	pm              *proxy.Manager
+	domain          string
+	trafficRecorder func(txBytes int64, rxBytes int64)
 }
 
-func NewClientPool(pm *proxy.Manager, domain string, size int) *ClientPool {
+func NewClientPool(pm *proxy.Manager, domain string, size int, trafficRecorder func(txBytes int64, rxBytes int64)) *ClientPool {
 	if size < 1 {
 		size = 1
 	}
@@ -24,9 +25,10 @@ func NewClientPool(pm *proxy.Manager, domain string, size int) *ClientPool {
 	}
 
 	pool := &ClientPool{
-		clients: make([]*Client, 0, size),
-		pm:      pm,
-		domain:  domain,
+		clients:         make([]*Client, 0, size),
+		pm:              pm,
+		domain:          domain,
+		trafficRecorder: trafficRecorder,
 	}
 
 	var wg sync.WaitGroup
@@ -35,7 +37,7 @@ func NewClientPool(pm *proxy.Manager, domain string, size int) *ClientPool {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c, err := NewClient(pm.Next())
+			c, err := NewClient(pm.Next(), trafficRecorder)
 			if err != nil {
 				log.Printf("pool: client creation failed: %v", err)
 				return
@@ -48,7 +50,7 @@ func NewClientPool(pm *proxy.Manager, domain string, size int) *ClientPool {
 	wg.Wait()
 
 	if len(pool.clients) == 0 {
-		c, err := NewClient(pm.Next())
+		c, err := NewClient(pm.Next(), trafficRecorder)
 		if err == nil {
 			pool.clients = append(pool.clients, c)
 		}
@@ -84,7 +86,7 @@ func (p *ClientPool) RaceClients(n int) []*Client {
 
 func (p *ClientPool) Replace(bad *Client) {
 	go func() {
-		c, err := NewClient(p.pm.Next())
+		c, err := NewClient(p.pm.Next(), p.trafficRecorder)
 		if err != nil {
 			log.Printf("pool: replace failed: %v", err)
 			return
