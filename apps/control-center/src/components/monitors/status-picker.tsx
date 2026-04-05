@@ -7,23 +7,16 @@ import { Check } from "lucide-react";
 interface StatusPickerProps {
   selected: string[];
   onChange: (ids: string[]) => void;
+  locale?: string;
 }
 
-export function StatusPicker({ selected, onChange }: StatusPickerProps) {
+export function StatusPicker({ selected, onChange, locale = "en" }: StatusPickerProps) {
   const toggle = (id: string) => {
     if (selected.includes(id)) {
       onChange(selected.filter((value) => value !== id));
       return;
     }
     onChange([...selected, id]);
-  };
-
-  const toneClasses: Record<string, string> = {
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    sky: "border-sky-200 bg-sky-50 text-sky-700",
-    indigo: "border-indigo-200 bg-indigo-50 text-indigo-700",
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    rose: "border-rose-200 bg-rose-50 text-rose-700",
   };
 
   return (
@@ -45,7 +38,7 @@ export function StatusPicker({ selected, onChange }: StatusPickerProps) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium">{status.label}</span>
+                    <span className="text-[13px] font-medium">{status.labels[locale] ?? status.label}</span>
                   </div>
                   <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
                     {status.description}

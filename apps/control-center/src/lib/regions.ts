@@ -5,6 +5,32 @@ export type Region = {
   domain: string;
 };
 
+const STATUS_LOCALE_BY_REGION: Record<string, string> = {
+  de: "de",
+  at: "de",
+  fr: "fr",
+  be: "fr",
+  lu: "fr",
+  it: "it",
+  es: "es",
+  nl: "nl",
+  pl: "pl",
+  pt: "pt",
+  uk: "en",
+  ie: "en",
+  cz: "cs",
+  sk: "sk",
+  lt: "lt",
+  se: "sv",
+  dk: "da",
+  ro: "ro",
+  hu: "hu",
+  hr: "hr",
+  fi: "fi",
+  si: "sl",
+  gr: "el",
+};
+
 export const REGIONS: Region[] = [
   { code: "de", label: "Germany", flag: "🇩🇪", domain: "vinted.de" },
   { code: "fr", label: "France", flag: "🇫🇷", domain: "vinted.fr" },
@@ -47,4 +73,23 @@ export function getRegionFlags(codesString: string): string[] {
   if (!codesString) return [];
   const codes = codesString.split(",").filter(Boolean);
   return codes.map((code) => REGIONS_BY_CODE[code]?.flag || code.toUpperCase());
+}
+
+export function getStatusLocaleForRegion(code: string | null | undefined): string {
+  if (!code) return "en";
+  return STATUS_LOCALE_BY_REGION[code] ?? "en";
+}
+
+export function getStatusLocaleForRegionCodes(codesString: string | null | undefined, fallbackCode?: string | null): string {
+  if (codesString) {
+    const firstCode = codesString
+      .split(",")
+      .map((code) => code.trim())
+      .find(Boolean);
+    if (firstCode) {
+      return getStatusLocaleForRegion(firstCode);
+    }
+  }
+
+  return getStatusLocaleForRegion(fallbackCode);
 }

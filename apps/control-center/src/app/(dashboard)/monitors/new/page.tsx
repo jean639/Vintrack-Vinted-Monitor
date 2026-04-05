@@ -12,6 +12,7 @@ import { RegionPicker } from "@/components/monitors/region-picker";
 import { CountryFilterPicker } from "@/components/monitors/country-filter-picker";
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
+import { getStatusLocaleForRegionCodes } from "@/lib/regions";
 import { ArrowLeft, Plus, Send } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
@@ -236,6 +237,7 @@ export default function NewMonitorPage() {
               <StatusPicker
                 selected={selectedStatuses}
                 onChange={setSelectedStatuses}
+                locale={getStatusLocaleForRegionCodes(selectedAllowedCountries.join(","), selectedRegion)}
               />
               <input
                 type="hidden"
