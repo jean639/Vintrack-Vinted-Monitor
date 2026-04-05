@@ -10,7 +10,7 @@ import { getCategoryLabels } from "@/lib/categories";
 import { getBrandLabels } from "@/lib/brands";
 import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
-import { getRegionLabel, getRegionFlags } from "@/lib/regions";
+import { getRegionLabel, getRegionFlags, getStatusLocaleForRegionCodes } from "@/lib/regions";
 import { getStatusLabels } from "@/lib/statuses";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
@@ -145,7 +145,10 @@ export default async function MonitorPage({
                     </span>
                   ))}
                 {monitor.status_ids &&
-                  getStatusLabels(monitor.status_ids).map((label) => (
+                  getStatusLabels(
+                    monitor.status_ids,
+                    getStatusLocaleForRegionCodes(monitor.allowed_countries, monitor.region)
+                  ).map((label) => (
                     <span
                       key={`status-${label}`}
                       className="inline-flex items-center rounded-md bg-cyan-50 dark:bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20"
