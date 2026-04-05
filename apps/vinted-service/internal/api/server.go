@@ -33,6 +33,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/items/unlike", s.handleUnlike)
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
 	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
+	mux.HandleFunc("GET /api/items/wardrobe", s.handleWardrobe)
 
 	mux.HandleFunc("GET /api/messages/inbox", s.handleInbox)
 	mux.HandleFunc("GET /api/notifications", s.handleNotifications)
@@ -359,6 +360,41 @@ func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
 
 	s.persistIfRefreshed(sess, client)
 	writeJSON(w, 200, favs)
+}
+
+func (s *Server) handleWardrobe(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	page := 1
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	perPage := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("per_page")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			perPage = parsed
+		}
+	}
+
+	order := strings.TrimSpace(r.URL.Query().Get("order"))
+	if order == "" {
+		order = "relevance"
+	}
+
+	wardrobe, err := client.GetWardrobe(sess.VintedUserID, page, perPage, order)
+	if err != nil {
+		writeError(w, "failed to fetch wardrobe: "+err.Error(), 502)
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, wardrobe)
 }
 
 func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {

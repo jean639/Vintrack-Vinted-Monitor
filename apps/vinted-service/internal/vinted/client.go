@@ -236,7 +236,19 @@ type VintedPrice struct {
 }
 
 type VintedPhoto struct {
-	Url string `json:"url"`
+	ID             int64  `json:"id,omitempty"`
+	Orientation    int    `json:"orientation,omitempty"`
+	ImageNo        int    `json:"image_no,omitempty"`
+	Width          int    `json:"width,omitempty"`
+	Height         int    `json:"height,omitempty"`
+	IsMain         bool   `json:"is_main,omitempty"`
+	Url            string `json:"url"`
+	FullSizeURL    string `json:"full_size_url,omitempty"`
+	HighResolution struct {
+		ID          string `json:"id,omitempty"`
+		Timestamp   int64  `json:"timestamp,omitempty"`
+		Orientation int    `json:"orientation,omitempty"`
+	} `json:"high_resolution,omitempty"`
 }
 
 type VintedUser struct {
@@ -270,10 +282,29 @@ type FavoritesItem struct {
 
 type VintedItemDetailResponse struct {
 	Item struct {
-		ID             int64         `json:"id"`
-		Photos         []VintedPhoto `json:"photos"`
-		TotalItemPrice *VintedPrice  `json:"total_item_price"`
-		User           struct {
+		ID                    int64           `json:"id"`
+		Title                 string          `json:"title"`
+		Description           string          `json:"description"`
+		BrandID               int64           `json:"brand_id"`
+		Brand                 string          `json:"brand"`
+		SizeID                int64           `json:"size_id"`
+		CatalogID             int64           `json:"catalog_id"`
+		ISBN                  *string         `json:"isbn"`
+		IsUnisex              bool            `json:"is_unisex"`
+		PriceNumeric          *float64        `json:"price_numeric"`
+		Price                 VintedPrice     `json:"price"`
+		Currency              string          `json:"currency"`
+		PackageSizeID         int64           `json:"package_size_id"`
+		ShipmentPrices        interface{}     `json:"shipment_prices"`
+		ColorIDs              []int64         `json:"color_ids"`
+		ItemAttributes        []ItemAttribute `json:"item_attributes"`
+		Photos                []VintedPhoto   `json:"photos"`
+		TotalItemPrice        *VintedPrice    `json:"total_item_price"`
+		MeasurementLength     interface{}     `json:"measurement_length"`
+		MeasurementWidth      interface{}     `json:"measurement_width"`
+		Manufacturer          interface{}     `json:"manufacturer"`
+		ManufacturerLabelling interface{}     `json:"manufacturer_labelling"`
+		User                  struct {
 			ID                 int64   `json:"id"`
 			Login              string  `json:"login"`
 			CountryTitle       string  `json:"country_title"`
@@ -287,6 +318,53 @@ type VintedItemDetailResponse struct {
 type FavoritesResponse struct {
 	Items      []FavoritesItem     `json:"items"`
 	Pagination FavoritesPagination `json:"pagination"`
+}
+
+type ItemAttribute struct {
+	Code string  `json:"code"`
+	IDs  []int64 `json:"ids,omitempty"`
+}
+
+type WardrobePagination struct {
+	CurrentPage  int `json:"current_page"`
+	TotalPages   int `json:"total_pages"`
+	TotalEntries int `json:"total_entries"`
+	PerPage      int `json:"per_page"`
+}
+
+type WardrobePushUp struct {
+	NextPushUpTime string `json:"next_push_up_time"`
+}
+
+type WardrobeItem struct {
+	ID                int64           `json:"id"`
+	Title             string          `json:"title"`
+	Brand             string          `json:"brand,omitempty"`
+	IsDraft           bool            `json:"is_draft"`
+	IsClosed          bool            `json:"is_closed"`
+	IsReserved        bool            `json:"is_reserved"`
+	IsHidden          bool            `json:"is_hidden"`
+	Promoted          bool            `json:"promoted"`
+	CanPushUp         bool            `json:"can_push_up"`
+	CanEdit           bool            `json:"can_edit"`
+	StatsVisible      bool            `json:"stats_visible"`
+	ViewCount         int             `json:"view_count"`
+	FavouriteCount    int             `json:"favourite_count"`
+	Status            string          `json:"status"`
+	Size              string          `json:"size"`
+	URL               string          `json:"url"`
+	Path              string          `json:"path"`
+	ItemClosingAction *string         `json:"item_closing_action"`
+	Price             VintedPrice     `json:"price"`
+	ServiceFee        *VintedPrice    `json:"service_fee"`
+	TotalItemPrice    *VintedPrice    `json:"total_item_price"`
+	PushUp            *WardrobePushUp `json:"push_up"`
+	Photos            []VintedPhoto   `json:"photos"`
+}
+
+type WardrobeResponse struct {
+	Items      []WardrobeItem      `json:"items"`
+	Pagination *WardrobePagination `json:"pagination,omitempty"`
 }
 
 type InboxUserPhoto struct {
@@ -755,6 +833,19 @@ func (c *Client) GetFavourites(vintedUserID int64, page string) (*FavoritesRespo
 	return favs, err
 }
 
+func (c *Client) GetWardrobe(vintedUserID int64, page, perPage int, order string) (*WardrobeResponse, error) {
+	wardrobe, err := c.doGetWardrobe(vintedUserID, page, perPage, order)
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] get wardrobe got %v, attempting token refresh...", err)
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, err
+		}
+		return c.doGetWardrobe(vintedUserID, page, perPage, order)
+	}
+	return wardrobe, err
+}
+
 func (c *Client) doGetFavourites(vintedUserID int64, page string) (*FavoritesResponse, error) {
 	if err := c.WarmUp(); err != nil {
 		log.Printf("[vinted] warmup failed: %v", err)
@@ -790,6 +881,59 @@ func (c *Client) doGetFavourites(vintedUserID int64, page string) (*FavoritesRes
 	}
 
 	return &favs, nil
+}
+
+func (c *Client) doGetWardrobe(vintedUserID int64, page, perPage int, order string) (*WardrobeResponse, error) {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before get wardrobe: %v", err)
+	}
+
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 20
+	}
+	if order == "" {
+		order = "relevance"
+	}
+
+	u := fmt.Sprintf(
+		"https://%s/api/v2/wardrobe/%d/items?page=%d&per_page=%d&order=%s",
+		c.session.Domain,
+		vintedUserID,
+		page,
+		perPage,
+		url.QueryEscape(order),
+	)
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create wardrobe request: %w", err)
+	}
+
+	req.Header = c.apiHeaders()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/member/%d", c.session.Domain, vintedUserID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("wardrobe request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] GET /api/v2/wardrobe/%d/items?page=%d&per_page=%d&order=%s -> %d (%.300s)", vintedUserID, page, perPage, order, resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var wardrobe WardrobeResponse
+	if err := json.Unmarshal(body, &wardrobe); err != nil {
+		return nil, fmt.Errorf("unmarshal wardrobe: %w", err)
+	}
+
+	return &wardrobe, nil
 }
 
 var isoCountryMap = map[string]string{

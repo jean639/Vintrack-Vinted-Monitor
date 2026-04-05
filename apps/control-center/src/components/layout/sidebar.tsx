@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart, MessageCircle, ExternalLink } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart, MessageCircle, ExternalLink, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -14,6 +14,7 @@ const navItems = [
   { href: "/feed", label: "Live Feed", icon: Radio },
   { href: "/proxies", label: "Proxy Groups", icon: Globe },
   { href: "/account", label: "Account", icon: User },
+  { href: "/your-listings", label: "Your Listings", icon: Store },
   { href: "/liked", label: "Liked Items", icon: Heart },
   { href: "/chats", label: "Chats", icon: MessageCircle },
   { href: "/guide", label: "Guide", icon: BookOpen },
