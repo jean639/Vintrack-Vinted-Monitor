@@ -86,17 +86,34 @@ export default function NewMonitorPage() {
         <CardContent className="p-6">
           <form action={createMonitor} className="space-y-6">
             <div className="space-y-2">
+              <Label htmlFor="name" className="text-[13px]">
+                Monitor Name
+              </Label>
+              <Input
+                name="name"
+                id="name"
+                placeholder="e.g. Nike Jackets DE"
+                required
+              />
+              <p className="text-[12px] text-muted-foreground">
+                Internal name for this monitor in the dashboard and notifications.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="query" className="text-[13px]">
-                Search Query
+                Keywords{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
               </Label>
               <Input
                 name="query"
                 id="query"
                 placeholder="e.g. Nike Dunk Low Grey"
-                required
               />
               <p className="text-[12px] text-muted-foreground">
-                This text will be searched on Vinted exactly as entered.
+                Optional Vinted text search. Leave empty if you only want to filter by category, brand, price, size, etc.
               </p>
             </div>
 

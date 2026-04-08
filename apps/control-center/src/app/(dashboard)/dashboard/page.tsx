@@ -22,6 +22,7 @@ export default async function DashboardPage() {
   const monitors: Monitor[] = await Promise.all(
     rawMonitors.map(async (m) => ({
       id: m.id,
+      name: m.name,
       query: m.query,
       status: m.status ?? "paused",
       price_max: m.price_max,

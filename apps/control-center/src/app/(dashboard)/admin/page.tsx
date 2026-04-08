@@ -37,6 +37,7 @@ export default async function AdminPage() {
         ],
         select: {
           id: true,
+          name: true,
           query: true,
           status: true,
           region: true,

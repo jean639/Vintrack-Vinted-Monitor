@@ -27,6 +27,7 @@ type ProxyGroupOption = {
 
 type MonitorData = {
   id: number;
+  name: string;
   query: string;
   price_min: number | null;
   price_max: number | null;
@@ -159,7 +160,7 @@ export default function EditMonitorPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Edit Monitor</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Update settings for &quot;{monitor.query}&quot;.
+            Update settings for &quot;{monitor.name}&quot;.
           </p>
         </div>
       </div>
@@ -169,18 +170,36 @@ export default function EditMonitorPage() {
           <form action={handleSave} className="space-y-6">
             <input type="hidden" name="return_to" value={returnTo} />
             <div className="space-y-2">
+              <Label htmlFor="name" className="text-[13px]">
+                Monitor Name
+              </Label>
+              <Input
+                name="name"
+                id="name"
+                placeholder="e.g. Nike Jackets DE"
+                defaultValue={monitor.name}
+                required
+              />
+              <p className="text-[12px] text-muted-foreground">
+                Internal name for this monitor in the dashboard and notifications.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="query" className="text-[13px]">
-                Search Query
+                Keywords{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
               </Label>
               <Input
                 name="query"
                 id="query"
                 placeholder="e.g. Nike Dunk Low Grey"
                 defaultValue={monitor.query}
-                required
               />
               <p className="text-[12px] text-muted-foreground">
-                This text will be searched on Vinted exactly as entered.
+                Optional Vinted text search. Leave empty if you only want to filter by category, brand, price, size, etc.
               </p>
             </div>
 

@@ -56,6 +56,7 @@ type MonitorHealth = {
 
 export type Monitor = {
   id: number;
+  name: string;
   query: string;
   status: string;
   price_max: number | null;
@@ -293,9 +294,9 @@ export function DashboardClient({
                   <div className="min-w-0 flex-1">
                     <h3
                       className="truncate text-[15px] font-semibold text-foreground"
-                      title={m.query}
+                      title={m.name}
                     >
-                      {m.query}
+                      {m.name}
                     </h3>
                     <div className="flex items-center gap-2 mt-1.5">
                       <Badge
@@ -498,9 +499,9 @@ export function DashboardClient({
             <DialogDescription>
               Configure notifications for{" "}
               <strong>
-                {selectedMonitor?.query && selectedMonitor.query.length > 50
-                  ? selectedMonitor.query.slice(0, 50) + "..."
-                  : selectedMonitor?.query}
+                {selectedMonitor?.name && selectedMonitor.name.length > 50
+                  ? selectedMonitor.name.slice(0, 50) + "..."
+                  : selectedMonitor?.name}
               </strong>.
             </DialogDescription>
           </DialogHeader>

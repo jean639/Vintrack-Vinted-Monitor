@@ -61,7 +61,7 @@ export default async function MonitorPage({
           <div>
             <div className="flex items-center gap-2.5">
               <h1 className="text-2xl font-bold tracking-tight">
-                {monitor.query}
+                {monitor.name}
               </h1>
               <Badge
                 variant={
@@ -86,6 +86,12 @@ export default async function MonitorPage({
             </div>
 
             <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+              {monitor.query && (
+                <>
+                  <span>Keywords: {monitor.query}</span>
+                  <span className="text-muted-foreground/50">·</span>
+                </>
+              )}
               <span>ID: {monitor.id}</span>
               {monitor.price_max && (
                 <>

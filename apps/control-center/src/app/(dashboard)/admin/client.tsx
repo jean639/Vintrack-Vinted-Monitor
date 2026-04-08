@@ -44,6 +44,7 @@ import { getRegionLabel } from "@/lib/regions";
 
 type UserMonitor = {
   id: number;
+  name: string;
   query: string;
   status: string | null;
   region: string;
@@ -671,7 +672,7 @@ export function AdminClient({
                         <div className="min-w-0 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-sm font-medium text-foreground">
-                              {monitor.query}
+                              {monitor.name}
                             </p>
                             <Badge className="bg-emerald-50 text-emerald-700">
                               Running
@@ -734,7 +735,7 @@ export function AdminClient({
                         <div className="min-w-0 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-sm font-medium text-foreground">
-                              {monitor.query}
+                              {monitor.name}
                             </p>
                             <Badge
                               variant={monitor.status === "active" ? "default" : "secondary"}
