@@ -65,6 +65,10 @@ export function getRegionLabel(code: string): string {
   return `${region.flag} ${region.label}`;
 }
 
+export function getRegionDomain(code: string): string {
+  return REGIONS_BY_CODE[code]?.domain ?? "vinted.de";
+}
+
 export function getRegionFlag(code: string): string {
   return REGIONS_BY_CODE[code]?.flag ?? "🌐";
 }
