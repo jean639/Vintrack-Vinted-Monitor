@@ -45,7 +45,7 @@ export async function GET(request: Request) {
         rating: true,
         seller_id: true,
         monitors: {
-          select: { query: true },
+          select: { name: true },
         },
       },
     });
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
       ...item,
       id: item.id.toString(),
       seller_id: item.seller_id?.toString() || null,
-      monitor_name: monitors?.query || "Unknown",
+      monitor_name: monitors?.name || "Unknown",
     }));
 
     return NextResponse.json(safeItems);
