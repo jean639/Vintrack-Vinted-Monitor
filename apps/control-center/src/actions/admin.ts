@@ -40,7 +40,7 @@ export async function getUsers() {
   return users;
 }
 
-async function sendPausedWebhook(query: string, monitorId: number, webhookUrl: string) {
+async function sendPausedWebhook(name: string, monitorId: number, webhookUrl: string) {
   try {
     const payload = {
       username: "Vintrack Monitor",
@@ -48,7 +48,7 @@ async function sendPausedWebhook(query: string, monitorId: number, webhookUrl: s
       embeds: [
         {
           title: "⏸️ Monitor Paused",
-          description: `The monitor **${query}** has been paused via User Management.`,
+          description: `The monitor **${name}** has been paused via User Management.`,
           color: 16753920,
           footer: {
             text: "Vintrack • Status Update",
@@ -90,7 +90,7 @@ export async function stopUserActiveMonitors(userId: string) {
     where: { userId, status: "active" },
     select: {
       id: true,
-      query: true,
+      name: true,
       discord_webhook: true,
       webhook_active: true,
     },
@@ -109,7 +109,7 @@ export async function stopUserActiveMonitors(userId: string) {
     monitorsToStop.map(async (monitor) => {
       if (monitor.discord_webhook && monitor.webhook_active) {
         await sendPausedWebhook(
-          monitor.query,
+          monitor.name,
           monitor.id,
           monitor.discord_webhook
         );
@@ -136,7 +136,7 @@ export async function stopSingleUserMonitor(userId: string, monitorId: number) {
     },
     select: {
       id: true,
-      query: true,
+      name: true,
       discord_webhook: true,
       webhook_active: true,
     },
@@ -152,7 +152,7 @@ export async function stopSingleUserMonitor(userId: string, monitorId: number) {
   });
 
   if (monitor.discord_webhook && monitor.webhook_active) {
-    sendPausedWebhook(monitor.query, monitor.id, monitor.discord_webhook).catch(
+    sendPausedWebhook(monitor.name, monitor.id, monitor.discord_webhook).catch(
       console.error
     );
   }
