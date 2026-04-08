@@ -28,6 +28,7 @@ type ProxyGroupOption = {
 export default function NewMonitorPage() {
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedCategoryLabels, setSelectedCategoryLabels] = useState<string[]>([]);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
@@ -198,6 +199,9 @@ export default function NewMonitorPage() {
                 region={selectedRegion}
                 selected={selectedCategories}
                 onChange={setSelectedCategories}
+                onSelectionMetaChange={({ selectedLabels }) =>
+                  setSelectedCategoryLabels(selectedLabels)
+                }
               />
               <input
                 type="hidden"
@@ -442,6 +446,18 @@ export default function NewMonitorPage() {
                     <Copy className="h-3.5 w-3.5" />
                   </button>
                 </div>
+                {selectedCategoryLabels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {selectedCategoryLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

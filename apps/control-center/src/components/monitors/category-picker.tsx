@@ -12,6 +12,7 @@ interface CategoryPickerProps {
   region: string;
   selected: string[];
   onChange: (ids: string[]) => void;
+  onSelectionMetaChange?: (meta: { selectedLabels: string[] }) => void;
 }
 
 function collectExpandedParents(nodes: CategoryNode[], selectedIds: Set<string>) {
@@ -37,7 +38,12 @@ function collectExpandedParents(nodes: CategoryNode[], selectedIds: Set<string>)
   return expanded;
 }
 
-export function CategoryPicker({ region, selected, onChange }: CategoryPickerProps) {
+export function CategoryPicker({
+  region,
+  selected,
+  onChange,
+  onSelectionMetaChange,
+}: CategoryPickerProps) {
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -86,6 +92,12 @@ export function CategoryPicker({ region, selected, onChange }: CategoryPickerPro
       })),
     [labelMap, selected]
   );
+
+  useEffect(() => {
+    onSelectionMetaChange?.({
+      selectedLabels: selectedLabels.map((item) => item.label),
+    });
+  }, [onSelectionMetaChange, selectedLabels]);
 
   const toggle = (id: number) => {
     const idStr = String(id);

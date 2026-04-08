@@ -59,13 +59,15 @@ export function buildVintedMonitorUrl({
   }
 
   appendList(params, "size_ids[]", sizeIds);
-  appendList(params, "catalog_ids[]", catalogIds);
+  appendList(params, "catalog[]", catalogIds);
   appendList(params, "brand_ids[]", brandIds);
   appendList(params, "color_ids[]", colorIds);
   appendList(params, "status_ids[]", statusIds);
 
   const queryString = params.toString();
+  const basePath = `https://${domain}/catalog`;
+
   return queryString
-    ? `https://${domain}/catalog?${queryString}`
-    : `https://${domain}/catalog`;
+    ? `${basePath}?${queryString}`
+    : basePath;
 }
