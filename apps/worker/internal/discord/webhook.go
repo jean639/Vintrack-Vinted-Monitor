@@ -15,7 +15,7 @@ import (
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
-func SendWebhook(webhookURL string, item model.Item, query string, proxySource string) {
+func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySource string) {
 	if webhookURL == "" {
 		return
 	}
@@ -43,7 +43,7 @@ func SendWebhook(webhookURL string, item model.Item, query string, proxySource s
 			"image":       map[string]string{"url": item.ImageURL},
 			"fields":      buildFields(item),
 			"footer": map[string]string{
-				"text":     fmt.Sprintf("Vintrack • Monitor #%d • %s", item.MonitorID, proxySource),
+				"text":     fmt.Sprintf("Vintrack • %s • %s", monitorName, proxySource),
 				"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
 			},
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -98,7 +98,7 @@ func SendWebhook(webhookURL string, item model.Item, query string, proxySource s
 	}
 }
 
-func SendStartupWebhook(webhookURL string, query string) {
+func SendStartupWebhook(webhookURL string, monitorName string) {
 	if webhookURL == "" {
 		return
 	}
@@ -109,7 +109,7 @@ func SendStartupWebhook(webhookURL string, query string) {
 		"embeds": []map[string]interface{}{
 			{
 				"title":       "⏳ Monitor Starting Up",
-				"description": fmt.Sprintf("The monitor **%s** is initializing in the backend. The initial scan is muted to avoid startup spam.", query),
+				"description": fmt.Sprintf("The monitor **%s** is initializing in the backend. The initial scan is muted to avoid startup spam.", monitorName),
 				"color":       3447003,
 				"footer": map[string]string{
 					"text":     "Vintrack • Startup",
@@ -158,7 +158,7 @@ func buildFields(item model.Item) []map[string]interface{} {
 	return fields
 }
 
-func SendProxyWarningWebhook(webhookURL string, query string, consecutiveErrors int) {
+func SendProxyWarningWebhook(webhookURL string, monitorName string, consecutiveErrors int) {
 	if webhookURL == "" {
 		return
 	}
@@ -169,7 +169,7 @@ func SendProxyWarningWebhook(webhookURL string, query string, consecutiveErrors 
 		"embeds": []map[string]interface{}{
 			{
 				"title":       "⚠️ Proxy Warning",
-				"description": fmt.Sprintf("The monitor **%s** is experiencing repeated proxy errors. Currently at **%d consecutive errors**.", query, consecutiveErrors),
+				"description": fmt.Sprintf("The monitor **%s** is experiencing repeated proxy errors. Currently at **%d consecutive errors**.", monitorName, consecutiveErrors),
 				"color":       16753920, // Orange
 				"footer": map[string]string{
 					"text":     "Vintrack • Health Warning",
@@ -191,7 +191,7 @@ func SendProxyWarningWebhook(webhookURL string, query string, consecutiveErrors 
 	}
 }
 
-func SendAutoStopWebhook(webhookURL string, query string, consecutiveErrors int) {
+func SendAutoStopWebhook(webhookURL string, monitorName string, consecutiveErrors int) {
 	if webhookURL == "" {
 		return
 	}
@@ -202,7 +202,7 @@ func SendAutoStopWebhook(webhookURL string, query string, consecutiveErrors int)
 		"embeds": []map[string]interface{}{
 			{
 				"title":       "🛑 Monitor Auto-Stopped",
-				"description": fmt.Sprintf("The monitor **%s** was automatically stopped due to reaching the maximum limit of **%d consecutive errors**.\nPlease check your proxy group.", query, consecutiveErrors),
+				"description": fmt.Sprintf("The monitor **%s** was automatically stopped due to reaching the maximum limit of **%d consecutive errors**.\nPlease check your proxy group.", monitorName, consecutiveErrors),
 				"color":       15548997, // Red
 				"footer": map[string]string{
 					"text":     "Vintrack • System Alert",

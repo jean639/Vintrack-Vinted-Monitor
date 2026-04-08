@@ -131,7 +131,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
 		})
 		if m.WebhookActive && m.DiscordWebhook.String != "" {
-			discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Query, -1)
+			discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, -1)
 		}
 		return
 	}
@@ -155,9 +155,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	initialized := false
 	var totalErrors int64
 
-	log.Printf("[%d] started | query=%q | race=%d | url=%s", m.ID, m.Query, raceFetchers, apiURL)
+	log.Printf("[%d] started | name=%q | query=%q | race=%d | url=%s", m.ID, m.Name, m.Query, raceFetchers, apiURL)
 	if m.WebhookActive && m.DiscordWebhook.String != "" {
-		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Query)
+		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Name)
 	}
 
 	reportHealth := func(lastErr string) {
@@ -323,7 +323,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				log.Printf("[%d] %d consecutive failures, backing off...", m.ID, consecutiveErrors)
 				if consecutiveErrors == 15 || consecutiveErrors == 30 {
 					if m.WebhookActive && m.DiscordWebhook.String != "" {
-						discord.SendProxyWarningWebhook(m.DiscordWebhook.String, m.Query, consecutiveErrors)
+						discord.SendProxyWarningWebhook(m.DiscordWebhook.String, m.Name, consecutiveErrors)
 					}
 				}
 			}
@@ -331,7 +331,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				log.Printf("[%d] ❌ auto-stopping: %d consecutive errors", m.ID, consecutiveErrors)
 				e.db.SetMonitorStatus(m.ID, "error")
 				if m.WebhookActive && m.DiscordWebhook.String != "" {
-					discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Query, consecutiveErrors)
+					discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, consecutiveErrors)
 				}
 				return
 			}
@@ -381,7 +381,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			e.db.MarkItemsSeen(m.ID, seedIDs)
 
 			seedBuiltItems := e.buildItems(m, seedItems)
-			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.Query, proxySource, enricher, domain, m.AllowedCountries, false)
+			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
 
 			initialized = true
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
@@ -424,7 +424,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		e.db.MarkItemsSeen(m.ID, newIDs)
 		initialized = true
 
-		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Query, proxySource, enricher, domain, m.AllowedCountries, true)
+		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -521,7 +521,7 @@ func resolveRedirectURL(currentURL string, location string) (string, error) {
 	return base.ResolveReference(next).String(), nil
 }
 
-func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, query string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
+func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, monitorName string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
 	if e.enrichSeller && enricher != nil {
 		sem := make(chan struct{}, 10)
 		var wg sync.WaitGroup
@@ -603,7 +603,7 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 				return
 			default:
 			}
-			discord.SendWebhook(webhook, items[i], query, ps)
+			discord.SendWebhook(webhook, items[i], monitorName, ps)
 		}
 	}
 }

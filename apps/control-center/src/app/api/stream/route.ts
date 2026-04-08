@@ -13,10 +13,10 @@ export async function GET(req: NextRequest) {
 
   const userMonitors = await db.monitors.findMany({
     where: { userId: session.user.id },
-    select: { id: true, query: true },
+    select: { id: true, name: true },
   });
   const monitorIds = new Set(userMonitors.map(m => m.id));
-  const monitorNames = new Map(userMonitors.map((monitor) => [monitor.id, monitor.query]));
+  const monitorNames = new Map(userMonitors.map((monitor) => [monitor.id, monitor.name]));
 
   const encoder = new TextEncoder();
   const stream = new TransformStream();

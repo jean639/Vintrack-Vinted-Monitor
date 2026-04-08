@@ -39,7 +39,6 @@ import {
   toggleWebhookStatus,
 } from "@/actions/dashboard-actions";
 import { testDiscordWebhook } from "@/actions/monitor";
-import { getCategoryLabels } from "@/lib/categories";
 import { getBrandLabels } from "@/lib/brands";
 import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
@@ -57,10 +56,12 @@ type MonitorHealth = {
 
 export type Monitor = {
   id: number;
+  name: string;
   query: string;
   status: string;
   price_max: number | null;
   catalog_ids: string | null;
+  category_labels: string[];
   brand_ids: string | null;
   color_ids: string | null;
   status_ids: string | null;
@@ -293,9 +294,9 @@ export function DashboardClient({
                   <div className="min-w-0 flex-1">
                     <h3
                       className="truncate text-[15px] font-semibold text-foreground"
-                      title={m.query}
+                      title={m.name}
                     >
-                      {m.query}
+                      {m.name}
                     </h3>
                     <div className="flex items-center gap-2 mt-1.5">
                       <Badge
@@ -371,8 +372,7 @@ export function DashboardClient({
                         {getRegionFlags(m.allowed_countries).join(" ")}
                       </span>
                     )}
-                    {m.catalog_ids &&
-                      getCategoryLabels(m.catalog_ids).map((label) => (
+                    {m.category_labels.map((label) => (
                         <span
                           key={`cat-${label}`}
                           className="inline-flex items-center rounded-md border border-violet-500/20 bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-medium text-violet-400"
@@ -499,9 +499,9 @@ export function DashboardClient({
             <DialogDescription>
               Configure notifications for{" "}
               <strong>
-                {selectedMonitor?.query && selectedMonitor.query.length > 50
-                  ? selectedMonitor.query.slice(0, 50) + "..."
-                  : selectedMonitor?.query}
+                {selectedMonitor?.name && selectedMonitor.name.length > 50
+                  ? selectedMonitor.name.slice(0, 50) + "..."
+                  : selectedMonitor?.name}
               </strong>.
             </DialogDescription>
           </DialogHeader>

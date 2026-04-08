@@ -10,9 +10,10 @@ export async function createMonitor(formData: FormData) {
 
   const session = await auth();
   if (!session?.user?.id) {
-     throw new Error("Nicht eingeloggt!");
+     throw new Error("Not logged in!");
   }
 
+  const name = formData.get("name") as string;
   const query = formData.get("query") as string;
   const priceMin = formData.get("price_min") ? Number(formData.get("price_min")) : null;
   const priceMax = formData.get("price_max") ? Number(formData.get("price_max")) : null;
@@ -26,8 +27,12 @@ export async function createMonitor(formData: FormData) {
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
-  if (!query || query.trim().length === 0) return;
-  if (query.length > 255) throw new Error("Query is too long");
+  const normalizedName = name?.trim() ?? "";
+  const normalizedQuery = query?.trim() ?? "";
+
+  if (!normalizedName) throw new Error("Name is required");
+  if (normalizedName.length > 255) throw new Error("Name is too long");
+  if (normalizedQuery.length > 255) throw new Error("Keywords are too long");
 
   let proxyGroupId: number | null = null;
 
@@ -67,7 +72,8 @@ export async function createMonitor(formData: FormData) {
   const monitor = await db.monitors.create({
     data: {
       userId: session.user.id,
-      query,
+      name: normalizedName,
+      query: normalizedQuery,
       price_min: priceMin,
       price_max: priceMax,
       size_id: sizeId,
@@ -92,7 +98,7 @@ export async function createMonitor(formData: FormData) {
         embeds: [
           {
             title: "🚀 New Monitor Created & Started",
-            description: `The monitor **${monitor.query}** has been successfully created and is now active.`,
+            description: `The monitor **${monitor.name}** has been successfully created and is now active.`,
             color: 3066993, // Green
             footer: {
               text: "Vintrack • Status Update",
@@ -121,6 +127,7 @@ export async function updateMonitor(id: number, formData: FormData) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
+  const name = formData.get("name") as string;
   const query = formData.get("query") as string;
   const priceMin = formData.get("price_min") ? Number(formData.get("price_min")) : null;
   const priceMax = formData.get("price_max") ? Number(formData.get("price_max")) : null;
@@ -135,8 +142,12 @@ export async function updateMonitor(id: number, formData: FormData) {
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
-  if (!query || query.trim().length === 0) return;
-  if (query.length > 255) throw new Error("Query is too long");
+  const normalizedName = name?.trim() ?? "";
+  const normalizedQuery = query?.trim() ?? "";
+
+  if (!normalizedName) throw new Error("Name is required");
+  if (normalizedName.length > 255) throw new Error("Name is too long");
+  if (normalizedQuery.length > 255) throw new Error("Keywords are too long");
 
   // Verify the monitor belongs to this user
   const existing = await db.monitors.findFirst({
@@ -174,7 +185,8 @@ export async function updateMonitor(id: number, formData: FormData) {
   await db.monitors.update({
     where: { id, userId: session.user.id },
     data: {
-      query,
+      name: normalizedName,
+      query: normalizedQuery,
       price_min: priceMin,
       price_max: priceMax,
       size_id: sizeId,
@@ -205,6 +217,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
+  const name = formData.get("name") as string;
   const query = formData.get("query") as string;
   const priceMin = formData.get("price_min") ? Number(formData.get("price_min")) : null;
   const priceMax = formData.get("price_max") ? Number(formData.get("price_max")) : null;
@@ -219,8 +232,12 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
-  if (!query || query.trim().length === 0) throw new Error("Query is required");
-  if (query.length > 255) throw new Error("Query is too long");
+  const normalizedName = name?.trim() ?? "";
+  const normalizedQuery = query?.trim() ?? "";
+
+  if (!normalizedName) throw new Error("Name is required");
+  if (normalizedName.length > 255) throw new Error("Name is too long");
+  if (normalizedQuery.length > 255) throw new Error("Keywords are too long");
 
   const existing = await db.monitors.findFirst({
     where: { id, userId: session.user.id },
@@ -257,7 +274,8 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
   await db.monitors.update({
     where: { id, userId: session.user.id },
     data: {
-      query,
+      name: normalizedName,
+      query: normalizedQuery,
       price_min: priceMin,
       price_max: priceMax,
       size_id: sizeId,
@@ -303,7 +321,7 @@ export async function toggleMonitorStatus(id: number, currentStatus: string) {
         embeds: [
           {
             title: isStarting ? "▶️ Monitor Started" : "⏸️ Monitor Paused",
-            description: `The monitor **${monitor.query}** has been ${isStarting ? "started" : "paused"}.`,
+            description: `The monitor **${monitor.name}** has been ${isStarting ? "started" : "paused"}.`,
             color: isStarting ? 3066993 : 16753920, // Green for start, Orange for pause
             footer: {
               text: "Vintrack • Status Update",

@@ -13,9 +13,10 @@ import { CountryFilterPicker } from "@/components/monitors/country-filter-picker
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
 import { getStatusLocaleForRegionCodes } from "@/lib/regions";
-import { ArrowLeft, Loader2, Save, Send, Trash2 } from "lucide-react";
+import { buildVintedMonitorUrl } from "@/lib/vinted-url";
+import { ArrowLeft, Copy, ExternalLink, Loader2, Save, Send, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -27,6 +28,7 @@ type ProxyGroupOption = {
 
 type MonitorData = {
   id: number;
+  name: string;
   query: string;
   price_min: number | null;
   price_max: number | null;
@@ -56,6 +58,9 @@ export default function EditMonitorPage() {
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [selectedRegion, setSelectedRegion] = useState<string>("de");
   const [selectedAllowedCountries, setSelectedAllowedCountries] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
   const [proxyGroups, setProxyGroups] = useState<ProxyGroupOption[]>([]);
   const [userRole, setUserRole] = useState<string>("free");
   const [selectedProxyGroup, setSelectedProxyGroup] = useState<string>("");
@@ -79,6 +84,15 @@ export default function EditMonitorPage() {
     }
   };
 
+  const handleCopyPreviewUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(previewUrl);
+      toast.success("Preview URL copied");
+    } catch {
+      toast.error("Failed to copy preview URL");
+    }
+  };
+
   useEffect(() => {
     Promise.all([
       fetch(`/api/monitors/${monitorId}`).then((r) => r.json()),
@@ -88,6 +102,9 @@ export default function EditMonitorPage() {
         const m = monitorData.monitor;
         if (m) {
           setMonitor(m);
+          setQuery(m.query || "");
+          setPriceMin(m.price_min != null ? String(m.price_min) : "");
+          setPriceMax(m.price_max != null ? String(m.price_max) : "");
           setSelectedSizes(m.size_id ? m.size_id.split(",").filter(Boolean) : []);
           setSelectedCategories(m.catalog_ids ? m.catalog_ids.split(",").filter(Boolean) : []);
           setSelectedBrands(m.brand_ids ? m.brand_ids.split(",").filter(Boolean) : []);
@@ -106,6 +123,32 @@ export default function EditMonitorPage() {
       })
       .catch(() => setLoading(false));
   }, [monitorId]);
+
+  const previewUrl = useMemo(
+    () =>
+      buildVintedMonitorUrl({
+        region: selectedRegion,
+        query,
+        priceMin,
+        priceMax,
+        sizeIds: selectedSizes,
+        catalogIds: selectedCategories,
+        brandIds: selectedBrands,
+        colorIds: selectedColors,
+        statusIds: selectedStatuses,
+      }),
+    [
+      selectedRegion,
+      query,
+      priceMin,
+      priceMax,
+      selectedSizes,
+      selectedCategories,
+      selectedBrands,
+      selectedColors,
+      selectedStatuses,
+    ]
+  );
 
   if (loading) {
     return (
@@ -159,7 +202,7 @@ export default function EditMonitorPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Edit Monitor</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Update settings for &quot;{monitor.query}&quot;.
+            Update settings for &quot;{monitor.name}&quot;.
           </p>
         </div>
       </div>
@@ -169,18 +212,37 @@ export default function EditMonitorPage() {
           <form action={handleSave} className="space-y-6">
             <input type="hidden" name="return_to" value={returnTo} />
             <div className="space-y-2">
+              <Label htmlFor="name" className="text-[13px]">
+                Monitor Name
+              </Label>
+              <Input
+                name="name"
+                id="name"
+                placeholder="e.g. Nike Jackets DE"
+                defaultValue={monitor.name}
+                required
+              />
+              <p className="text-[12px] text-muted-foreground">
+                Internal name for this monitor in the dashboard and notifications.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="query" className="text-[13px]">
-                Search Query
+                Keywords{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
               </Label>
               <Input
                 name="query"
                 id="query"
                 placeholder="e.g. Nike Dunk Low Grey"
-                defaultValue={monitor.query}
-                required
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
               />
               <p className="text-[12px] text-muted-foreground">
-                This text will be searched on Vinted exactly as entered.
+                Optional Vinted text search. Leave empty if you only want to filter by category, brand, price, size, etc.
               </p>
             </div>
 
@@ -221,6 +283,7 @@ export default function EditMonitorPage() {
                 </span>
               </Label>
               <CategoryPicker
+                region={selectedRegion}
                 selected={selectedCategories}
                 onChange={setSelectedCategories}
               />
@@ -247,8 +310,9 @@ export default function EditMonitorPage() {
                     type="number"
                     name="price_min"
                     placeholder="0"
-                    defaultValue={monitor.price_min ?? ""}
                     className="pl-7"
+                    value={priceMin}
+                    onChange={(event) => setPriceMin(event.target.value)}
                   />
                 </div>
               </div>
@@ -264,8 +328,9 @@ export default function EditMonitorPage() {
                     type="number"
                     name="price_max"
                     placeholder="Any"
-                    defaultValue={monitor.price_max ?? ""}
                     className="pl-7"
+                    value={priceMax}
+                    onChange={(event) => setPriceMax(event.target.value)}
                   />
                 </div>
               </div>
@@ -420,6 +485,42 @@ export default function EditMonitorPage() {
                   )}
                 </>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[13px]">Monitor URL Preview</Label>
+              <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[12px] text-muted-foreground">
+                    This is the exact Vinted catalog URL for the current filter setup.
+                  </p>
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted"
+                  >
+                    Test URL
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+                <div className="relative mt-3">
+                  <div className="overflow-x-auto rounded-lg border border-border/70 bg-background px-3 py-3 pr-12">
+                    <code className="block whitespace-pre-wrap break-all text-[11px] text-foreground/90">
+                      {previewUrl}
+                    </code>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyPreviewUrl}
+                    className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Copy preview URL"
+                    title="Copy URL"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">

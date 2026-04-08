@@ -64,6 +64,7 @@ model monitors {
   userId     String    
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  name       String    @db.VarChar(255)
   query      String    @db.VarChar(255)
   price_min  Int?
   price_max  Int?

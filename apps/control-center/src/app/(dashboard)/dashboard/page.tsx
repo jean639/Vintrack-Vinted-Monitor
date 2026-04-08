@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
+import { getCategoryLabelsForRegion } from "@/lib/categories.server";
 import { redirect } from "next/navigation";
 import { DashboardClient, type Monitor } from "./client";
 
@@ -18,24 +19,31 @@ export default async function DashboardPage() {
     }
   });
 
-  const monitors: Monitor[] = rawMonitors.map((m) => ({
-    id: m.id,
-    query: m.query,
-    status: m.status ?? "paused", 
-    price_max: m.price_max,
-    catalog_ids: m.catalog_ids ?? null,
-    brand_ids: m.brand_ids ?? null,
-    color_ids: m.color_ids ?? null,
-    status_ids: m.status_ids ?? null,
-    size_id: m.size_id ?? null,
-    region: m.region ?? "de",
-    allowed_countries: m.allowed_countries ?? null,
-    discord_webhook: m.discord_webhook ?? null,
-    webhook_active: m.webhook_active ?? true, 
-    proxy_group_name: m.proxy_group?.name ?? null,
-    _count: m._count,
-    created_at: m.created_at ? m.created_at.toISOString() : new Date().toISOString()
-  }));
+  const monitors: Monitor[] = await Promise.all(
+    rawMonitors.map(async (m) => ({
+      id: m.id,
+      name: m.name,
+      query: m.query,
+      status: m.status ?? "paused",
+      price_max: m.price_max,
+      catalog_ids: m.catalog_ids ?? null,
+      category_labels: await getCategoryLabelsForRegion(
+        m.catalog_ids,
+        m.region ?? "de"
+      ),
+      brand_ids: m.brand_ids ?? null,
+      color_ids: m.color_ids ?? null,
+      status_ids: m.status_ids ?? null,
+      size_id: m.size_id ?? null,
+      region: m.region ?? "de",
+      allowed_countries: m.allowed_countries ?? null,
+      discord_webhook: m.discord_webhook ?? null,
+      webhook_active: m.webhook_active ?? true,
+      proxy_group_name: m.proxy_group?.name ?? null,
+      _count: m._count,
+      created_at: m.created_at ? m.created_at.toISOString() : new Date().toISOString(),
+    }))
+  );
 
   return (
     <DashboardClient 

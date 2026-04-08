@@ -8,6 +8,7 @@ import (
 // Monitor represents a user-configured search monitor.
 type Monitor struct {
 	ID                   int
+	Name                 string
 	Query                string
 	PriceMin             *int
 	PriceMax             *int

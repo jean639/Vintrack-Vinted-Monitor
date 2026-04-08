@@ -28,7 +28,7 @@ export async function stopAllMonitors() {
             embeds: [
               {
                 title: "⏸️ Monitor Paused",
-                description: `The monitor **${monitor.query}** has been paused via Stop All.`,
+                description: `The monitor **${monitor.name}** has been paused via Stop All.`,
                 color: 16753920,
                 footer: {
                   text: "Vintrack • Status Update",
@@ -75,7 +75,7 @@ export async function toggleMonitor(id: number, currentStatus: string) {
         embeds: [
           {
             title: isStarting ? "▶️ Monitor Started" : "⏸️ Monitor Paused",
-            description: `The monitor **${monitor.query}** has been ${isStarting ? "started" : "paused"}.`,
+            description: `The monitor **${monitor.name}** has been ${isStarting ? "started" : "paused"}.`,
             color: isStarting ? 3066993 : 16753920,
             footer: {
               text: "Vintrack • Status Update",
