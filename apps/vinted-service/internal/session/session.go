@@ -16,10 +16,28 @@ type VintedSession struct {
 	VintedName   string `json:"vinted_name"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
+	CookieHeader string `json:"cookie_header,omitempty"`
+	CsrfToken    string `json:"csrf_token,omitempty"`
+	AnonID       string `json:"anon_id,omitempty"`
+	WarmedAt     string `json:"warmed_at,omitempty"`
+	UserAgent    string `json:"user_agent,omitempty"`
+	PhoneNumber  string `json:"phone_number,omitempty"`
 	Domain       string `json:"domain"`
 	Status       string `json:"status"`
 	LinkedAt     string `json:"linked_at"`
 	LastCheck    string `json:"last_check"`
+}
+
+type CheckoutLink struct {
+	ItemID        int64  `json:"item_id"`
+	SellerID      int64  `json:"seller_id"`
+	TransactionID int64  `json:"transaction_id"`
+	PurchaseID    string `json:"purchase_id,omitempty"`
+	CheckoutURL   string `json:"checkout_url,omitempty"`
+	PaymentURL    string `json:"payment_url,omitempty"`
+	Domain        string `json:"domain,omitempty"`
+	Status        string `json:"status"`
+	CreatedAt     string `json:"created_at"`
 }
 
 type Manager struct {
@@ -148,6 +166,44 @@ func (m *Manager) GetLikes(userID string) ([]int64, error) {
 
 func (m *Manager) DeleteLikes(userID string) error {
 	return m.redis.Del(m.ctx, m.likesKey(userID)).Err()
+}
+
+func (m *Manager) checkoutLinksKey(userID string) string {
+	return fmt.Sprintf("vinted:checkout-links:%s", userID)
+}
+
+func (m *Manager) AddCheckoutLink(userID string, link CheckoutLink) error {
+	data, err := json.Marshal(link)
+	if err != nil {
+		return fmt.Errorf("marshal checkout link: %w", err)
+	}
+
+	pipe := m.redis.TxPipeline()
+	pipe.LPush(m.ctx, m.checkoutLinksKey(userID), data)
+	pipe.LTrim(m.ctx, m.checkoutLinksKey(userID), 0, 99)
+	_, err = pipe.Exec(m.ctx)
+	return err
+}
+
+func (m *Manager) GetCheckoutLinks(userID string) ([]CheckoutLink, error) {
+	values, err := m.redis.LRange(m.ctx, m.checkoutLinksKey(userID), 0, 99).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	links := make([]CheckoutLink, 0, len(values))
+	for _, value := range values {
+		var link CheckoutLink
+		if err := json.Unmarshal([]byte(value), &link); err != nil {
+			continue
+		}
+		links = append(links, link)
+	}
+	return links, nil
+}
+
+func (m *Manager) DeleteCheckoutLinks(userID string) error {
+	return m.redis.Del(m.ctx, m.checkoutLinksKey(userID)).Err()
 }
 
 func (m *Manager) StartKeepAlive(validateFn func(sess *VintedSession) bool) {
