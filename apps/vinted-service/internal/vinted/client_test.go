@@ -2,8 +2,11 @@ package vinted
 
 import (
 	"testing"
+	"time"
 
 	"vintrack-vinted/internal/session"
+
+	http "github.com/bogdanfinn/fhttp"
 )
 
 func TestParseUserIDFromJWT_Valid(t *testing.T) {
@@ -153,5 +156,40 @@ func TestGetSession(t *testing.T) {
 	}
 	if got.Domain != "www.vinted.fr" {
 		t.Errorf("GetSession().Domain = %q, want %q", got.Domain, "www.vinted.fr")
+	}
+}
+
+func TestSerializeCookies(t *testing.T) {
+	cookies := []*http.Cookie{
+		{Name: "access_token_web", Value: "access"},
+		{Name: "anon_id", Value: "anon-1"},
+		{Name: "foo", Value: "bar"},
+		{Name: "anon_id", Value: "anon-2"},
+		{Name: "refresh_token_web", Value: "refresh"},
+	}
+
+	got := serializeCookies(cookies)
+	want := "anon_id=anon-2; foo=bar"
+	if got != want {
+		t.Fatalf("serializeCookies() = %q, want %q", got, want)
+	}
+}
+
+func TestCanReuseWarmup(t *testing.T) {
+	c := &Client{
+		session: &session.VintedSession{
+			CsrfToken: "csrf",
+			WarmedAt:  time.Now().UTC().Format(time.RFC3339),
+		},
+		csrfToken: "csrf",
+	}
+
+	if !c.canReuseWarmup() {
+		t.Fatal("canReuseWarmup() = false, want true for fresh cached warmup")
+	}
+
+	c.session.WarmedAt = time.Now().UTC().Add(-warmupReuseWindow - time.Minute).Format(time.RFC3339)
+	if c.canReuseWarmup() {
+		t.Fatal("canReuseWarmup() = true, want false for stale cached warmup")
 	}
 }

@@ -2,11 +2,12 @@
 
 import { memo, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { ExternalLink, ImageOff, Heart, MessageCircle, Send, Loader2, XIcon, ChevronLeft, ChevronRight, Tag, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { warmBuySession } from "@/lib/buy-session";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +58,8 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
   const [offerOpen, setOfferOpen] = useState(false);
   const [offerPrice, setOfferPrice] = useState("");
   const [sendingOffer, setSendingOffer] = useState(false);
+  const [buying, setBuying] = useState(false);
+  const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
 
   const allImages = item.image_url ? [item.image_url, ...(item.extra_images || [])] : [];
@@ -212,6 +215,73 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
     setSendingOffer(false);
   };
 
+  const runBuy = async () => {
+    if (!linked) {
+      toast.error("Link your Vinted account first (Account tab)");
+      return;
+    }
+    if (!item.seller_id) {
+      toast.error("Seller information is missing");
+      return;
+    }
+
+    setBuying(true);
+    try {
+      const res = await fetch("/api/items/buy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item_id: Number(item.id),
+          seller_id: Number(item.seller_id),
+          pickup_type: 1,
+          payment_method: {
+            card_id: null,
+            pay_in_method_id: "10",
+          },
+          browser_info: {
+            language: navigator.language || "en-DE",
+            color_depth: window.screen.colorDepth || 32,
+            java_enabled: false,
+            screen_height: window.screen.height || 1080,
+            screen_width: window.screen.width || 1920,
+            timezone_offset: new Date().getTimezoneOffset(),
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || `Buy failed (${res.status})`);
+        return;
+      }
+
+      if (data.payment_url) {
+        window.open(data.payment_url, "_blank", "noopener,noreferrer");
+        toast.success("Reserved. Opened PayPal.");
+        setBuyDialogOpen(false);
+      } else {
+        toast.error("Reserved, but Vinted did not return a PayPal link");
+      }
+    } catch {
+      toast.error("Network error — could not reach server");
+    } finally {
+      setBuying(false);
+    }
+  };
+
+  const handleBuy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!linked) {
+      toast.error("Link your Vinted account first (Account tab)");
+      return;
+    }
+    if (!item.seller_id) {
+      toast.error("Seller information is missing");
+      return;
+    }
+    setBuyDialogOpen(true);
+  };
+
   return (
     <div
       className={`group relative flex flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/92 transition-all duration-300 hover:-translate-y-0.5 hover:border-border hover:shadow-[0_20px_50px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.28)] ${
@@ -320,6 +390,23 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
           )}
           {linked && item.seller_id && (
             <>
+              <button
+                onClick={handleBuy}
+                onMouseEnter={() => {
+                  if (linked) {
+                    void warmBuySession();
+                  }
+                }}
+                disabled={buying}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-amber-400/25 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-70 cursor-pointer sm:h-7 sm:w-7"
+                title="Experimental PayPal checkout"
+              >
+                {buying ? (
+                  <Loader2 className="w-4 h-4 animate-spin sm:w-3.5 sm:h-3.5" />
+                ) : (
+                  <ShoppingCart className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                )}
+              </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -508,6 +595,32 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                 <Send className="w-4 h-4" />
               )}
               {sending ? "Sending..." : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={buyDialogOpen} onOpenChange={setBuyDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Experimental PayPal Checkout</DialogTitle>
+            <DialogDescription>
+              This buy flow is experimental and intentionally separated from the normal item actions.
+              It opens the Vinted PayPal checkout using the shipping address and checkout data already
+              stored on your linked Vinted account.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+            Use this only if your linked account is configured correctly in Vinted. Vintrack does not
+            override the delivery address here.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBuyDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={runBuy} disabled={buying} className="gap-2">
+              {buying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
+              {buying ? "Starting..." : "Continue to PayPal"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -25,12 +26,16 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/account/link", s.handleLink)
+	mux.HandleFunc("POST /api/account/phone", s.handleUpdatePhoneNumber)
 	mux.HandleFunc("DELETE /api/account/unlink", s.handleUnlink)
 	mux.HandleFunc("GET /api/account/status", s.handleStatus)
 	mux.HandleFunc("GET /api/account/info", s.handleInfo)
 
 	mux.HandleFunc("POST /api/items/like", s.handleLike)
 	mux.HandleFunc("POST /api/items/unlike", s.handleUnlike)
+	mux.HandleFunc("POST /api/items/buy", s.handleOneClickBuy)
+	mux.HandleFunc("POST /api/items/buy/warm", s.handleBuyWarm)
+	mux.HandleFunc("GET /api/items/checkout-links", s.handleCheckoutLinks)
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
 	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
 	mux.HandleFunc("GET /api/items/wardrobe", s.handleWardrobe)
@@ -81,6 +86,15 @@ func writeError(w http.ResponseWriter, msg string, status int) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*session.VintedSession, *vinted.Client, bool) {
 	userID := getUserID(r)
 	if userID == "" {
@@ -106,6 +120,8 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 
 	if err := client.WarmUp(); err != nil {
 		log.Printf("[session] warmup failed for user %s: %v", userID, err)
+	} else {
+		s.persistSessionIfChanged(sess, client.GetSession(), false)
 	}
 
 	if sess.Status != "active" {
@@ -143,6 +159,9 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 type linkRequest struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	CookieHeader string `json:"cookie_header"`
+	UserAgent    string `json:"user_agent"`
+	PhoneNumber  string `json:"phone_number"`
 	Domain       string `json:"domain"`
 }
 
@@ -172,6 +191,9 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 		UserID:       userID,
 		AccessToken:  req.AccessToken,
 		RefreshToken: req.RefreshToken,
+		CookieHeader: strings.TrimSpace(req.CookieHeader),
+		UserAgent:    strings.TrimSpace(req.UserAgent),
+		PhoneNumber:  strings.TrimSpace(req.PhoneNumber),
 		Domain:       req.Domain,
 		Status:       "active",
 		LinkedAt:     time.Now().UTC().Format(time.RFC3339),
@@ -194,10 +216,11 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess.VintedUserID = info.ID
-	sess.VintedName = info.Login
+	linkedSession := client.GetSession()
+	linkedSession.VintedUserID = info.ID
+	linkedSession.VintedName = info.Login
 
-	if err := s.sessions.Store(sess); err != nil {
+	if err := s.sessions.Store(*linkedSession); err != nil {
 		writeError(w, "failed to save session", 500)
 		return
 	}
@@ -205,10 +228,52 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[account] linked user %s -> @%s (ID: %d) on %s", userID, info.Login, info.ID, req.Domain)
 
 	writeJSON(w, 200, map[string]interface{}{
-		"linked":      true,
-		"vinted_name": info.Login,
-		"vinted_id":   info.ID,
-		"domain":      req.Domain,
+		"linked":              true,
+		"vinted_name":         info.Login,
+		"vinted_id":           info.ID,
+		"domain":              req.Domain,
+		"has_browser_session": linkedSession.CookieHeader != "",
+		"has_phone_number":    linkedSession.PhoneNumber != "",
+	})
+}
+
+type updatePhoneNumberRequest struct {
+	PhoneNumber string `json:"phone_number"`
+}
+
+func (s *Server) handleUpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	sess, err := s.sessions.Get(userID)
+	if err != nil {
+		writeError(w, "session fetch error", 500)
+		return
+	}
+	if sess == nil {
+		writeError(w, "no linked Vinted account", 404)
+		return
+	}
+
+	var req updatePhoneNumberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+
+	sess.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+	sess.LastCheck = time.Now().UTC().Format(time.RFC3339)
+	if err := s.sessions.Store(*sess); err != nil {
+		writeError(w, "failed to save phone number", 500)
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"has_phone_number": sess.PhoneNumber != "",
+		"last_check":       sess.LastCheck,
 	})
 }
 
@@ -224,6 +289,7 @@ func (s *Server) handleUnlink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.sessions.DeleteLikes(userID)
+	_ = s.sessions.DeleteCheckoutLinks(userID)
 
 	log.Printf("[account] unlinked user %s", userID)
 	writeJSON(w, 200, map[string]string{"status": "unlinked"})
@@ -248,13 +314,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{
-		"linked":      true,
-		"status":      sess.Status,
-		"vinted_name": sess.VintedName,
-		"vinted_id":   sess.VintedUserID,
-		"domain":      sess.Domain,
-		"linked_at":   sess.LinkedAt,
-		"last_check":  sess.LastCheck,
+		"linked":              true,
+		"status":              sess.Status,
+		"vinted_name":         sess.VintedName,
+		"vinted_id":           sess.VintedUserID,
+		"domain":              sess.Domain,
+		"linked_at":           sess.LinkedAt,
+		"last_check":          sess.LastCheck,
+		"has_browser_session": sess.CookieHeader != "",
+		"has_phone_number":    sess.PhoneNumber != "",
 	})
 }
 
@@ -327,6 +395,128 @@ func (s *Server) handleUnlike(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"status": "unliked", "item_id": req.ItemID})
 }
 
+type oneClickBuyRequest struct {
+	ItemID               int64                  `json:"item_id"`
+	SellerID             int64                  `json:"seller_id"`
+	IncogniaRequestToken string                 `json:"incognia_request_token"`
+	PickupType           int                    `json:"pickup_type"`
+	BrowserInfo          vinted.BrowserInfo     `json:"browser_info"`
+	PaymentMethod        map[string]interface{} `json:"payment_method"`
+	PhoneNumber          string                 `json:"phone_number"`
+}
+
+func (s *Server) handleOneClickBuy(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	var req oneClickBuyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+	if req.ItemID == 0 {
+		writeError(w, "item_id is required", 400)
+		return
+	}
+	if req.SellerID == 0 {
+		writeError(w, "seller_id is required", 400)
+		return
+	}
+
+	result, err := client.OneClickBuy(req.ItemID, vinted.OneClickBuyOptions{
+		SellerID:             req.SellerID,
+		IncogniaRequestToken: strings.TrimSpace(req.IncogniaRequestToken),
+		PickupType:           req.PickupType,
+		BrowserInfo:          req.BrowserInfo,
+		PaymentMethod:        req.PaymentMethod,
+		PhoneNumber:          firstNonEmpty(strings.TrimSpace(req.PhoneNumber), sess.PhoneNumber),
+	})
+	if err != nil {
+		var authErr *vinted.AuthError
+		if errors.As(err, &authErr) {
+			writeJSON(w, 401, map[string]interface{}{
+				"error":        "one-click buy failed: " + authErr.Error(),
+				"code":         "invalid_authentication_token",
+				"step":         authErr.Step,
+				"vinted_code":  authErr.VintedCode,
+				"vinted_error": authErr.Message,
+			})
+			return
+		}
+		var paymentMissingErr *vinted.PaymentURLMissingError
+		if errors.As(err, &paymentMissingErr) {
+			s.storeCheckoutLink(getUserID(r), sess, session.CheckoutLink{
+				ItemID:        req.ItemID,
+				SellerID:      req.SellerID,
+				TransactionID: paymentMissingErr.TransactionID,
+				PurchaseID:    paymentMissingErr.PurchaseID,
+				CheckoutURL:   paymentMissingErr.CheckoutURL,
+				Domain:        sess.Domain,
+				Status:        "payment_url_missing",
+				CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+			})
+			writeJSON(w, 409, map[string]interface{}{
+				"error":        "one-click buy failed: " + paymentMissingErr.Error(),
+				"code":         "payment_url_missing",
+				"purchase_id":  paymentMissingErr.PurchaseID,
+				"checkout_url": paymentMissingErr.CheckoutURL,
+				"payment_raw":  paymentMissingErr.Raw,
+			})
+			return
+		}
+		var paymentStateErr *vinted.PaymentStateError
+		if errors.As(err, &paymentStateErr) {
+			writeJSON(w, 409, map[string]interface{}{
+				"error":        "one-click buy failed: " + paymentStateErr.Error(),
+				"code":         paymentStateErr.Code,
+				"step":         paymentStateErr.Step,
+				"vinted_code":  paymentStateErr.VintedCode,
+				"vinted_error": paymentStateErr.Message,
+				"payment_raw":  paymentStateErr.Raw,
+			})
+			return
+		}
+		var challengeErr *vinted.DataDomeChallengeError
+		if errors.As(err, &challengeErr) {
+			writeJSON(w, 409, map[string]interface{}{
+				"error":       "one-click buy failed: " + challengeErr.Error(),
+				"code":        "datadome_challenge",
+				"step":        challengeErr.Step,
+				"captcha_url": challengeErr.CaptchaURL,
+			})
+			return
+		}
+		writeError(w, "one-click buy failed: "+err.Error(), 502)
+		return
+	}
+
+	s.storeCheckoutLink(getUserID(r), sess, session.CheckoutLink{
+		ItemID:        result.ItemID,
+		SellerID:      result.SellerID,
+		TransactionID: result.TransactionID,
+		PurchaseID:    result.PurchaseID,
+		CheckoutURL:   result.CheckoutURL,
+		PaymentURL:    result.PaymentURL,
+		Domain:        sess.Domain,
+		Status:        result.Status,
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+	})
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, result)
+}
+
+func (s *Server) handleBuyWarm(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, map[string]string{"status": "warmed"})
+}
+
 func (s *Server) handleLikedItems(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	if userID == "" {
@@ -341,6 +531,22 @@ func (s *Server) handleLikedItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{"item_ids": ids})
+}
+
+func (s *Server) handleCheckoutLinks(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	links, err := s.sessions.GetCheckoutLinks(userID)
+	if err != nil {
+		writeError(w, "failed to fetch checkout links", 500)
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{"links": links})
 }
 
 func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
@@ -496,15 +702,56 @@ func (s *Server) handleConversationReplies(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) persistIfRefreshed(original *session.VintedSession, client *vinted.Client) {
-	updated := client.GetSession()
-	if updated.AccessToken != original.AccessToken {
+	s.persistSessionIfChanged(original, client.GetSession(), true)
+}
+
+func (s *Server) persistSessionIfChanged(original *session.VintedSession, updated *session.VintedSession, markHealthy bool) {
+	if original == nil || updated == nil {
+		return
+	}
+	if !sessionChanged(original, updated) {
+		return
+	}
+
+	if markHealthy {
 		updated.Status = "active"
 		updated.LastCheck = time.Now().UTC().Format(time.RFC3339)
-		if err := s.sessions.Store(*updated); err != nil {
-			log.Printf("[server] failed to persist refreshed session for user %s: %v", updated.UserID, err)
-		} else {
-			log.Printf("[server] persisted refreshed tokens for user %s", updated.UserID)
-		}
+	}
+
+	if err := s.sessions.Store(*updated); err != nil {
+		log.Printf("[server] failed to persist session for user %s: %v", updated.UserID, err)
+		return
+	}
+
+	log.Printf("[server] persisted session update for user %s", updated.UserID)
+}
+
+func sessionChanged(original *session.VintedSession, updated *session.VintedSession) bool {
+	return original.AccessToken != updated.AccessToken ||
+		original.RefreshToken != updated.RefreshToken ||
+		original.CookieHeader != updated.CookieHeader ||
+		original.CsrfToken != updated.CsrfToken ||
+		original.AnonID != updated.AnonID ||
+		original.WarmedAt != updated.WarmedAt ||
+		original.Status != updated.Status ||
+		original.LastCheck != updated.LastCheck
+}
+
+func (s *Server) storeCheckoutLink(userID string, sess *session.VintedSession, link session.CheckoutLink) {
+	if userID == "" || sess == nil {
+		return
+	}
+	if strings.TrimSpace(link.CheckoutURL) == "" && strings.TrimSpace(link.PaymentURL) == "" {
+		return
+	}
+	if link.Domain == "" {
+		link.Domain = sess.Domain
+	}
+	if link.CreatedAt == "" {
+		link.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	if err := s.sessions.AddCheckoutLink(userID, link); err != nil {
+		log.Printf("[server] failed to store checkout link for user %s: %v", userID, err)
 	}
 }
 

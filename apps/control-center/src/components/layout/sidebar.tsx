@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart, MessageCircle, ExternalLink, Store } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Radio, LogOut, Globe, Shield, User, Star, BookOpen, X, Heart, MessageCircle, ExternalLink, Store, Link2, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -18,6 +18,10 @@ const navItems = [
   { href: "/liked", label: "Liked Items", icon: Heart },
   { href: "/chats", label: "Chats", icon: MessageCircle },
   { href: "/guide", label: "Guide", icon: BookOpen },
+];
+
+const experimentalNavItems = [
+  { href: "/checkout-links", label: "Checkout Links", icon: Link2 },
 ];
 
 const adminNavItems = [
@@ -125,6 +129,41 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
             <PlusCircle className="w-4 h-4 text-sidebar-foreground/45" />
             New Monitor
           </Link>
+        </div>
+
+        <div className="pt-4">
+          <p className="mb-2 px-3 text-[11px] font-medium uppercase tracking-widest text-sidebar-foreground/40">
+            Experimental
+          </p>
+          {experimentalNavItems.map((item) => {
+            const isActive =
+              pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onClose}
+                className={cn(
+                  "mb-1 flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
+                  isActive
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                    : "text-sidebar-foreground/68 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <item.icon
+                  className={cn(
+                    "h-4 w-4",
+                    isActive ? "text-sidebar-primary-foreground" : "text-sidebar-foreground/45"
+                  )}
+                />
+                {item.label}
+                <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                  <FlaskConical className="h-2.5 w-2.5" />
+                  Exp
+                </span>
+              </Link>
+            );
+          })}
         </div>
 
         <div className="pt-4">
