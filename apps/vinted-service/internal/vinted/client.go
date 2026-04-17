@@ -3,6 +3,7 @@ package vinted
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,10 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 )
 
+const defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+const defaultSecChUA = `"Google Chrome";v="146", "Chromium";v="146", "Not_A Brand";v="99"`
+const warmupReuseWindow = 10 * time.Minute
+
 type Client struct {
 	httpClient tls_client.HttpClient
 	session    *session.VintedSession
@@ -33,7 +38,7 @@ func NewClient(sess *session.VintedSession) (*Client, error) {
 
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(15),
-		tls_client.WithClientProfile(profiles.Chrome_131),
+		tls_client.WithClientProfile(profiles.Chrome_146),
 		tls_client.WithCookieJar(jar),
 	}
 
@@ -42,24 +47,55 @@ func NewClient(sess *session.VintedSession) (*Client, error) {
 		return nil, fmt.Errorf("create tls client: %w", err)
 	}
 
-	return &Client{httpClient: httpClient, session: sess}, nil
+	sessCopy := *sess
+	return &Client{httpClient: httpClient, session: &sessCopy}, nil
+}
+
+func (c *Client) userAgent() string {
+	if strings.TrimSpace(c.session.UserAgent) != "" {
+		return strings.TrimSpace(c.session.UserAgent)
+	}
+	return defaultUserAgent
+}
+
+func (c *Client) injectStoredCookies() {
+	if strings.TrimSpace(c.session.CookieHeader) == "" {
+		return
+	}
+	domainURL, _ := url.Parse(fmt.Sprintf("https://%s/", c.session.Domain))
+	c.httpClient.SetCookies(domainURL, parseCookieHeader(c.session.CookieHeader))
+}
+
+func (c *Client) injectCachedSessionContext() {
+	if strings.TrimSpace(c.session.CsrfToken) != "" {
+		c.csrfToken = strings.TrimSpace(c.session.CsrfToken)
+	}
+	if strings.TrimSpace(c.session.AnonID) == "" {
+		return
+	}
+
+	c.anonID = strings.TrimSpace(c.session.AnonID)
+	domainURL, _ := url.Parse(fmt.Sprintf("https://%s/", c.session.Domain))
+	c.httpClient.SetCookies(domainURL, []*http.Cookie{{
+		Name:  "anon_id",
+		Value: c.anonID,
+		Path:  "/",
+	}})
 }
 
 func (c *Client) injectAuthCookie() {
 	domainURL, _ := url.Parse(fmt.Sprintf("https://%s/", c.session.Domain))
-	c.httpClient.SetCookies(domainURL, []*http.Cookie{
-		{
-			Name:  "access_token_web",
-			Value: c.session.AccessToken,
-			Path:  "/",
-		},
-	})
+	cookies := []*http.Cookie{{Name: "access_token_web", Value: c.session.AccessToken, Path: "/"}}
+	if c.session.RefreshToken != "" {
+		cookies = append(cookies, &http.Cookie{Name: "refresh_token_web", Value: c.session.RefreshToken, Path: "/"})
+	}
+	c.httpClient.SetCookies(domainURL, cookies)
 }
 
 func (c *Client) apiHeaders() http.Header {
 	now := time.Now().UnixMilli()
 	h := http.Header{
-		"User-Agent":         {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+		"User-Agent":         {c.userAgent()},
 		"Accept":             {"application/json, text/plain, */*"},
 		"Accept-Language":    {"de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"},
 		"Cache-Control":      {"no-cache"},
@@ -71,7 +107,7 @@ func (c *Client) apiHeaders() http.Header {
 		"X-Local-Time":       {strconv.FormatInt(now, 10)},
 		"Origin":             {fmt.Sprintf("https://%s", c.session.Domain)},
 		"Referer":            {fmt.Sprintf("https://%s/", c.session.Domain)},
-		"Sec-Ch-Ua":          {`"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`},
+		"Sec-Ch-Ua":          {defaultSecChUA},
 		"Sec-Ch-Ua-Mobile":   {"?0"},
 		"Sec-Ch-Ua-Platform": {`"macOS"`},
 		"Sec-Fetch-Dest":     {"empty"},
@@ -140,14 +176,38 @@ func (c *Client) locale() string {
 }
 
 func (c *Client) WarmUp() error {
-	if c.warmedUp {
+	return c.warmUp(false)
+}
+
+func (c *Client) ForceWarmUp() error {
+	return c.warmUp(true)
+}
+
+func (c *Client) warmUp(force bool) error {
+	if c.warmedUp && !force {
+		return nil
+	}
+
+	if force {
+		c.warmedUp = false
+		c.csrfToken = ""
+		c.anonID = ""
+	}
+
+	c.injectStoredCookies()
+	c.injectAuthCookie()
+	c.injectCachedSessionContext()
+
+	if !force && c.canReuseWarmup() {
+		c.warmedUp = true
+		log.Printf("[vinted] reused cached warmup for %s, csrf=%v, anon_id=%v", c.session.Domain, c.csrfToken != "", c.anonID != "")
 		return nil
 	}
 
 	u := fmt.Sprintf("https://%s/", c.session.Domain)
 	req, _ := http.NewRequest("GET", u, nil)
 	req.Header = http.Header{
-		"User-Agent": {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+		"User-Agent": {c.userAgent()},
 		"Accept":     {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
 	}
 	resp, err := c.httpClient.Do(req)
@@ -184,10 +244,44 @@ func (c *Client) WarmUp() error {
 	}
 
 	c.injectAuthCookie()
+	c.rememberWarmupState()
 
 	c.warmedUp = true
 	log.Printf("[vinted] warmup done for %s, csrf=%v, anon_id=%v", c.session.Domain, c.csrfToken != "", c.anonID != "")
 	return nil
+}
+
+func (c *Client) canReuseWarmup() bool {
+	warmedAt := strings.TrimSpace(c.session.WarmedAt)
+	if warmedAt == "" {
+		return false
+	}
+
+	parsed, err := time.Parse(time.RFC3339, warmedAt)
+	if err != nil {
+		return false
+	}
+	if time.Since(parsed) > warmupReuseWindow {
+		return false
+	}
+
+	return c.csrfToken != "" || c.anonID != "" || strings.TrimSpace(c.session.CookieHeader) != ""
+}
+
+func (c *Client) rememberWarmupState() {
+	if c.csrfToken != "" {
+		c.session.CsrfToken = c.csrfToken
+	}
+	if c.anonID != "" {
+		c.session.AnonID = c.anonID
+	}
+	c.session.WarmedAt = time.Now().UTC().Format(time.RFC3339)
+
+	domainURL, _ := url.Parse(fmt.Sprintf("https://%s/", c.session.Domain))
+	serialized := serializeCookies(c.httpClient.GetCookies(domainURL))
+	if serialized != "" {
+		c.session.CookieHeader = serialized
+	}
 }
 
 func (c *Client) GetAccessToken() string {
@@ -564,7 +658,7 @@ func (c *Client) ValidateSession() bool {
 
 func (c *Client) LikeItem(itemID int64) error {
 	err := c.doLike(itemID)
-	if err != nil && strings.Contains(err.Error(), "HTTP 401") && c.session.RefreshToken != "" {
+	if err != nil && shouldAttemptTokenRefresh(err) && c.session.RefreshToken != "" {
 		log.Printf("[vinted] like got 401, attempting token refresh...")
 		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
 			log.Printf("[vinted] token refresh failed: %v", refreshErr)
@@ -621,7 +715,7 @@ func minInt(a, b int) int {
 
 func (c *Client) UnlikeItem(itemID int64) error {
 	err := c.doUnlike(itemID)
-	if err != nil && strings.Contains(err.Error(), "HTTP 401") && c.session.RefreshToken != "" {
+	if err != nil && shouldAttemptTokenRefresh(err) && c.session.RefreshToken != "" {
 		log.Printf("[vinted] unlike got 401, attempting token refresh...")
 		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
 			log.Printf("[vinted] token refresh failed: %v", refreshErr)
@@ -674,6 +768,37 @@ type BuyResponse struct {
 	CheckoutURL   string `json:"checkout_url"`
 }
 
+type BrowserInfo struct {
+	Language       string `json:"language"`
+	ColorDepth     int    `json:"color_depth"`
+	JavaEnabled    bool   `json:"java_enabled"`
+	ScreenHeight   int    `json:"screen_height"`
+	ScreenWidth    int    `json:"screen_width"`
+	TimezoneOffset int    `json:"timezone_offset"`
+}
+
+type OneClickBuyOptions struct {
+	SellerID             int64
+	IncogniaRequestToken string
+	PickupType           int
+	BrowserInfo          BrowserInfo
+	PaymentMethod        map[string]interface{}
+	PhoneNumber          string
+}
+
+type OneClickBuyResponse struct {
+	Status          string `json:"status"`
+	ItemID          int64  `json:"item_id"`
+	SellerID        int64  `json:"seller_id"`
+	TransactionID   int64  `json:"transaction_id"`
+	PurchaseID      string `json:"purchase_id"`
+	Checksum        string `json:"checksum,omitempty"`
+	CheckoutURL     string `json:"checkout_url,omitempty"`
+	ShippingOrderID int64  `json:"shipping_order_id,omitempty"`
+	PaymentURL      string `json:"payment_url,omitempty"`
+	PaymentRaw      string `json:"payment_raw,omitempty"`
+}
+
 func (c *Client) BuyItem(itemID int64) (*BuyResponse, error) {
 	if err := c.WarmUp(); err != nil {
 		log.Printf("[vinted] warmup failed before buy: %v", err)
@@ -707,6 +832,871 @@ func (c *Client) BuyItem(itemID int64) (*BuyResponse, error) {
 	}
 
 	return nil, fmt.Errorf("buy failed (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 200))
+}
+
+func (c *Client) OneClickBuy(itemID int64, opts OneClickBuyOptions) (*OneClickBuyResponse, error) {
+	result, err := c.doOneClickBuy(itemID, opts)
+	if err != nil && shouldAttemptTokenRefresh(err) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] one-click buy got auth error, attempting token refresh...")
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, fmt.Errorf("%w (auto-refresh failed: %v)", err, refreshErr)
+		}
+		return c.doOneClickBuy(itemID, opts)
+	}
+	return result, err
+}
+
+func (c *Client) doOneClickBuy(itemID int64, opts OneClickBuyOptions) (*OneClickBuyResponse, error) {
+	if itemID == 0 {
+		return nil, fmt.Errorf("item id is required")
+	}
+	if opts.SellerID == 0 {
+		return nil, fmt.Errorf("seller id is required")
+	}
+	if opts.PickupType == 0 {
+		opts.PickupType = 1
+	}
+	opts.BrowserInfo = defaultBrowserInfo(opts.BrowserInfo)
+	opts.PaymentMethod = defaultPaymentMethod(opts.PaymentMethod)
+	opts.PhoneNumber = strings.TrimSpace(opts.PhoneNumber)
+	if opts.PhoneNumber == "" {
+		opts.PhoneNumber = strings.TrimSpace(c.session.PhoneNumber)
+	}
+
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before one-click buy: %v", err)
+	}
+
+	transactionID, err := c.createBuyTransaction(itemID, opts.SellerID)
+	if err != nil {
+		return nil, err
+	}
+
+	build, err := c.buildPurchaseCheckout(itemID, transactionID, opts.IncogniaRequestToken)
+	if err != nil {
+		return nil, err
+	}
+	if build.PurchaseID == "" {
+		return nil, fmt.Errorf("checkout build did not return a purchase id")
+	}
+
+	paymentUpdate, err := c.updatePurchaseCheckout(build.PurchaseID, transactionID, map[string]interface{}{
+		"additional_service":      map[string]interface{}{},
+		"payment_method":          opts.PaymentMethod,
+		"shipping_address":        map[string]interface{}{},
+		"shipping_pickup_options": map[string]interface{}{"pickup_type": opts.PickupType},
+		"shipping_pickup_details": map[string]interface{}{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	mergeCheckoutBuildResult(build, paymentUpdate)
+
+	if opts.PhoneNumber != "" {
+		if build.ShippingOrderID == 0 {
+			log.Printf("[vinted] checkout update returned no shipping_order_id for purchase %s, retrying shipping bootstrap", build.PurchaseID)
+			shippingUpdate, err := c.updatePurchaseCheckout(build.PurchaseID, transactionID, map[string]interface{}{
+				"additional_service":      map[string]interface{}{},
+				"payment_method":          map[string]interface{}{},
+				"shipping_address":        map[string]interface{}{},
+				"shipping_pickup_options": map[string]interface{}{"pickup_type": opts.PickupType},
+				"shipping_pickup_details": map[string]interface{}{},
+			})
+			if err != nil {
+				return nil, err
+			}
+			mergeCheckoutBuildResult(build, shippingUpdate)
+		}
+
+		if build.ShippingOrderID > 0 {
+			contactUpdate, err := c.updateShippingContact(build.PurchaseID, transactionID, build.ShippingOrderID, opts.PhoneNumber)
+			if err != nil {
+				return nil, err
+			}
+			mergeCheckoutBuildResult(build, contactUpdate)
+		} else {
+			log.Printf("[vinted] phone number provided but checkout state did not expose shipping_order_id for purchase %s", build.PurchaseID)
+		}
+	}
+
+	payment, err := c.createPurchasePayment(build.PurchaseID, transactionID, build.Checksum, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	checkoutURL := build.CheckoutURL
+	if checkoutURL == "" {
+		checkoutURL = fmt.Sprintf("https://%s/checkout?purchase_id=%s&order_id=%d&order_type=transaction", c.session.Domain, url.QueryEscape(build.PurchaseID), transactionID)
+	}
+	if payment.URL == "" {
+		return nil, &PaymentURLMissingError{
+			TransactionID: transactionID,
+			PurchaseID:    build.PurchaseID,
+			CheckoutURL:   checkoutURL,
+			Raw:           payment.Raw,
+		}
+	}
+
+	return &OneClickBuyResponse{
+		Status:          "payment_url_created",
+		ItemID:          itemID,
+		SellerID:        opts.SellerID,
+		TransactionID:   transactionID,
+		PurchaseID:      build.PurchaseID,
+		Checksum:        build.Checksum,
+		CheckoutURL:     checkoutURL,
+		ShippingOrderID: build.ShippingOrderID,
+		PaymentURL:      payment.URL,
+		PaymentRaw:      payment.Raw,
+	}, nil
+}
+
+func defaultBrowserInfo(info BrowserInfo) BrowserInfo {
+	if info.Language == "" {
+		info.Language = "en-DE"
+	}
+	if info.ColorDepth == 0 {
+		info.ColorDepth = 32
+	}
+	if info.ScreenHeight == 0 {
+		info.ScreenHeight = 1080
+	}
+	if info.ScreenWidth == 0 {
+		info.ScreenWidth = 1920
+	}
+	return info
+}
+
+func defaultPaymentMethod(paymentMethod map[string]interface{}) map[string]interface{} {
+	if len(paymentMethod) > 0 {
+		return paymentMethod
+	}
+	return map[string]interface{}{
+		"card_id":          nil,
+		"pay_in_method_id": "10",
+	}
+}
+
+func (c *Client) createBuyTransaction(itemID, sellerID int64) (int64, error) {
+	convoURL := fmt.Sprintf("https://%s/api/v2/conversations", c.session.Domain)
+	payload := map[string]interface{}{
+		"initiator":        "buy",
+		"item_id":          fmt.Sprintf("%d", itemID),
+		"opposite_user_id": fmt.Sprintf("%d", sellerID),
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", convoURL, strings.NewReader(string(body)))
+	if err != nil {
+		return 0, fmt.Errorf("create buy conversation request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/items/%d", c.session.Domain, itemID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("buy conversation request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+	log.Printf("[vinted] POST /api/v2/conversations (buy) -> %d (%.300s)", resp.StatusCode, bodyStr)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, vintedHTTPError("buy conversation", resp.StatusCode, bodyStr)
+	}
+
+	var convoResp struct {
+		Conversation struct {
+			Transaction struct {
+				ID int64 `json:"id"`
+			} `json:"transaction"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal(respBody, &convoResp); err == nil && convoResp.Conversation.Transaction.ID > 0 {
+		return convoResp.Conversation.Transaction.ID, nil
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return 0, fmt.Errorf("parse buy conversation response: %w", err)
+	}
+	if txID, ok := int64AtPath(raw, "conversation", "transaction", "id"); ok {
+		return txID, nil
+	}
+	if txID, ok := int64AtPath(raw, "transaction", "id"); ok {
+		return txID, nil
+	}
+
+	return 0, fmt.Errorf("could not extract transaction ID from buy conversation response: %.200s", bodyStr)
+}
+
+type checkoutBuildResult struct {
+	PurchaseID      string
+	Checksum        string
+	CheckoutURL     string
+	ShippingOrderID int64
+}
+
+func (c *Client) buildPurchaseCheckout(itemID, transactionID int64, incogniaRequestToken string) (*checkoutBuildResult, error) {
+	buildURL := fmt.Sprintf("https://%s/api/v2/purchases/checkout/build", c.session.Domain)
+	payload := map[string]interface{}{
+		"purchase_items": []map[string]interface{}{
+			{"id": transactionID, "type": "transaction"},
+		},
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", buildURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("create checkout build request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/items/%d", c.session.Domain, itemID))
+	if incogniaRequestToken != "" {
+		req.Header.Set("X-Incognia-Request-Token", incogniaRequestToken)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("checkout build request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+	log.Printf("[vinted] POST /api/v2/purchases/checkout/build -> %d (%.300s)", resp.StatusCode, bodyStr)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, vintedHTTPError("checkout build", resp.StatusCode, bodyStr)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("parse checkout build response: %w", err)
+	}
+
+	result := &checkoutBuildResult{
+		PurchaseID:      firstStringPath(raw, []string{"purchase", "id"}, []string{"purchase", "uid"}, []string{"checkout", "purchase_id"}, []string{"checkout", "id"}, []string{"purchase_id"}),
+		Checksum:        firstStringPath(raw, []string{"checksum"}, []string{"checkout", "checksum"}, []string{"payment", "checksum"}),
+		CheckoutURL:     firstStringPath(raw, []string{"checkout_url"}, []string{"checkout", "url"}),
+		ShippingOrderID: firstInt64Path(raw, []string{"shipping_order_id"}, []string{"shippingOrderId"}, []string{"shipping_order", "id"}, []string{"shippingOrder", "id"}, []string{"checkout", "shipping_order_id"}, []string{"checkout", "shipping_order", "id"}),
+	}
+	if result.PurchaseID == "" {
+		result.PurchaseID = findLikelyPurchaseID(raw)
+	}
+	if result.Checksum == "" {
+		result.Checksum, _ = findStringByKey(raw, "checksum")
+	}
+	if result.CheckoutURL == "" {
+		result.CheckoutURL, _ = findURLContaining(raw, "/checkout")
+	}
+	if result.ShippingOrderID == 0 {
+		result.ShippingOrderID, _ = findInt64ByAnyKey(raw, "shipping_order_id", "shippingOrderId")
+	}
+
+	return result, nil
+}
+
+func (c *Client) updatePurchaseCheckout(purchaseID string, transactionID int64, components map[string]interface{}) (*checkoutBuildResult, error) {
+	checkoutURL := fmt.Sprintf("https://%s/api/v2/purchases/%s/checkout", c.session.Domain, url.PathEscape(purchaseID))
+	payload := map[string]interface{}{
+		"components": components,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("PUT", checkoutURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("create checkout update request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/checkout?purchase_id=%s&order_id=%d&order_type=transaction", c.session.Domain, url.QueryEscape(purchaseID), transactionID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("checkout update request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+	log.Printf("[vinted] PUT /api/v2/purchases/%s/checkout -> %d (%.300s)", purchaseID, resp.StatusCode, bodyStr)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, vintedHTTPError("checkout update", resp.StatusCode, bodyStr)
+	}
+
+	result := &checkoutBuildResult{}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err == nil {
+		result.PurchaseID = firstStringPath(raw, []string{"purchase", "id"}, []string{"purchase_id"})
+		result.Checksum = firstStringPath(raw, []string{"checksum"}, []string{"checkout", "checksum"}, []string{"payment", "checksum"})
+		result.CheckoutURL = firstStringPath(raw, []string{"checkout_url"}, []string{"checkout", "url"})
+		result.ShippingOrderID = firstInt64Path(raw, []string{"shipping_order_id"}, []string{"shippingOrderId"}, []string{"shipping_order", "id"}, []string{"shippingOrder", "id"}, []string{"checkout", "shipping_order_id"}, []string{"checkout", "shipping_order", "id"})
+		if result.Checksum == "" {
+			result.Checksum, _ = findStringByKey(raw, "checksum")
+		}
+		if result.CheckoutURL == "" {
+			result.CheckoutURL, _ = findURLContaining(raw, "/checkout")
+		}
+		if result.ShippingOrderID == 0 {
+			result.ShippingOrderID, _ = findInt64ByAnyKey(raw, "shipping_order_id", "shippingOrderId")
+		}
+	}
+	return result, nil
+}
+
+func mergeCheckoutBuildResult(target, source *checkoutBuildResult) {
+	if target == nil || source == nil {
+		return
+	}
+	if source.PurchaseID != "" {
+		target.PurchaseID = source.PurchaseID
+	}
+	if source.Checksum != "" {
+		target.Checksum = source.Checksum
+	}
+	if source.CheckoutURL != "" {
+		target.CheckoutURL = source.CheckoutURL
+	}
+	if source.ShippingOrderID > 0 {
+		target.ShippingOrderID = source.ShippingOrderID
+	}
+}
+
+func (c *Client) updateShippingContact(purchaseID string, transactionID, shippingOrderID int64, phoneNumber string) (*checkoutBuildResult, error) {
+	contactURL := fmt.Sprintf("https://%s/api/v2/shipping_orders/%d/shipping_contact", c.session.Domain, shippingOrderID)
+	payload := map[string]interface{}{
+		"save_for_later":        true,
+		"receiver_phone_number": strings.TrimSpace(phoneNumber),
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", contactURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("create shipping contact request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/checkout?purchase_id=%s&order_id=%d&order_type=transaction", c.session.Domain, url.QueryEscape(purchaseID), transactionID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("shipping contact request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+	log.Printf("[vinted] POST /api/v2/shipping_orders/%d/shipping_contact -> %d (%.300s)", shippingOrderID, resp.StatusCode, bodyStr)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, vintedHTTPError("shipping contact", resp.StatusCode, bodyStr)
+	}
+
+	result := &checkoutBuildResult{ShippingOrderID: shippingOrderID}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err == nil {
+		result.PurchaseID = firstStringPath(raw, []string{"purchase", "id"}, []string{"purchase_id"})
+		result.Checksum = firstStringPath(raw, []string{"checksum"}, []string{"checkout", "checksum"}, []string{"payment", "checksum"})
+		result.CheckoutURL = firstStringPath(raw, []string{"checkout_url"}, []string{"checkout", "url"})
+		if result.Checksum == "" {
+			result.Checksum, _ = findStringByKey(raw, "checksum")
+		}
+		if result.CheckoutURL == "" {
+			result.CheckoutURL, _ = findURLContaining(raw, "/checkout")
+		}
+		if parsedShippingOrderID, ok := findInt64ByAnyKey(raw, "shipping_order_id", "shippingOrderId"); ok && parsedShippingOrderID > 0 {
+			result.ShippingOrderID = parsedShippingOrderID
+		}
+	}
+	return result, nil
+}
+
+type paymentResult struct {
+	URL string
+	Raw string
+}
+
+func (c *Client) createPurchasePayment(purchaseID string, transactionID int64, checksum string, opts OneClickBuyOptions) (*paymentResult, error) {
+	if checksum == "" {
+		return nil, fmt.Errorf("checkout build response did not include checksum")
+	}
+
+	paymentURL := fmt.Sprintf("https://%s/api/v2/purchases/%s/checkout/payment", c.session.Domain, url.PathEscape(purchaseID))
+	payload := map[string]interface{}{
+		"checksum": checksum,
+		"payment_options": map[string]interface{}{
+			"browser_info": opts.BrowserInfo,
+		},
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", paymentURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("create checkout payment request: %w", err)
+	}
+	req.Header = c.apiHeadersWithBody()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/checkout?purchase_id=%s&order_id=%d&order_type=transaction", c.session.Domain, url.QueryEscape(purchaseID), transactionID))
+	if opts.IncogniaRequestToken != "" {
+		req.Header.Set("X-Incognia-Request-Token", opts.IncogniaRequestToken)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("checkout payment request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	bodyStr := strings.TrimSpace(string(respBody))
+	log.Printf("[vinted] POST /api/v2/purchases/%s/checkout/payment -> %d (%.300s)", purchaseID, resp.StatusCode, bodyStr)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, vintedHTTPError("checkout payment", resp.StatusCode, bodyStr)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("parse checkout payment response: %w", err)
+	}
+	result := &paymentResult{Raw: truncate(bodyStr, 2000)}
+	if u, ok := findURLContaining(raw, "paypal"); ok {
+		result.URL = u
+		return result, nil
+	}
+	if u := firstStringPath(
+		raw,
+		[]string{"payment_url"},
+		[]string{"redirect_url"},
+		[]string{"url"},
+		[]string{"payment", "url"},
+		[]string{"payment", "redirect_url"},
+		[]string{"action", "parameters", "url"},
+	); u != "" {
+		result.URL = u
+		return result, nil
+	}
+	return result, nil
+}
+
+func int64AtPath(raw map[string]interface{}, path ...string) (int64, bool) {
+	var current interface{} = raw
+	for _, part := range path {
+		obj, ok := current.(map[string]interface{})
+		if !ok {
+			return 0, false
+		}
+		current, ok = obj[part]
+		if !ok {
+			return 0, false
+		}
+	}
+	return interfaceToInt64(current)
+}
+
+func firstStringPath(raw map[string]interface{}, paths ...[]string) string {
+	for _, path := range paths {
+		if val, ok := stringAtPath(raw, path...); ok && val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func firstInt64Path(raw map[string]interface{}, paths ...[]string) int64 {
+	for _, path := range paths {
+		if val, ok := int64AtPath(raw, path...); ok && val > 0 {
+			return val
+		}
+	}
+	return 0
+}
+
+func stringAtPath(raw map[string]interface{}, path ...string) (string, bool) {
+	var current interface{} = raw
+	for _, part := range path {
+		obj, ok := current.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		current, ok = obj[part]
+		if !ok {
+			return "", false
+		}
+	}
+	val, ok := current.(string)
+	return val, ok
+}
+
+func findLikelyPurchaseID(v interface{}) string {
+	if s, ok := v.(string); ok {
+		if strings.Contains(s, "purchase_id=") {
+			if parsed, err := url.Parse(s); err == nil {
+				return parsed.Query().Get("purchase_id")
+			}
+		}
+		return ""
+	}
+	switch typed := v.(type) {
+	case map[string]interface{}:
+		for key, child := range typed {
+			if val, ok := child.(string); ok && strings.Contains(val, "purchase_id=") {
+				if parsed, err := url.Parse(val); err == nil {
+					if purchaseID := parsed.Query().Get("purchase_id"); purchaseID != "" {
+						return purchaseID
+					}
+				}
+			}
+			lowerKey := strings.ToLower(key)
+			if strings.Contains(lowerKey, "purchase") {
+				if val, ok := child.(string); ok && len(val) >= 12 && !isDigitsOnly(val) && !strings.Contains(val, "http") && !strings.Contains(val, "|") {
+					return val
+				}
+			}
+		}
+		for _, key := range []string{"purchase_id", "purchaseId"} {
+			if val, ok := typed[key].(string); ok && val != "" {
+				return val
+			}
+		}
+		for _, child := range typed {
+			if found := findLikelyPurchaseID(child); found != "" {
+				return found
+			}
+		}
+	case []interface{}:
+		for _, child := range typed {
+			if found := findLikelyPurchaseID(child); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
+}
+
+func findInt64ByAnyKey(v interface{}, keys ...string) (int64, bool) {
+	keySet := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		keySet[strings.ToLower(key)] = struct{}{}
+	}
+	return findInt64ByKeySet(v, keySet)
+}
+
+func findInt64ByKeySet(v interface{}, keys map[string]struct{}) (int64, bool) {
+	switch typed := v.(type) {
+	case map[string]interface{}:
+		for key, child := range typed {
+			if _, ok := keys[strings.ToLower(key)]; ok {
+				if val, converted := interfaceToInt64(child); converted && val > 0 {
+					return val, true
+				}
+			}
+		}
+		for _, child := range typed {
+			if val, ok := findInt64ByKeySet(child, keys); ok {
+				return val, true
+			}
+		}
+	case []interface{}:
+		for _, child := range typed {
+			if val, ok := findInt64ByKeySet(child, keys); ok {
+				return val, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func findStringByKey(v interface{}, key string) (string, bool) {
+	switch typed := v.(type) {
+	case map[string]interface{}:
+		if val, ok := typed[key].(string); ok {
+			return val, true
+		}
+		for _, child := range typed {
+			if val, ok := findStringByKey(child, key); ok {
+				return val, true
+			}
+		}
+	case []interface{}:
+		for _, child := range typed {
+			if val, ok := findStringByKey(child, key); ok {
+				return val, true
+			}
+		}
+	}
+	return "", false
+}
+
+func findURLContaining(v interface{}, needle string) (string, bool) {
+	switch typed := v.(type) {
+	case string:
+		lower := strings.ToLower(typed)
+		if (strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")) && strings.Contains(lower, strings.ToLower(needle)) {
+			return typed, true
+		}
+	case map[string]interface{}:
+		for _, child := range typed {
+			if val, ok := findURLContaining(child, needle); ok {
+				return val, true
+			}
+		}
+	case []interface{}:
+		for _, child := range typed {
+			if val, ok := findURLContaining(child, needle); ok {
+				return val, true
+			}
+		}
+	}
+	return "", false
+}
+
+func interfaceToInt64(v interface{}) (int64, bool) {
+	switch typed := v.(type) {
+	case float64:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case int:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseInt(typed, 10, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func isDigitsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+type DataDomeChallengeError struct {
+	Step       string
+	StatusCode int
+	CaptchaURL string
+}
+
+func (e *DataDomeChallengeError) Error() string {
+	if e.CaptchaURL != "" {
+		return fmt.Sprintf("datadome challenge at %s (HTTP %d): captcha_url=%s", e.Step, e.StatusCode, e.CaptchaURL)
+	}
+	return fmt.Sprintf("datadome challenge at %s (HTTP %d)", e.Step, e.StatusCode)
+}
+
+type PaymentURLMissingError struct {
+	TransactionID int64
+	PurchaseID    string
+	CheckoutURL   string
+	Raw           string
+}
+
+func (e *PaymentURLMissingError) Error() string {
+	return fmt.Sprintf("checkout payment did not return a PayPal/payment URL for purchase %s", e.PurchaseID)
+}
+
+type AuthError struct {
+	Step       string
+	StatusCode int
+	VintedCode int
+	Message    string
+}
+
+func (e *AuthError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("invalid authentication token at %s (HTTP %d): %s", e.Step, e.StatusCode, e.Message)
+	}
+	return fmt.Sprintf("invalid authentication token at %s (HTTP %d)", e.Step, e.StatusCode)
+}
+
+type PaymentStateError struct {
+	Step       string
+	StatusCode int
+	Code       string
+	VintedCode int
+	Message    string
+	Raw        string
+}
+
+func (e *PaymentStateError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("%s at %s (HTTP %d): %s", e.Code, e.Step, e.StatusCode, e.Message)
+	}
+	return fmt.Sprintf("%s at %s (HTTP %d)", e.Code, e.Step, e.StatusCode)
+}
+
+func vintedHTTPError(step string, statusCode int, body string) error {
+	if isInvalidAuthToken(body) {
+		authErr := &AuthError{Step: step, StatusCode: statusCode}
+		var raw struct {
+			Code        int    `json:"code"`
+			Message     string `json:"message"`
+			MessageCode string `json:"message_code"`
+		}
+		if err := json.Unmarshal([]byte(body), &raw); err == nil {
+			authErr.VintedCode = raw.Code
+			authErr.Message = raw.Message
+			if authErr.Message == "" {
+				authErr.Message = raw.MessageCode
+			}
+		}
+		return authErr
+	}
+	if isPaymentAlreadyProcessing(body) {
+		return paymentStateError(step, statusCode, "payment_already_processing", body)
+	}
+	if isPaymentMethodInvalid(body) {
+		return paymentStateError(step, statusCode, "payment_method_invalid", body)
+	}
+	if isPhoneRequired(body) {
+		return paymentStateError(step, statusCode, "phone_required", body)
+	}
+	if isDataDomeChallenge(body) {
+		return &DataDomeChallengeError{
+			Step:       step,
+			StatusCode: statusCode,
+			CaptchaURL: extractCaptchaURL(body),
+		}
+	}
+	return fmt.Errorf("%s failed (HTTP %d): %s", step, statusCode, truncate(body, 300))
+}
+
+func paymentStateError(step string, statusCode int, code string, body string) *PaymentStateError {
+	err := &PaymentStateError{
+		Step:       step,
+		StatusCode: statusCode,
+		Code:       code,
+		Raw:        truncate(body, 2000),
+	}
+	var raw struct {
+		Code        int    `json:"code"`
+		Message     string `json:"message"`
+		MessageCode string `json:"message_code"`
+		Errors      []struct {
+			Field string `json:"field"`
+			Value string `json:"value"`
+		} `json:"errors"`
+	}
+	if jsonErr := json.Unmarshal([]byte(body), &raw); jsonErr == nil {
+		err.VintedCode = raw.Code
+		err.Message = raw.Message
+		for _, fieldErr := range raw.Errors {
+			if fieldErr.Value != "" {
+				err.Message = fieldErr.Value
+				break
+			}
+		}
+		if err.Message == "" {
+			err.Message = raw.MessageCode
+		}
+	}
+	return err
+}
+
+func isInvalidAuthToken(body string) bool {
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "invalid_authentication_token") || strings.Contains(lower, "jeton d'authentification invalide")
+}
+
+func isPaymentAlreadyProcessing(body string) bool {
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "bezahlungsvorgang") &&
+		(strings.Contains(lower, "abgeschlossen") || strings.Contains(lower, "bearbeitet"))
+}
+
+func isPaymentMethodInvalid(body string) bool {
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "checkout_error") &&
+		(strings.Contains(lower, "purchase card is not valid") || strings.Contains(lower, "andere zahlungsmethode"))
+}
+
+func isPhoneRequired(body string) bool {
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "telefonnummer") && strings.Contains(lower, "erforderlich")
+}
+
+func isDataDomeChallenge(body string) bool {
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "captcha-delivery.com") || strings.Contains(lower, "datadome")
+}
+
+func extractCaptchaURL(body string) string {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(body), &raw); err == nil {
+		if u, ok := raw["url"].(string); ok && strings.Contains(strings.ToLower(u), "captcha-delivery.com") {
+			return u
+		}
+	}
+	re := regexp.MustCompile(`https://[^"'\s]+captcha-delivery\.com[^"'\s]+`)
+	if match := re.FindString(body); match != "" {
+		return match
+	}
+	return ""
+}
+
+func parseCookieHeader(header string) []*http.Cookie {
+	parts := strings.Split(header, ";")
+	cookies := make([]*http.Cookie, 0, len(parts))
+	for _, part := range parts {
+		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{
+			Name:  strings.TrimSpace(name),
+			Value: strings.TrimSpace(value),
+			Path:  "/",
+		})
+	}
+	return cookies
+}
+
+func serializeCookies(cookies []*http.Cookie) string {
+	if len(cookies) == 0 {
+		return ""
+	}
+
+	order := make([]string, 0, len(cookies))
+	values := make(map[string]string, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil {
+			continue
+		}
+
+		name := strings.TrimSpace(cookie.Name)
+		value := strings.TrimSpace(cookie.Value)
+		if name == "" || value == "" {
+			continue
+		}
+		if name == "access_token_web" || name == "refresh_token_web" {
+			continue
+		}
+		if _, exists := values[name]; !exists {
+			order = append(order, name)
+		}
+		values[name] = value
+	}
+
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		if value := values[name]; value != "" {
+			parts = append(parts, fmt.Sprintf("%s=%s", name, value))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func truncate(s string, maxLen int) string {
@@ -745,42 +1735,16 @@ func (c *Client) RefreshAccessToken() error {
 		{Name: "refresh_token_web", Value: c.session.RefreshToken, Path: "/"},
 	})
 
-	refreshURL := fmt.Sprintf("https://%s/web/api/auth/refresh", c.session.Domain)
-
-	req, err := http.NewRequest("POST", refreshURL, strings.NewReader(""))
+	_, err := c.executeRefreshRequest()
 	if err != nil {
-		return fmt.Errorf("create refresh request: %w", err)
-	}
-	req.Header = http.Header{
-		"User-Agent":         {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
-		"Accept":             {"application/json, text/plain, */*"},
-		"Accept-Language":    {c.locale()},
-		"Cache-Control":      {"no-cache"},
-		"Pragma":             {"no-cache"},
-		"Origin":             {fmt.Sprintf("https://%s", c.session.Domain)},
-		"Referer":            {fmt.Sprintf("https://%s/session-refresh?ref_url=%%2F", c.session.Domain)},
-		"Sec-Ch-Ua":          {`"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`},
-		"Sec-Ch-Ua-Mobile":   {"?0"},
-		"Sec-Ch-Ua-Platform": {`"macOS"`},
-		"Sec-Fetch-Dest":     {"empty"},
-		"Sec-Fetch-Mode":     {"cors"},
-		"Sec-Fetch-Site":     {"same-origin"},
-	}
-	if c.csrfToken != "" {
-		req.Header.Set("X-Csrf-Token", c.csrfToken)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("refresh request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("[vinted] POST /web/api/auth/refresh -> %d (%.200s)", resp.StatusCode, string(body))
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("refresh failed (HTTP %d): %s", resp.StatusCode, truncate(string(body), 200))
+		log.Printf("[vinted] refresh attempt failed, forcing fresh warmup and retrying once: %v", err)
+		if warmErr := c.ForceWarmUp(); warmErr != nil {
+			return fmt.Errorf("%v; force warmup failed: %w", err, warmErr)
+		}
+		_, err = c.executeRefreshRequest()
+		if err != nil {
+			return err
+		}
 	}
 
 	var newAccessToken, newRefreshToken string
@@ -794,17 +1758,6 @@ func (c *Client) RefreshAccessToken() error {
 	}
 
 	if newAccessToken == "" {
-		for _, cookie := range resp.Cookies() {
-			switch cookie.Name {
-			case "access_token_web":
-				newAccessToken = cookie.Value
-			case "refresh_token_web":
-				newRefreshToken = cookie.Value
-			}
-		}
-	}
-
-	if newAccessToken == "" {
 		return fmt.Errorf("refresh response did not contain new access token")
 	}
 
@@ -814,15 +1767,72 @@ func (c *Client) RefreshAccessToken() error {
 	}
 
 	c.injectAuthCookie()
+	c.rememberWarmupState()
 	c.warmedUp = false
 
 	log.Printf("[vinted] token refresh successful, new access token: %s...", truncate(newAccessToken, 20))
 	return nil
 }
 
+func (c *Client) executeRefreshRequest() ([]byte, error) {
+	refreshURL := fmt.Sprintf("https://%s/web/api/auth/refresh", c.session.Domain)
+
+	req, err := http.NewRequest("POST", refreshURL, strings.NewReader(""))
+	if err != nil {
+		return nil, fmt.Errorf("create refresh request: %w", err)
+	}
+	req.Header = http.Header{
+		"User-Agent":         {c.userAgent()},
+		"Accept":             {"application/json, text/plain, */*"},
+		"Accept-Language":    {c.locale()},
+		"Cache-Control":      {"no-cache"},
+		"Pragma":             {"no-cache"},
+		"Origin":             {fmt.Sprintf("https://%s", c.session.Domain)},
+		"Referer":            {fmt.Sprintf("https://%s/session-refresh?ref_url=%%2F", c.session.Domain)},
+		"Sec-Ch-Ua":          {defaultSecChUA},
+		"Sec-Ch-Ua-Mobile":   {"?0"},
+		"Sec-Ch-Ua-Platform": {`"macOS"`},
+		"Sec-Fetch-Dest":     {"empty"},
+		"Sec-Fetch-Mode":     {"cors"},
+		"Sec-Fetch-Site":     {"same-origin"},
+	}
+	if c.csrfToken != "" {
+		req.Header.Set("X-Csrf-Token", c.csrfToken)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] POST /web/api/auth/refresh -> %d (%.200s)", resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("refresh failed (HTTP %d): %s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	return body, nil
+}
+
+func shouldAttemptTokenRefresh(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var authErr *AuthError
+	if errors.As(err, &authErr) {
+		return true
+	}
+
+	msg := err.Error()
+	return strings.Contains(msg, "HTTP 401") || strings.Contains(msg, "HTTP 403")
+}
+
 func (c *Client) GetFavourites(vintedUserID int64, page string) (*FavoritesResponse, error) {
 	favs, err := c.doGetFavourites(vintedUserID, page)
-	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+	if err != nil && shouldAttemptTokenRefresh(err) && c.session.RefreshToken != "" {
 		log.Printf("[vinted] get favorites got %v, attempting token refresh...", err)
 		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
 			log.Printf("[vinted] token refresh failed: %v", refreshErr)
@@ -835,7 +1845,7 @@ func (c *Client) GetFavourites(vintedUserID int64, page string) (*FavoritesRespo
 
 func (c *Client) GetWardrobe(vintedUserID int64, page, perPage int, order string) (*WardrobeResponse, error) {
 	wardrobe, err := c.doGetWardrobe(vintedUserID, page, perPage, order)
-	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403")) && c.session.RefreshToken != "" {
+	if err != nil && shouldAttemptTokenRefresh(err) && c.session.RefreshToken != "" {
 		log.Printf("[vinted] get wardrobe got %v, attempting token refresh...", err)
 		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
 			log.Printf("[vinted] token refresh failed: %v", refreshErr)
