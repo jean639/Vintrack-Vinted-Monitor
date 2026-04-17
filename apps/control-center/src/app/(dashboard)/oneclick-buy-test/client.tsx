@@ -523,9 +523,9 @@ export function OneClickBuyTestClient() {
                 )}
                 {isDataDomeResult(result) && (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-                    Vinted returned a DataDome checkout challenge. Relink the account with the
-                    full Cookie header and matching User-Agent from the same logged-in browser
-                    session, then run this test again. The x-incognia-request-token is not a cookie.
+                    Vinted returned a DataDome checkout challenge. Relink the account with fresh
+                    tokens from the same logged-in browser session, then run this test again. The
+                    x-incognia-request-token is not a cookie.
                   </div>
                 )}
                 {isInvalidAuthResult(result) && (

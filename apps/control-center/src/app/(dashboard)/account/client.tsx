@@ -57,7 +57,6 @@ export function AccountClient({
   const [status, setStatus] = useState<AccountStatus>(initialStatus);
   const [accessToken, setAccessToken] = useState("");
   const [refreshToken, setRefreshToken] = useState("");
-  const [cookieHeader, setCookieHeader] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [linkedPhoneNumber, setLinkedPhoneNumber] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("de");
@@ -78,7 +77,6 @@ export function AccountClient({
         accessToken.trim(),
         `www.${selectedDomain}`,
         refreshToken.trim() || undefined,
-        cookieHeader.trim() || undefined,
         phoneNumber.trim() || undefined
       );
       if ("error" in result) {
@@ -87,7 +85,6 @@ export function AccountClient({
       }
       setAccessToken("");
       setRefreshToken("");
-      setCookieHeader("");
       setPhoneNumber("");
       setStatus({
         linked: true,
@@ -228,16 +225,16 @@ export function AccountClient({
             </div>
             <div className="rounded-md border border-border/80 bg-background/60 p-3 text-sm">
               <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">
-                Browser Session
+                Checkout Session
               </span>
               <p className="mt-1 font-medium">
                 {status.has_browser_session
-                  ? "Full browser cookie stored for experimental checkout / autobuy"
-                  : "Token-only session for normal account actions"}
+                  ? "Additional checkout session data cached automatically"
+                  : "Token-based session active"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Likes, offers, messages, and normal account linking work with tokens. A full cookie
-                header is only recommended for the experimental autobuy / PayPal checkout flow.
+                Managed automatically by Vintrack. No manual cookie input is required for normal
+                account actions or the experimental checkout flow.
               </p>
             </div>
             <div className="rounded-md border border-border/80 bg-background/60 p-3 text-sm">
@@ -369,33 +366,6 @@ export function AccountClient({
               />
               <p className="text-xs text-muted-foreground">
                 Providing the refresh token allows automatic token renewal so your session stays active.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="cookie-header">
-                  Full Cookie Header (Experimental Checkout / Autobuy Only)
-                </Label>
-                <Badge
-                  variant="secondary"
-                  className="h-5 border border-amber-500/25 bg-amber-500/10 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400"
-                >
-                  Experimental
-                </Badge>
-              </div>
-              <textarea
-                id="cookie-header"
-                value={cookieHeader}
-                onChange={(e) => setCookieHeader(e.target.value)}
-                placeholder="Optional. Only paste this if you want to use the experimental checkout / autobuy flow."
-                rows={5}
-                className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              <p className="text-xs text-muted-foreground">
-                Optional. Only needed for the experimental autobuy / PayPal checkout flow.
-                Normal account actions like likes, offers, messages, and token refresh do not
-                require a full cookie header.
               </p>
             </div>
 
