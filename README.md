@@ -96,13 +96,13 @@ Link your Vinted account directly in the dashboard to interact with listings wit
 - **Like / Unlike items** — one-click like/unlike from the feed or monitor view
 - **Send Offers** — make price offers directly to sellers (with built-in 60% minimum price validation)
 - **Message Sellers** — start a conversation or ask questions instantly
-- **Experimental PayPal checkout** — available in the separated Buy Lab and experimental feed action, using the shipping address and checkout data already stored in your linked Vinted account
+- **Experimental PayPal checkout** — available via the experimental feed action and checkout-link history, using the shipping address and checkout data already stored in your linked Vinted account
 - **Multi-Image Preview** — view extra images and high-res gallery directly in the dashboard
 - **Account management** — link/unlink with region selection (12 EU markets)
 - **Token Refresh** — support for `refresh_token` to maintain sessions long-term
 - **Status monitoring** — see your linked account status, username, and domain at a glance
 
-To link your account, grab your `access_token_web` (and optionally `refresh_token`) from Vinted's DevTools and paste it in the Account page. A full browser Cookie header is only recommended for the experimental autobuy / PayPal checkout flow, not for normal account actions.
+To link your account, grab your `access_token_web` (and optionally `refresh_token`) from Vinted's DevTools and paste it in the Account page.
 
 ### Experimental Buy Disclaimer
 
