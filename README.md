@@ -52,7 +52,6 @@ You can test Vintrack live at:
 - **Default role:** New accounts are assigned **Free**
 - **Important:** Persistent server proxies are not guaranteed on the demo instance, so reliability may vary over time
 
-
 ---
 
 ## Why Vintrack?
@@ -65,6 +64,7 @@ Built for resellers who need speed. Open-sourced for the community.
 - **Anti-detection** — TLS fingerprint rotation with proxy support
 - **Granular filters** — price, size, category, brand, color, and country/region
 - **Direct Interaction** — Like items, send offers, and message sellers from the dashboard
+- **Experimental checkout tooling** — oneclick reserve button and checkout-link history for controlled PayPal checkouts
 - **Full dashboard** — no CLI needed, everything from the browser
 - **One-command deploy** — `docker compose up` and you're live
 
@@ -73,10 +73,13 @@ Built for resellers who need speed. Open-sourced for the community.
 ## Features
 
 ### Real-Time Monitoring
+
 Create unlimited monitors with custom search queries. Each monitor polls the Vinted API independently with configurable intervals (default: 1.5s). Results are deduplicated via Redis — you'll never see the same item twice.
 
 ### Advanced Filters
+
 Fine-tune every monitor with:
+
 - **Search query** — keyword-based filtering
 - **Price range** — min/max price boundaries
 - **Categories** — over 900+ Vinted categories supported
@@ -87,29 +90,49 @@ Fine-tune every monitor with:
 - **Region** — choose the Vinted market per monitor (e.g. `vinted.de`, `vinted.hu`, `vinted.fr`)
 
 ### Vinted Account Linking & Interactions
+
 Link your Vinted account directly in the dashboard to interact with listings without leaving Vintrack:
+
 - **Like / Unlike items** — one-click like/unlike from the feed or monitor view
 - **Send Offers** — make price offers directly to sellers (with built-in 60% minimum price validation)
 - **Message Sellers** — start a conversation or ask questions instantly
+- **Experimental PayPal checkout** — available in the separated Buy Lab and experimental feed action, using the shipping address and checkout data already stored in your linked Vinted account
 - **Multi-Image Preview** — view extra images and high-res gallery directly in the dashboard
 - **Account management** — link/unlink with region selection (12 EU markets)
 - **Token Refresh** — support for `refresh_token` to maintain sessions long-term
 - **Status monitoring** — see your linked account status, username, and domain at a glance
 
-To link your account, grab your `access_token_web` (and optionally `refresh_token`) from Vinted's DevTools and paste it in the Account page.
+To link your account, grab your `access_token_web` (and optionally `refresh_token`) from Vinted's DevTools and paste it in the Account page. A full browser Cookie header is only recommended for the experimental autobuy / PayPal checkout flow, not for normal account actions.
+
+### Experimental Buy Disclaimer
+
+Vintrack includes an experimental buy module for controlled checkout tests. It is intentionally separated from the normal monitoring workflow.
+
+- The buy module is experimental and may break when Vinted changes authentication or checkout protection.
+- Use a dedicated buy account for this module, not your main personal Vinted account.
+- The PayPal checkout flow uses the shipping address, checkout details, and payment context already stored on your linked Vinted account.
+- Vintrack opens the returned PayPal payment link, but it does not fully complete the purchase inside Vintrack itself.
+- Vintrack does not replace or override your delivery address in this flow.
+- A valid `refresh_token_web` is strongly recommended, otherwise automatic session recovery may fail.
+- Use the experimental buy actions only if you understand that they may reserve an item before the PayPal step is completed.
 
 ### Discord Notifications
+
 Rich embed webhooks sent instantly when a new item is found:
+
 - Item image, title, price (including fees), size, condition
 - Seller region & rating (enriched via HTML scraping)
 - Direct buy link + app deep link + dashboard link
 - Per-webhook toggle — pause without deleting
 
 ### Live Feed
+
 Server-Sent Events (SSE) stream items directly to the dashboard in real-time. See every new listing appear the moment it's detected — no manual refresh needed.
 
 ### Proxy System
+
 Two-tier proxy architecture designed for scale:
+
 - **Server proxies** — shared pool for premium users
 - **User proxy groups** — BYOP (Bring Your Own Proxies) for free users
 - Automatic rotation with `tls-client` TLS fingerprint spoofing
@@ -118,6 +141,7 @@ Two-tier proxy architecture designed for scale:
 - Note: `vinted.co.uk` does not support IPv6 proxies. Use IPv4 proxies for UK monitors.
 
 ### Multi-User & Roles
+
 Built-in role system with Discord OAuth:
 | Role | Server Proxies | Own Proxies | Admin Panel |
 |------|:-:|:-:|:-:|
@@ -198,6 +222,7 @@ Need help, want to exchange setups with other users, or report a bug?
 ```
 
 **Data flow:**
+
 1. User creates a monitor via the dashboard
 2. Go Worker detects the new monitor within 5s and starts a goroutine
 3. Goroutine polls Vinted API through rotating proxies
@@ -209,18 +234,18 @@ Need help, want to exchange setups with other users, or report a bug?
 
 ## Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Frontend** | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui | Dashboard & UI |
-| **Backend** | Next.js Server Actions, API Routes | API & auth |
-| **Worker** | Go 1.25, tls-client, goroutines | High-perf scraping |
-| **Vinted Service** | Go 1.25, TLS client, Redis sessions | Account linking & item actions |
-| **Database** | PostgreSQL 15 + Prisma ORM | Persistent storage |
-| **Cache** | Redis 7 | Deduplication & SSE pub/sub |
-| **Auth** | NextAuth.js v5 (Discord OAuth2) | Authentication |
-| **Proxy** | tls-client with SOCKS4/5 & HTTP(S) | Anti-detection |
-| **Reverse Proxy** | Caddy 2 | Auto HTTPS via Let's Encrypt |
-| **Deployment** | Docker Compose | One-command orchestration |
+| Layer              | Technology                                      | Purpose                        |
+| ------------------ | ----------------------------------------------- | ------------------------------ |
+| **Frontend**       | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui | Dashboard & UI                 |
+| **Backend**        | Next.js Server Actions, API Routes              | API & auth                     |
+| **Worker**         | Go 1.25, tls-client, goroutines                 | High-perf scraping             |
+| **Vinted Service** | Go 1.25, TLS client, Redis sessions             | Account linking & item actions |
+| **Database**       | PostgreSQL 15 + Prisma ORM                      | Persistent storage             |
+| **Cache**          | Redis 7                                         | Deduplication & SSE pub/sub    |
+| **Auth**           | NextAuth.js v5 (Discord OAuth2)                 | Authentication                 |
+| **Proxy**          | tls-client with SOCKS4/5 & HTTP(S)              | Anti-detection                 |
+| **Reverse Proxy**  | Caddy 2                                         | Auto HTTPS via Let's Encrypt   |
+| **Deployment**     | Docker Compose                                  | One-command orchestration      |
 
 ---
 
@@ -317,6 +342,7 @@ Contributions are welcome! Here's how:
 5. Open a Pull Request
 
 Please make sure to:
+
 - Follow existing code style
 - Test your changes with `docker compose up --build`
 - Update documentation if needed
