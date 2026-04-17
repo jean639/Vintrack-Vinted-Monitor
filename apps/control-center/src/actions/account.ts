@@ -70,11 +70,10 @@ export async function getAccountStatus(): Promise<VintedAccountStatus> {
 }
 
 export async function linkVintedAccount(
-    accessToken: string,
-    domain: string,
-    refreshToken?: string,
-    cookieHeader?: string,
-    phoneNumber?: string,
+  accessToken: string,
+  domain: string,
+  refreshToken?: string,
+  phoneNumber?: string,
 ) {
     return apiFetch<{
         linked: boolean;
@@ -89,7 +88,6 @@ export async function linkVintedAccount(
             access_token: accessToken,
             domain,
             refresh_token: refreshToken || "",
-            cookie_header: cookieHeader || "",
             phone_number: phoneNumber || "",
         }),
     });
