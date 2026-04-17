@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { warmBuySession } from "@/lib/buy-session";
 
 type AccountContextType = {
   linked: boolean;
@@ -45,6 +46,13 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       .catch(() => setLinked(false))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!linked) {
+      return;
+    }
+    void warmBuySession();
+  }, [linked]);
 
   const addLike = useCallback((id: number) => {
     setLikedIds((prev) => new Set(prev).add(id));
