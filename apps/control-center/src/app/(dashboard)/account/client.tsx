@@ -33,6 +33,7 @@ import {
   unlinkVintedAccount,
   getAccountStatus,
   refreshVintedSession,
+  updateVintedPhoneNumber,
 } from "@/actions/account";
 import { toast } from "sonner";
 
@@ -44,6 +45,8 @@ export interface AccountStatus {
   domain?: string;
   linked_at?: string;
   last_check?: string;
+  has_browser_session?: boolean;
+  has_phone_number?: boolean;
 }
 
 export function AccountClient({
@@ -54,6 +57,9 @@ export function AccountClient({
   const [status, setStatus] = useState<AccountStatus>(initialStatus);
   const [accessToken, setAccessToken] = useState("");
   const [refreshToken, setRefreshToken] = useState("");
+  const [cookieHeader, setCookieHeader] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [linkedPhoneNumber, setLinkedPhoneNumber] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("de");
   const [isVintedIdVisible, setIsVintedIdVisible] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -71,20 +77,26 @@ export function AccountClient({
       const result = await linkVintedAccount(
         accessToken.trim(),
         `www.${selectedDomain}`,
-        refreshToken.trim() || undefined
+        refreshToken.trim() || undefined,
+        cookieHeader.trim() || undefined,
+        phoneNumber.trim() || undefined
       );
-      if (result.error) {
+      if ("error" in result) {
         toast.error(result.error);
         return;
       }
       setAccessToken("");
       setRefreshToken("");
+      setCookieHeader("");
+      setPhoneNumber("");
       setStatus({
         linked: true,
         status: "active",
         vinted_name: result.vinted_name,
         vinted_id: result.vinted_id,
         domain: result.domain,
+        has_browser_session: result.has_browser_session,
+        has_phone_number: result.has_phone_number,
         linked_at: new Date().toISOString(),
         last_check: new Date().toISOString(),
       });
@@ -119,6 +131,27 @@ export function AccountClient({
       toast.success("Token refreshed successfully");
       const updated = await getAccountStatus();
       setStatus(updated);
+    });
+  };
+
+  const handlePhoneUpdate = () => {
+    startTransition(async () => {
+      const result = await updateVintedPhoneNumber(linkedPhoneNumber.trim());
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      setStatus((current) => ({
+        ...current,
+        has_phone_number: result.has_phone_number,
+        last_check: result.last_check,
+      }));
+      if (result.has_phone_number) {
+        setLinkedPhoneNumber("");
+        toast.success("Shipping phone number saved");
+      } else {
+        toast.success("Shipping phone number cleared");
+      }
     });
   };
 
@@ -191,6 +224,47 @@ export function AccountClient({
                     ? new Date(status.last_check).toLocaleString()
                     : "—"}
                 </p>
+              </div>
+            </div>
+            <div className="rounded-md border border-border/80 bg-background/60 p-3 text-sm">
+              <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">
+                Browser Session
+              </span>
+              <p className="mt-1 font-medium">
+                {status.has_browser_session
+                  ? "Full browser cookie stored for experimental checkout / autobuy"
+                  : "Token-only session for normal account actions"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Likes, offers, messages, and normal account linking work with tokens. A full cookie
+                header is only recommended for the experimental autobuy / PayPal checkout flow.
+              </p>
+            </div>
+            <div className="rounded-md border border-border/80 bg-background/60 p-3 text-sm">
+              <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">
+                Shipping Contact
+              </span>
+              <p className="mt-1 font-medium">
+                {status.has_phone_number
+                  ? "Phone number stored for checkout"
+                  : "No phone number stored"}
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={linkedPhoneNumber}
+                  onChange={(e) => setLinkedPhoneNumber(e.target.value)}
+                  placeholder="Set or clear phone number, e.g. +491234567890"
+                  className="bg-background"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePhoneUpdate}
+                  disabled={isPending}
+                  className="sm:w-auto"
+                >
+                  Save
+                </Button>
               </div>
             </div>
             <div className="flex flex-col xs:flex-row gap-2">
@@ -298,6 +372,47 @@ export function AccountClient({
               </p>
             </div>
 
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="cookie-header">
+                  Full Cookie Header (Experimental Checkout / Autobuy Only)
+                </Label>
+                <Badge
+                  variant="secondary"
+                  className="h-5 border border-amber-500/25 bg-amber-500/10 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                >
+                  Experimental
+                </Badge>
+              </div>
+              <textarea
+                id="cookie-header"
+                value={cookieHeader}
+                onChange={(e) => setCookieHeader(e.target.value)}
+                placeholder="Optional. Only paste this if you want to use the experimental checkout / autobuy flow."
+                rows={5}
+                className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional. Only needed for the experimental autobuy / PayPal checkout flow.
+                Normal account actions like likes, offers, messages, and token refresh do not
+                require a full cookie header.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone-number">Shipping Phone Number</Label>
+              <Input
+                id="phone-number"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                placeholder="Optional for checkout, e.g. +491234567890"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used only when Vinted requires a receiver phone number before creating the PayPal
+                payment redirect.
+              </p>
+            </div>
+
             <Button
               onClick={handleLink}
               disabled={!accessToken.trim() || isPending}
@@ -374,17 +489,17 @@ export function AccountClient({
               </div>
               <div>
                 <span className="font-medium text-foreground">
-                  One-click buy
+                  Experimental PayPal checkout
                 </span>
                 <span className="text-muted-foreground ml-1">
-                  — from monitor feed
+                  — uses the shipping address saved in your linked Vinted account
                 </span>
               </div>
               <Badge
                 variant="secondary"
                 className="ml-auto text-[10px] bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400"
               >
-                Coming Soon
+                Experimental
               </Badge>
             </li>
             <li className="flex items-center gap-3">
