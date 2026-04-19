@@ -16,6 +16,8 @@ type VintedAccountStatus = {
     linked_at?: string;
     last_check?: string;
     has_browser_session?: boolean;
+    browser_linked?: boolean;
+    last_browser_sync?: string;
     has_phone_number?: boolean;
 };
 
@@ -81,6 +83,8 @@ export async function linkVintedAccount(
         vinted_id: number;
         domain: string;
         has_browser_session: boolean;
+        browser_linked: boolean;
+        last_browser_sync?: string;
         has_phone_number: boolean;
     }>("/api/account/link", {
         method: "POST",
@@ -106,6 +110,16 @@ export async function updateVintedPhoneNumber(phoneNumber: string) {
     }>("/api/account/phone", {
         method: "POST",
         body: JSON.stringify({ phone_number: phoneNumber }),
+    });
+}
+
+export async function updateVintedDomain(domain: string) {
+    return apiFetch<{
+        domain: string;
+        last_check: string;
+    }>("/api/account/domain", {
+        method: "POST",
+        body: JSON.stringify({ domain }),
     });
 }
 

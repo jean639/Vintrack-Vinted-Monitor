@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,11 +24,20 @@ func NewServer(sessions *session.Manager, addr string) *Server {
 	return &Server{sessions: sessions, listenAddr: addr}
 }
 
+const browserSyncTTL = 10 * time.Minute
+const browserLinkTTL = 180 * 24 * time.Hour
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/account/link", s.handleLink)
+	mux.HandleFunc("POST /api/account/browser-sync/start", s.handleBrowserSyncStart)
+	mux.HandleFunc("GET /api/account/browser-sync/status", s.handleBrowserSyncStatus)
+	mux.HandleFunc("POST /api/account/browser-sync/complete", s.handleBrowserSyncComplete)
+	mux.HandleFunc("POST /api/account/browser-link/create", s.handleBrowserLinkCreate)
+	mux.HandleFunc("POST /api/account/extension-sync/complete", s.handleExtensionSyncComplete)
 	mux.HandleFunc("POST /api/account/phone", s.handleUpdatePhoneNumber)
+	mux.HandleFunc("POST /api/account/domain", s.handleUpdateDomain)
 	mux.HandleFunc("DELETE /api/account/unlink", s.handleUnlink)
 	mux.HandleFunc("GET /api/account/status", s.handleStatus)
 	mux.HandleFunc("GET /api/account/info", s.handleInfo)
@@ -36,6 +47,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/items/buy", s.handleOneClickBuy)
 	mux.HandleFunc("POST /api/items/buy/warm", s.handleBuyWarm)
 	mux.HandleFunc("GET /api/items/checkout-links", s.handleCheckoutLinks)
+	mux.HandleFunc("POST /api/items/checkout-links", s.handleStoreCheckoutLink)
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
 	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
 	mux.HandleFunc("GET /api/items/wardrobe", s.handleWardrobe)
@@ -95,6 +107,125 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func extractHeaderValue(raw, name string) string {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	for _, line := range lines {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(key), name) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func normalizeCookieHeader(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.Contains(trimmed, "\n") {
+		if cookieHeader := extractHeaderValue(trimmed, "cookie"); cookieHeader != "" {
+			return cookieHeader
+		}
+	}
+
+	if key, value, ok := strings.Cut(trimmed, ":"); ok && strings.EqualFold(strings.TrimSpace(key), "cookie") {
+		return strings.TrimSpace(value)
+	}
+
+	return trimmed
+}
+
+func extractCookieValue(header, name string) string {
+	for _, part := range strings.Split(header, ";") {
+		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(key), name) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func normalizeVintedDomain(raw string) string {
+	normalized := strings.TrimSpace(strings.ToLower(raw))
+	if normalized == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(normalized, "http://") || strings.HasPrefix(normalized, "https://") {
+		if parsed, err := url.Parse(normalized); err == nil && parsed.Host != "" {
+			normalized = parsed.Hostname()
+		}
+	}
+
+	normalized = strings.TrimPrefix(normalized, ".")
+	normalized = strings.TrimSuffix(normalized, ".")
+
+	if strings.HasPrefix(normalized, "www.") {
+		return normalized
+	}
+
+	if normalized == "vinted.co.uk" {
+		return "www.vinted.co.uk"
+	}
+
+	if strings.HasPrefix(normalized, "vinted.") {
+		return "www." + normalized
+	}
+
+	return normalized
+}
+
+func normalizeBrowserSessionInput(accessToken, refreshToken, cookieHeader, userAgent string) (string, string, string, string, error) {
+	normalizedCookieHeader := normalizeCookieHeader(cookieHeader)
+	normalizedUserAgent := strings.TrimSpace(userAgent)
+
+	if normalizedUserAgent == "" && strings.Contains(strings.TrimSpace(cookieHeader), "\n") {
+		normalizedUserAgent = extractHeaderValue(cookieHeader, "user-agent")
+	}
+
+	normalizedAccessToken := strings.TrimSpace(accessToken)
+	normalizedRefreshToken := strings.TrimSpace(refreshToken)
+
+	if normalizedCookieHeader != "" {
+		if normalizedAccessToken == "" {
+			normalizedAccessToken = extractCookieValue(normalizedCookieHeader, "access_token_web")
+		}
+		if normalizedRefreshToken == "" {
+			normalizedRefreshToken = extractCookieValue(normalizedCookieHeader, "refresh_token_web")
+		}
+	}
+
+	if normalizedAccessToken == "" {
+		return "", "", "", "", errors.New("access_token is required or must be present in the cookie header")
+	}
+
+	return normalizedAccessToken, normalizedRefreshToken, normalizedCookieHeader, normalizedUserAgent, nil
+}
+
+func (s *Server) canonicalizeSessionDomain(sess *session.VintedSession) {
+	if sess == nil {
+		return
+	}
+
+	normalized := normalizeVintedDomain(sess.Domain)
+	if normalized == "" || normalized == sess.Domain {
+		return
+	}
+
+	sess.Domain = normalized
+	if err := s.sessions.Store(*sess); err != nil {
+		log.Printf("[server] failed to persist canonical domain for user %s: %v", sess.UserID, err)
+	}
+}
+
 func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*session.VintedSession, *vinted.Client, bool) {
 	userID := getUserID(r)
 	if userID == "" {
@@ -111,6 +242,8 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 		writeError(w, "no linked Vinted account", 404)
 		return nil, nil, false
 	}
+
+	s.canonicalizeSessionDomain(sess)
 
 	client, err := vinted.NewClient(sess)
 	if err != nil {
@@ -165,6 +298,91 @@ type linkRequest struct {
 	Domain       string `json:"domain"`
 }
 
+type browserSyncCompleteRequest struct {
+	Code         string `json:"code"`
+	CookieHeader string `json:"cookie_header"`
+	UserAgent    string `json:"user_agent"`
+	Domain       string `json:"domain"`
+}
+
+type extensionSyncCompleteRequest struct {
+	LinkToken    string `json:"link_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	UserAgent    string `json:"user_agent"`
+	Domain       string `json:"domain"`
+}
+
+func (s *Server) buildLinkedSession(userID string, req linkRequest) (*session.VintedSession, error) {
+	accessToken, refreshToken, cookieHeader, userAgent, err := normalizeBrowserSessionInput(
+		req.AccessToken,
+		req.RefreshToken,
+		req.CookieHeader,
+		req.UserAgent,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	existingSession, err := s.sessions.Get(userID)
+	if err != nil {
+		return nil, fmt.Errorf("session fetch error: %w", err)
+	}
+
+	phoneNumber := strings.TrimSpace(req.PhoneNumber)
+	if phoneNumber == "" && existingSession != nil {
+		phoneNumber = existingSession.PhoneNumber
+	}
+
+	domain := normalizeVintedDomain(req.Domain)
+	if domain == "" {
+		return nil, errors.New("domain is required")
+	}
+
+	if userAgent == "" && existingSession != nil {
+		userAgent = strings.TrimSpace(existingSession.UserAgent)
+	}
+
+	preservedCookieHeader := cookieHeader
+	if preservedCookieHeader == "" && existingSession != nil {
+		preservedCookieHeader = strings.TrimSpace(existingSession.CookieHeader)
+	}
+
+	preservedCsrfToken := ""
+	preservedAnonID := ""
+	if existingSession != nil {
+		preservedCsrfToken = strings.TrimSpace(existingSession.CsrfToken)
+		preservedAnonID = strings.TrimSpace(existingSession.AnonID)
+	}
+
+	linkedAt := time.Now().UTC().Format(time.RFC3339)
+	if existingSession != nil && strings.TrimSpace(existingSession.LinkedAt) != "" {
+		linkedAt = existingSession.LinkedAt
+	}
+
+	return &session.VintedSession{
+		UserID:        userID,
+		AccessToken:   accessToken,
+		RefreshToken:  refreshToken,
+		CookieHeader:  preservedCookieHeader,
+		CsrfToken:     preservedCsrfToken,
+		AnonID:        preservedAnonID,
+		UserAgent:     userAgent,
+		PhoneNumber:   phoneNumber,
+		BrowserLinked: existingSession != nil && existingSession.BrowserLinked,
+		LastBrowserSync: firstNonEmpty(func() string {
+			if existingSession == nil {
+				return ""
+			}
+			return existingSession.LastBrowserSync
+		}()),
+		Domain:    domain,
+		Status:    "active",
+		LinkedAt:  linkedAt,
+		LastCheck: time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
 func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	if userID == "" {
@@ -178,29 +396,22 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.AccessToken == "" {
-		writeError(w, "access_token is required", 400)
-		return
-	}
 	if req.Domain == "" {
 		writeError(w, "domain is required", 400)
 		return
 	}
 
-	sess := session.VintedSession{
-		UserID:       userID,
-		AccessToken:  req.AccessToken,
-		RefreshToken: req.RefreshToken,
-		CookieHeader: strings.TrimSpace(req.CookieHeader),
-		UserAgent:    strings.TrimSpace(req.UserAgent),
-		PhoneNumber:  strings.TrimSpace(req.PhoneNumber),
-		Domain:       req.Domain,
-		Status:       "active",
-		LinkedAt:     time.Now().UTC().Format(time.RFC3339),
-		LastCheck:    time.Now().UTC().Format(time.RFC3339),
+	sess, err := s.buildLinkedSession(userID, req)
+	if err != nil {
+		statusCode := 400
+		if strings.Contains(err.Error(), "session fetch error") {
+			statusCode = 500
+		}
+		writeError(w, err.Error(), statusCode)
+		return
 	}
 
-	client, err := vinted.NewClient(&sess)
+	client, err := vinted.NewClient(sess)
 	if err != nil {
 		writeError(w, "failed to create client: "+err.Error(), 500)
 		return
@@ -233,12 +444,321 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 		"vinted_id":           info.ID,
 		"domain":              req.Domain,
 		"has_browser_session": linkedSession.CookieHeader != "",
+		"browser_linked":      linkedSession.BrowserLinked,
+		"last_browser_sync":   linkedSession.LastBrowserSync,
 		"has_phone_number":    linkedSession.PhoneNumber != "",
+	})
+}
+
+func (s *Server) handleBrowserSyncStart(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	req, err := s.sessions.CreateBrowserSyncRequest(userID, browserSyncTTL)
+	if err != nil {
+		writeError(w, "failed to create browser sync request", 500)
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"code":       req.Code,
+		"status":     req.Status,
+		"created_at": req.CreatedAt,
+		"expires_at": req.ExpiresAt,
+	})
+}
+
+func (s *Server) handleBrowserSyncStatus(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		writeError(w, "code is required", 400)
+		return
+	}
+
+	req, err := s.sessions.GetBrowserSyncRequest(code)
+	if err != nil {
+		writeError(w, "browser sync fetch error", 500)
+		return
+	}
+	if req == nil || req.UserID != userID {
+		writeError(w, "browser sync request not found", 404)
+		return
+	}
+
+	writeJSON(w, 200, req)
+}
+
+func (s *Server) handleBrowserSyncComplete(w http.ResponseWriter, r *http.Request) {
+	var req browserSyncCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+
+	req.Code = strings.TrimSpace(req.Code)
+	req.Domain = strings.TrimSpace(req.Domain)
+	if req.Code == "" {
+		writeError(w, "code is required", 400)
+		return
+	}
+	if req.Domain == "" {
+		writeError(w, "domain is required", 400)
+		return
+	}
+
+	syncReq, err := s.sessions.GetBrowserSyncRequest(req.Code)
+	if err != nil {
+		writeError(w, "browser sync fetch error", 500)
+		return
+	}
+	if syncReq == nil {
+		writeError(w, "browser sync request expired or not found", 404)
+		return
+	}
+
+	linkReq := linkRequest{
+		CookieHeader: req.CookieHeader,
+		UserAgent:    req.UserAgent,
+		Domain:       req.Domain,
+	}
+	sess, err := s.buildLinkedSession(syncReq.UserID, linkReq)
+	if err != nil {
+		syncReq.Status = "failed"
+		syncReq.Error = err.Error()
+		_ = s.sessions.StoreBrowserSyncRequest(*syncReq)
+		writeError(w, err.Error(), 400)
+		return
+	}
+
+	client, err := vinted.NewClient(sess)
+	if err != nil {
+		writeError(w, "failed to create client: "+err.Error(), 500)
+		return
+	}
+
+	if err := client.WarmUp(); err != nil {
+		log.Printf("[browser-sync] warmup warning for user %s: %v", syncReq.UserID, err)
+	}
+
+	info, err := client.GetAccountInfo()
+	if err != nil {
+		syncReq.Status = "failed"
+		syncReq.Domain = req.Domain
+		syncReq.Error = "invalid browser session: " + err.Error()
+		_ = s.sessions.StoreBrowserSyncRequest(*syncReq)
+		writeError(w, syncReq.Error, 401)
+		return
+	}
+
+	linkedSession := client.GetSession()
+	linkedSession.VintedUserID = info.ID
+	linkedSession.VintedName = info.Login
+	linkedSession.BrowserLinked = true
+	linkedSession.LastBrowserSync = time.Now().UTC().Format(time.RFC3339)
+
+	if err := s.sessions.Store(*linkedSession); err != nil {
+		writeError(w, "failed to save session", 500)
+		return
+	}
+
+	syncReq.Status = "completed"
+	syncReq.Domain = linkedSession.Domain
+	syncReq.VintedID = linkedSession.VintedUserID
+	syncReq.VintedName = linkedSession.VintedName
+	syncReq.Error = ""
+	syncReq.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := s.sessions.StoreBrowserSyncRequest(*syncReq); err != nil {
+		log.Printf("[browser-sync] failed to persist request result for user %s: %v", syncReq.UserID, err)
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"status":      "completed",
+		"vinted_name": linkedSession.VintedName,
+		"vinted_id":   linkedSession.VintedUserID,
+		"domain":      linkedSession.Domain,
+	})
+}
+
+func (s *Server) handleBrowserLinkCreate(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	link, err := s.sessions.CreateBrowserLink(userID, browserLinkTTL)
+	if err != nil {
+		writeError(w, "failed to create browser link", 500)
+		return
+	}
+
+	writeJSON(w, 200, link)
+}
+
+func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Request) {
+	var req extensionSyncCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+
+	req.LinkToken = strings.TrimSpace(req.LinkToken)
+	req.AccessToken = strings.TrimSpace(req.AccessToken)
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+	req.UserAgent = strings.TrimSpace(req.UserAgent)
+	req.Domain = strings.TrimSpace(req.Domain)
+
+	if req.LinkToken == "" {
+		writeError(w, "link_token is required", 400)
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, "access_token is required", 400)
+		return
+	}
+	if req.Domain == "" {
+		writeError(w, "domain is required", 400)
+		return
+	}
+
+	link, err := s.sessions.GetBrowserLinkByToken(req.LinkToken)
+	if err != nil {
+		writeError(w, "browser link fetch error", 500)
+		return
+	}
+	if link == nil {
+		writeError(w, "browser link expired or not found", 404)
+		return
+	}
+
+	incomingDomain := normalizeVintedDomain(req.Domain)
+	existingSession, err := s.sessions.Get(link.UserID)
+	if err != nil {
+		writeError(w, "session fetch error", 500)
+		return
+	}
+	if existingSession != nil {
+		s.canonicalizeSessionDomain(existingSession)
+		if incomingDomain != "" && existingSession.Domain != "" && incomingDomain != existingSession.Domain {
+			if err := s.sessions.TouchBrowserLink(req.LinkToken); err != nil {
+				log.Printf("[extension-sync] failed to touch browser link for user %s: %v", link.UserID, err)
+			}
+			writeJSON(w, 200, map[string]interface{}{
+				"status":         "ignored_domain",
+				"domain":         existingSession.Domain,
+				"ignored_domain": incomingDomain,
+			})
+			return
+		}
+	}
+
+	sess, err := s.buildLinkedSession(link.UserID, linkRequest{
+		AccessToken:  req.AccessToken,
+		RefreshToken: req.RefreshToken,
+		UserAgent:    req.UserAgent,
+		Domain:       req.Domain,
+	})
+	if err != nil {
+		writeError(w, err.Error(), 400)
+		return
+	}
+
+	client, err := vinted.NewClient(sess)
+	if err != nil {
+		writeError(w, "failed to create client: "+err.Error(), 500)
+		return
+	}
+
+	if err := client.WarmUp(); err != nil {
+		log.Printf("[extension-sync] warmup warning for user %s: %v", link.UserID, err)
+	}
+
+	info, err := client.GetAccountInfo()
+	if err != nil {
+		writeError(w, "invalid browser token sync: "+err.Error(), 401)
+		return
+	}
+
+	linkedSession := client.GetSession()
+	linkedSession.VintedUserID = info.ID
+	linkedSession.VintedName = info.Login
+	linkedSession.BrowserLinked = true
+	linkedSession.LastBrowserSync = time.Now().UTC().Format(time.RFC3339)
+
+	if err := s.sessions.Store(*linkedSession); err != nil {
+		writeError(w, "failed to save session", 500)
+		return
+	}
+
+	if err := s.sessions.TouchBrowserLink(req.LinkToken); err != nil {
+		log.Printf("[extension-sync] failed to touch browser link for user %s: %v", link.UserID, err)
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"status":      "completed",
+		"vinted_name": linkedSession.VintedName,
+		"vinted_id":   linkedSession.VintedUserID,
+		"domain":      linkedSession.Domain,
 	})
 }
 
 type updatePhoneNumberRequest struct {
 	PhoneNumber string `json:"phone_number"`
+}
+
+type updateDomainRequest struct {
+	Domain string `json:"domain"`
+}
+
+func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	var req updateDomainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", 400)
+		return
+	}
+
+	domain := normalizeVintedDomain(req.Domain)
+	if domain == "" {
+		writeError(w, "domain is required", 400)
+		return
+	}
+
+	sess, err := s.sessions.Get(userID)
+	if err != nil {
+		writeError(w, "session fetch error", 500)
+		return
+	}
+	if sess == nil {
+		writeError(w, "no linked Vinted account", 404)
+		return
+	}
+
+	sess.Domain = domain
+	sess.LastCheck = time.Now().UTC().Format(time.RFC3339)
+	if err := s.sessions.Store(*sess); err != nil {
+		writeError(w, "failed to save domain", 500)
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"domain":     sess.Domain,
+		"last_check": sess.LastCheck,
+	})
 }
 
 func (s *Server) handleUpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
@@ -313,6 +833,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.canonicalizeSessionDomain(sess)
+
 	writeJSON(w, 200, map[string]interface{}{
 		"linked":              true,
 		"status":              sess.Status,
@@ -322,6 +844,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"linked_at":           sess.LinkedAt,
 		"last_check":          sess.LastCheck,
 		"has_browser_session": sess.CookieHeader != "",
+		"browser_linked":      sess.BrowserLinked,
+		"last_browser_sync":   sess.LastBrowserSync,
 		"has_phone_number":    sess.PhoneNumber != "",
 	})
 }
@@ -547,6 +1071,58 @@ func (s *Server) handleCheckoutLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{"links": links})
+}
+
+type storeCheckoutLinkRequest struct {
+	ItemID        int64  `json:"item_id"`
+	SellerID      int64  `json:"seller_id"`
+	TransactionID int64  `json:"transaction_id"`
+	PurchaseID    string `json:"purchase_id"`
+	CheckoutURL   string `json:"checkout_url"`
+	PaymentURL    string `json:"payment_url"`
+	Status        string `json:"status"`
+}
+
+func (s *Server) handleStoreCheckoutLink(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		writeError(w, "unauthorized", 401)
+		return
+	}
+
+	sess, err := s.sessions.Get(userID)
+	if err != nil {
+		writeError(w, "failed to load session", 500)
+		return
+	}
+	if sess == nil {
+		writeError(w, "no linked session", 404)
+		return
+	}
+
+	var req storeCheckoutLinkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid json", 400)
+		return
+	}
+
+	if strings.TrimSpace(req.CheckoutURL) == "" && strings.TrimSpace(req.PaymentURL) == "" {
+		writeError(w, "checkout_url or payment_url is required", 400)
+		return
+	}
+
+	s.storeCheckoutLink(userID, sess, session.CheckoutLink{
+		ItemID:        req.ItemID,
+		SellerID:      req.SellerID,
+		TransactionID: req.TransactionID,
+		PurchaseID:    strings.TrimSpace(req.PurchaseID),
+		CheckoutURL:   strings.TrimSpace(req.CheckoutURL),
+		PaymentURL:    strings.TrimSpace(req.PaymentURL),
+		Status:        firstNonEmpty(strings.TrimSpace(req.Status), "checkout_ready"),
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+	})
+
+	writeJSON(w, 200, map[string]interface{}{"status": "stored"})
 }
 
 func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {

@@ -1,11 +1,11 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { warmBuySession } from "@/lib/buy-session";
 
 type AccountContextType = {
   linked: boolean;
   loading: boolean;
+  domain: string | null;
   likedIds: Set<number>;
   addLike: (id: number) => void;
   removeLike: (id: number) => void;
@@ -15,6 +15,7 @@ type AccountContextType = {
 const AccountContext = createContext<AccountContextType>({
   linked: false,
   loading: true,
+  domain: null,
   likedIds: new Set(),
   addLike: () => {},
   removeLike: () => {},
@@ -24,6 +25,7 @@ const AccountContext = createContext<AccountContextType>({
 export function AccountProvider({ children }: { children: React.ReactNode }) {
   const [linked, setLinked] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [domain, setDomain] = useState<string | null>(null);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -32,6 +34,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       .then((data) => {
         const isLinked = data.linked === true;
         setLinked(isLinked);
+        setDomain(isLinked && typeof data.domain === "string" ? data.domain : null);
         if (isLinked) {
           fetch("/api/items/liked")
             .then((res) => res.json())
@@ -43,16 +46,12 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
             .catch(() => {});
         }
       })
-      .catch(() => setLinked(false))
+      .catch(() => {
+        setLinked(false);
+        setDomain(null);
+      })
       .finally(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    if (!linked) {
-      return;
-    }
-    void warmBuySession();
-  }, [linked]);
 
   const addLike = useCallback((id: number) => {
     setLikedIds((prev) => new Set(prev).add(id));
@@ -81,7 +80,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AccountContext.Provider value={{ linked, loading, likedIds, addLike, removeLike, syncLikes }}>
+    <AccountContext.Provider value={{ linked, loading, domain, likedIds, addLike, removeLike, syncLikes }}>
       {children}
     </AccountContext.Provider>
   );
