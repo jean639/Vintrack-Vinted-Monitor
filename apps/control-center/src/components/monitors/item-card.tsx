@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { warmBuySession } from "@/lib/buy-session";
+import { runBrowserBuyViaExtension } from "@/lib/vintrack-extension";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +49,7 @@ function getMonitorLabel(item: ItemData) {
 }
 
 function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
-  const { linked, likedIds, addLike, removeLike } = useVintedAccount();
+  const { linked, domain: accountDomain, likedIds, addLike, removeLike } = useVintedAccount();
   const liked = likedIds.has(Number(item.id));
   const [liking, setLiking] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
@@ -227,42 +227,53 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
 
     setBuying(true);
     try {
-      const res = await fetch("/api/items/buy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          item_id: Number(item.id),
-          seller_id: Number(item.seller_id),
-          pickup_type: 1,
-          payment_method: {
-            card_id: null,
-            pay_in_method_id: "10",
-          },
-          browser_info: {
-            language: navigator.language || "en-DE",
-            color_depth: window.screen.colorDepth || 32,
-            java_enabled: false,
-            screen_height: window.screen.height || 1080,
-            screen_width: window.screen.width || 1920,
-            timezone_offset: new Date().getTimezoneOffset(),
-          },
-        }),
+      const browserBuyResult = await runBrowserBuyViaExtension({
+        itemId: Number(item.id),
+        sellerId: Number(item.seller_id),
+        itemUrl: item.url || undefined,
+        domain: accountDomain || (item.url ? new URL(item.url).hostname : undefined),
+        pickupType: 1,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.error || `Buy failed (${res.status})`);
+
+      if (browserBuyResult) {
+        if (browserBuyResult.ok) {
+          if (!browserBuyResult.checkoutUrl) {
+            toast.error("Browser checkout returned no Vinted checkout URL");
+            return;
+          }
+
+          await fetch("/api/items/checkout-links", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              item_id: Number(item.id),
+              seller_id: Number(item.seller_id),
+              transaction_id: browserBuyResult.transactionId || 0,
+              purchase_id: browserBuyResult.purchaseId || "",
+              checkout_url: browserBuyResult.checkoutUrl,
+              status: "checkout_ready",
+            }),
+          }).catch(() => {});
+
+          toast.success("Vinted checkout opened. Choose the payment method there.");
+          setBuyDialogOpen(false);
+          return;
+        }
+
+        if (browserBuyResult.code === "datadome_challenge") {
+          toast.error(
+            "Vinted requested a captcha in the browser tab. Solve it there, then retry checkout."
+          );
+          return;
+        }
+
+        toast.error(browserBuyResult.error || "Browser checkout failed");
         return;
       }
 
-      if (data.payment_url) {
-        window.open(data.payment_url, "_blank", "noopener,noreferrer");
-        toast.success("Reserved. Opened PayPal.");
-        setBuyDialogOpen(false);
-      } else {
-        toast.error("Reserved, but Vinted did not return a PayPal link");
-      }
+      toast.error("Browser extension not detected or not responding");
     } catch {
-      toast.error("Network error — could not reach server");
+      toast.error("Browser checkout could not be started");
     } finally {
       setBuying(false);
     }
@@ -392,14 +403,9 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
             <>
               <button
                 onClick={handleBuy}
-                onMouseEnter={() => {
-                  if (linked) {
-                    void warmBuySession();
-                  }
-                }}
                 disabled={buying}
                 className="flex h-8 w-8 items-center justify-center rounded-full border border-amber-400/25 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-70 cursor-pointer sm:h-7 sm:w-7"
-                title="Experimental PayPal checkout"
+                title="Open Vinted checkout"
               >
                 {buying ? (
                   <Loader2 className="w-4 h-4 animate-spin sm:w-3.5 sm:h-3.5" />
@@ -603,24 +609,19 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
       <Dialog open={buyDialogOpen} onOpenChange={setBuyDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Experimental PayPal Checkout</DialogTitle>
+            <DialogTitle>Open Vinted Checkout</DialogTitle>
             <DialogDescription>
-              This buy flow is experimental and intentionally separated from the normal item actions.
-              It opens the Vinted PayPal checkout using the shipping address and checkout data already
-              stored on your linked Vinted account.
+              This opens the normal Vinted checkout in your logged-in browser. Choose the payment
+              method there and finish the order on Vinted.
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-            Use this only if your linked account is configured correctly in Vinted. Vintrack does not
-            override the delivery address here.
-          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBuyDialogOpen(false)}>
               Cancel
             </Button>
             <Button onClick={runBuy} disabled={buying} className="gap-2">
               {buying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
-              {buying ? "Starting..." : "Continue to PayPal"}
+              {buying ? "Starting..." : "Open Checkout"}
             </Button>
           </DialogFooter>
         </DialogContent>
