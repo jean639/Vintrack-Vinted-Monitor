@@ -9,6 +9,14 @@ import {
     CardTitle,
     CardDescription,
 } from "@/components/ui/card";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +94,7 @@ export function AccountClient({
         return matchingRegion?.code || "de";
     });
     const [isVintedIdVisible, setIsVintedIdVisible] = useState(false);
+    const [isUnlinkDialogOpen, setIsUnlinkDialogOpen] = useState(false);
     const [isPending, startTransition] = useTransition();
     const [isBrowserSyncStarting, setIsBrowserSyncStarting] = useState(false);
 
@@ -245,14 +254,13 @@ export function AccountClient({
     };
 
     const handleUnlink = () => {
-        if (!confirm("Unlink your Vinted account?")) return;
-
         startTransition(async () => {
             const result = await unlinkVintedAccount();
             if (result.error) {
                 toast.error(result.error);
                 return;
             }
+            setIsUnlinkDialogOpen(false);
             setStatus({ linked: false });
             toast.success("Account unlinked");
         });
@@ -668,7 +676,7 @@ export function AccountClient({
                             <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={handleUnlink}
+                                onClick={() => setIsUnlinkDialogOpen(true)}
                                 disabled={isPending}
                                 className="flex-1 sm:flex-none gap-1.5 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20 hover:bg-red-50 dark:hover:bg-red-500/10 dark:bg-transparent"
                             >
@@ -859,6 +867,45 @@ export function AccountClient({
                     </details>
                 </Card>
             )}
+
+            <Dialog
+                open={isUnlinkDialogOpen}
+                onOpenChange={(open) => {
+                    if (!isPending) {
+                        setIsUnlinkDialogOpen(open);
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Unlink Vinted account?</DialogTitle>
+                        <DialogDescription>
+                            This removes the saved Vinted session from
+                            Vintrack. You can link the account again with the
+                            browser extension or manual tokens.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsUnlinkDialogOpen(false)}
+                            disabled={isPending}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleUnlink}
+                            disabled={isPending}
+                        >
+                            {isPending ? "Unlinking..." : "Unlink Account"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
