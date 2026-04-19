@@ -17,9 +17,13 @@ import {
   Tag,
   Sparkles,
   Smartphone,
-  User
+  User,
+  Download
 } from "lucide-react";
 import Link from "next/link";
+
+const EXTENSION_DOWNLOAD_URL =
+  "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip";
 
 export default function GuidePage() {
   return (
@@ -33,8 +37,7 @@ export default function GuidePage() {
           Getting Started with Vintrack
         </h1>
         <p className="text-muted-foreground text-[17px] max-w-3xl leading-relaxed">
-          This comprehensive guide will walk you through setting up your Vintrack account for maximum efficiency. 
-          Follow these steps to start monitoring Vinted like a pro.
+          Set up proxies, monitors, alerts, and the browser extension for linked Vinted actions.
         </p>
       </div>
 
@@ -59,7 +62,7 @@ export default function GuidePage() {
                     <h3 className="text-lg font-bold text-foreground">The Basics</h3>
                   </div>
                   <p className="text-[15px] text-muted-foreground leading-relaxed">
-                    Vinted has strict limits on requests from a single IP. Proxies act as a "middleman," allowing Vintrack to rotate through multiple identities to keep you scanning 24/7.
+                    Vinted has strict limits on requests from a single IP. Proxies rotate traffic through multiple identities to keep monitoring stable.
                   </p>
                   <div className="space-y-3 pt-2">
                     <div className="flex items-start gap-3 text-[14px] text-muted-foreground">
@@ -79,7 +82,7 @@ export default function GuidePage() {
                   </h3>
                   <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
                     <li>Go to <Link href="/proxies" className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4">Proxy Groups</Link>.</li>
-                    <li>Click <strong>"New Group"</strong> and give it a name.</li>
+                    <li>Click <strong>New Group</strong> and give it a name.</li>
                     <li>Paste your proxies in the format:<br/>
                       <code className="inline-block mt-2 bg-background px-2 py-1 rounded border border-border text-emerald-700 dark:text-emerald-400 font-mono text-xs">ip:port:user:pass</code>
                     </li>
@@ -130,7 +133,7 @@ export default function GuidePage() {
                   </h3>
                   <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
                     <li>Go to <Link href="/monitors/new" className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4">New Monitor</Link>.</li>
-                    <li>Enter your <strong>Keywords</strong> (e.g., "Stone Island").</li>
+                    <li>Enter your <strong>Keywords</strong>, for example Stone Island.</li>
                     <li>Select the <strong>Region</strong> (e.g., FR, UK, DE).</li>
                     <li>Assign your <strong>Proxy Group</strong> and save.</li>
                   </ol>
@@ -159,7 +162,7 @@ export default function GuidePage() {
                     <h3 className="text-lg font-bold text-foreground">Stay Alert</h3>
                   </div>
                   <p className="text-[15px] text-muted-foreground leading-relaxed">
-                    Don't stay glued to the dashboard. Use Webhooks to receive instant, beautiful item cards directly in your Discord server.
+                    Use Webhooks to receive instant item cards directly in your Discord server.
                   </p>
                   <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-100 dark:border-purple-500/20 flex items-center gap-3">
                     <Smartphone className="w-5 h-5 text-purple-600 dark:text-purple-400" />
@@ -173,9 +176,9 @@ export default function GuidePage() {
                   </h3>
                   <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
                     <li>In Discord: <strong>Channel Settings</strong> &gt; <strong>Integrations</strong>.</li>
-                    <li>Click <strong>"Create Webhook"</strong> and copy the URL.</li>
+                    <li>Click <strong>Create Webhook</strong> and copy the URL.</li>
                     <li>Paste the URL into your monitor settings.</li>
-                    <li>Toggle <strong>"Webhook Active"</strong> to ON.</li>
+                    <li>Toggle <strong>Webhook Active</strong> to ON.</li>
                   </ol>
                 </div>
               </div>
@@ -191,7 +194,7 @@ export default function GuidePage() {
             <h2 className="text-2xl font-bold text-foreground">Vinted Account Integration</h2>
           </div>
           
-          <Card className="shadow-sm overflow-hidden bg-amber-50 dark:bg-amber-500/5">
+          <Card className="shadow-sm overflow-hidden">
             <CardContent className="p-8 space-y-8">
               <div className="grid md:grid-cols-2 gap-12">
                 <div className="space-y-5">
@@ -199,10 +202,10 @@ export default function GuidePage() {
                     <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
                       <User className="w-6 h-6" />
                     </div>
-                    <h3 className="text-lg font-bold text-foreground">Pro Power Tools</h3>
+                    <h3 className="text-lg font-bold text-foreground">Account Actions</h3>
                   </div>
                   <p className="text-[15px] text-muted-foreground leading-relaxed">
-                    Linking your account unlocks direct interactions with Vinted sellers, saving you the time of manual browsing.
+                    Link your Vinted account with the Vintrack extension. It keeps the browser session fresh without making you copy tokens manually.
                   </p>
                   <div className="grid grid-cols-3 gap-3">
                     <div className="p-3 rounded-xl bg-card border border-border shadow-sm text-center space-y-2">
@@ -218,20 +221,35 @@ export default function GuidePage() {
                       <span className="text-[11px] font-bold block text-foreground">Offer</span>
                     </div>
                   </div>
+                  <p className="text-[13px] text-muted-foreground leading-relaxed">
+                    The extension syncs only the Vinted session tokens, domain, browser user agent, and Vintrack theme. It does not send a full cookie header.
+                  </p>
                 </div>
-                <div className="space-y-5 p-6 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-100 dark:border-amber-500/20">
+                <div className="space-y-5 p-6 rounded-2xl bg-muted/50 border border-border/50">
                   <h3 className="text-md font-bold text-foreground flex items-center gap-2">
                     <Settings className="w-5 h-5 text-amber-600 dark:text-amber-400" />
                     How to Setup
                   </h3>
-                  <p className="text-[15px] text-muted-foreground leading-relaxed">
-                    Go to the <Link href="/account" className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4">Account</Link> tab and follow the instructions to link your Vinted session using a web token.
-                  </p>
-                  <Link href="/account">
-                    <Badge className="bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30 hover:bg-amber-200 dark:hover:bg-amber-500/30 cursor-pointer px-4 py-1.5 font-bold mt-2">
-                      Connect Account
-                    </Badge>
-                  </Link>
+                  <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
+                    <li>Download and unzip the Vintrack extension.</li>
+                    <li>Open <strong>chrome://extensions</strong>, enable <strong>Developer mode</strong>, then click <strong>Load unpacked</strong>.</li>
+                    <li>Select the extracted extension folder.</li>
+                    <li>Sign in to Vinted in the same browser.</li>
+                    <li>Go to <Link href="/account" className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4">Account</Link> and click <strong>Link With Installed Extension</strong>.</li>
+                  </ol>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <a href={EXTENSION_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+                      <Badge className="w-full justify-center bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30 hover:bg-amber-200 dark:hover:bg-amber-500/30 cursor-pointer px-4 py-1.5 font-bold">
+                        <Download className="mr-1.5 h-3.5 w-3.5" />
+                        Download Extension
+                      </Badge>
+                    </a>
+                    <Link href="/account">
+                      <Badge className="w-full justify-center bg-background text-foreground border-border hover:bg-muted cursor-pointer px-4 py-1.5 font-bold">
+                        Connect Account
+                      </Badge>
+                    </Link>
+                  </div>
                 </div>
               </div>
             </CardContent>
