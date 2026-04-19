@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,21 +13,23 @@ import (
 )
 
 type VintedSession struct {
-	UserID       string `json:"user_id"`
-	VintedUserID int64  `json:"vinted_user_id"`
-	VintedName   string `json:"vinted_name"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	CookieHeader string `json:"cookie_header,omitempty"`
-	CsrfToken    string `json:"csrf_token,omitempty"`
-	AnonID       string `json:"anon_id,omitempty"`
-	WarmedAt     string `json:"warmed_at,omitempty"`
-	UserAgent    string `json:"user_agent,omitempty"`
-	PhoneNumber  string `json:"phone_number,omitempty"`
-	Domain       string `json:"domain"`
-	Status       string `json:"status"`
-	LinkedAt     string `json:"linked_at"`
-	LastCheck    string `json:"last_check"`
+	UserID          string `json:"user_id"`
+	VintedUserID    int64  `json:"vinted_user_id"`
+	VintedName      string `json:"vinted_name"`
+	AccessToken     string `json:"access_token"`
+	RefreshToken    string `json:"refresh_token,omitempty"`
+	CookieHeader    string `json:"cookie_header,omitempty"`
+	CsrfToken       string `json:"csrf_token,omitempty"`
+	AnonID          string `json:"anon_id,omitempty"`
+	WarmedAt        string `json:"warmed_at,omitempty"`
+	UserAgent       string `json:"user_agent,omitempty"`
+	PhoneNumber     string `json:"phone_number,omitempty"`
+	BrowserLinked   bool   `json:"browser_linked,omitempty"`
+	LastBrowserSync string `json:"last_browser_sync,omitempty"`
+	Domain          string `json:"domain"`
+	Status          string `json:"status"`
+	LinkedAt        string `json:"linked_at"`
+	LastCheck       string `json:"last_check"`
 }
 
 type CheckoutLink struct {
@@ -38,6 +42,27 @@ type CheckoutLink struct {
 	Domain        string `json:"domain,omitempty"`
 	Status        string `json:"status"`
 	CreatedAt     string `json:"created_at"`
+}
+
+type BrowserSyncRequest struct {
+	Code        string `json:"code"`
+	UserID      string `json:"user_id"`
+	Status      string `json:"status"`
+	Domain      string `json:"domain,omitempty"`
+	VintedName  string `json:"vinted_name,omitempty"`
+	VintedID    int64  `json:"vinted_id,omitempty"`
+	Error       string `json:"error,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at"`
+	CompletedAt string `json:"completed_at,omitempty"`
+}
+
+type BrowserLink struct {
+	Token      string `json:"token"`
+	UserID     string `json:"user_id"`
+	CreatedAt  string `json:"created_at"`
+	ExpiresAt  string `json:"expires_at"`
+	LastUsedAt string `json:"last_used_at,omitempty"`
 }
 
 type Manager struct {
@@ -204,6 +229,165 @@ func (m *Manager) GetCheckoutLinks(userID string) ([]CheckoutLink, error) {
 
 func (m *Manager) DeleteCheckoutLinks(userID string) error {
 	return m.redis.Del(m.ctx, m.checkoutLinksKey(userID)).Err()
+}
+
+func (m *Manager) browserSyncKey(code string) string {
+	return fmt.Sprintf("vinted:browser-sync:%s", code)
+}
+
+func (m *Manager) newBrowserSyncCode() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate browser sync code: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+func (m *Manager) CreateBrowserSyncRequest(userID string, ttl time.Duration) (*BrowserSyncRequest, error) {
+	code, err := m.newBrowserSyncCode()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	req := BrowserSyncRequest{
+		Code:      code,
+		UserID:    userID,
+		Status:    "pending",
+		CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt: now.Add(ttl).Format(time.RFC3339),
+	}
+
+	if err := m.StoreBrowserSyncRequest(req); err != nil {
+		return nil, err
+	}
+
+	return &req, nil
+}
+
+func (m *Manager) StoreBrowserSyncRequest(req BrowserSyncRequest) error {
+	expiresAt, err := time.Parse(time.RFC3339, req.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("parse browser sync expiry: %w", err)
+	}
+
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return fmt.Errorf("browser sync request expired")
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal browser sync request: %w", err)
+	}
+
+	return m.redis.Set(m.ctx, m.browserSyncKey(req.Code), data, ttl).Err()
+}
+
+func (m *Manager) GetBrowserSyncRequest(code string) (*BrowserSyncRequest, error) {
+	data, err := m.redis.Get(m.ctx, m.browserSyncKey(code)).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var req BrowserSyncRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return nil, err
+	}
+
+	return &req, nil
+}
+
+func (m *Manager) browserLinkTokenKey(token string) string {
+	return fmt.Sprintf("vinted:browser-link:token:%s", token)
+}
+
+func (m *Manager) browserLinkUserKey(userID string) string {
+	return fmt.Sprintf("vinted:browser-link:user:%s", userID)
+}
+
+func (m *Manager) CreateBrowserLink(userID string, ttl time.Duration) (*BrowserLink, error) {
+	existingToken, err := m.redis.Get(m.ctx, m.browserLinkUserKey(userID)).Result()
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+	if existingToken != "" {
+		_ = m.redis.Del(m.ctx, m.browserLinkTokenKey(existingToken)).Err()
+	}
+
+	token, err := m.newBrowserSyncCode()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	link := BrowserLink{
+		Token:     token,
+		UserID:    userID,
+		CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt: now.Add(ttl).Format(time.RFC3339),
+	}
+
+	if err := m.StoreBrowserLink(link); err != nil {
+		return nil, err
+	}
+
+	return &link, nil
+}
+
+func (m *Manager) StoreBrowserLink(link BrowserLink) error {
+	expiresAt, err := time.Parse(time.RFC3339, link.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("parse browser link expiry: %w", err)
+	}
+
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return fmt.Errorf("browser link expired")
+	}
+
+	data, err := json.Marshal(link)
+	if err != nil {
+		return fmt.Errorf("marshal browser link: %w", err)
+	}
+
+	pipe := m.redis.TxPipeline()
+	pipe.Set(m.ctx, m.browserLinkTokenKey(link.Token), data, ttl)
+	pipe.Set(m.ctx, m.browserLinkUserKey(link.UserID), link.Token, ttl)
+	_, err = pipe.Exec(m.ctx)
+	return err
+}
+
+func (m *Manager) GetBrowserLinkByToken(token string) (*BrowserLink, error) {
+	data, err := m.redis.Get(m.ctx, m.browserLinkTokenKey(token)).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var link BrowserLink
+	if err := json.Unmarshal(data, &link); err != nil {
+		return nil, err
+	}
+
+	return &link, nil
+}
+
+func (m *Manager) TouchBrowserLink(token string) error {
+	link, err := m.GetBrowserLinkByToken(token)
+	if err != nil || link == nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	link.LastUsedAt = time.Now().UTC().Format(time.RFC3339)
+	link.ExpiresAt = now.Add(180 * 24 * time.Hour).Format(time.RFC3339)
+	return m.StoreBrowserLink(*link)
 }
 
 func (m *Manager) StartKeepAlive(validateFn func(sess *VintedSession) bool) {
