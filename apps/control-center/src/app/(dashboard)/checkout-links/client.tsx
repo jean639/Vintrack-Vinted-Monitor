@@ -110,9 +110,9 @@ export function CheckoutLinksClient() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Experimental Checkout Links</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Checkout Links</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Saved payment and checkout URLs from the experimental buy flow.
+            Recent checkout URLs saved from your buy attempts.
           </p>
         </div>
         <Button
@@ -243,7 +243,7 @@ export function CheckoutLinksClient() {
           <Link2 className="mb-2 h-8 w-8 text-muted-foreground/30" />
           <p className="font-medium text-muted-foreground">No checkout links saved yet</p>
           <p className="text-xs text-muted-foreground/60">
-            After a buy attempt, the latest checkout and payment URLs will appear here.
+            After a buy attempt, the latest checkout URLs will appear here.
           </p>
         </div>
       )}
