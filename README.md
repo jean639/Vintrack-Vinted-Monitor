@@ -32,6 +32,7 @@
 
 <p align="center">
   <a href="#live-demo">Live Demo</a> •
+  <a href="#browser-extension">Browser Extension</a> •
   <a href="#getting-started">Getting Started</a> •
   <a href="#features">Features</a> •
   <a href="#community--support">Community</a> •
@@ -50,6 +51,7 @@ You can test Vintrack live at:
 - **URL:** https://vintrack.jakobaio.dev
 - **Login:** Anyone can sign up via Discord OAuth
 - **Default role:** New accounts are assigned **Free**
+- **Browser extension:** download the latest ZIP from the [GitHub releases](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
 - **Important:** Persistent server proxies are not guaranteed on the demo instance, so reliability may vary over time
 
 ---
@@ -64,7 +66,8 @@ Built for resellers who need speed. Open-sourced for the community.
 - **Anti-detection** — TLS fingerprint rotation with proxy support
 - **Granular filters** — price, size, category, brand, color, and country/region
 - **Direct Interaction** — Like items, send offers, and message sellers from the dashboard
-- **Experimental checkout tooling** — oneclick reserve button and checkout-link history for controlled PayPal checkouts
+- **Browser session sync** — Chrome extension keeps linked Vinted sessions fresh without copying tokens manually
+- **Experimental checkout tooling** — browser-assisted checkout link creation with checkout-link history
 - **Full dashboard** — no CLI needed, everything from the browser
 - **One-command deploy** — `docker compose up` and you're live
 
@@ -96,13 +99,26 @@ Link your Vinted account directly in the dashboard to interact with listings wit
 - **Like / Unlike items** — one-click like/unlike from the feed or monitor view
 - **Send Offers** — make price offers directly to sellers (with built-in 60% minimum price validation)
 - **Message Sellers** — start a conversation or ask questions instantly
-- **Experimental PayPal checkout** — available via the experimental feed action and checkout-link history, using the shipping address and checkout data already stored in your linked Vinted account
+- **Browser-assisted checkout** — Vintrack opens the native Vinted checkout flow in your browser and stores checkout links for recovery
 - **Multi-Image Preview** — view extra images and high-res gallery directly in the dashboard
 - **Account management** — link/unlink with region selection (12 EU markets)
-- **Token Refresh** — support for `refresh_token` to maintain sessions long-term
+- **Browser Sync Extension** — automatically refreshes the linked session when you log in to Vinted in the same browser
 - **Status monitoring** — see your linked account status, username, and domain at a glance
 
-To link your account, grab your `access_token_web` (and optionally `refresh_token`) from Vinted's DevTools and paste it in the Account page.
+The recommended linking flow is the browser extension. Install it once, sign in to Vinted in the same browser, then connect it from the Vintrack Account page. Manual token linking still exists as a fallback, but normal users should not need it.
+
+### Browser Extension
+
+The extension is the easiest way to use linked Vinted accounts on the live demo and in self-hosted installs.
+
+- Download: [vintrack-browser-sync-extension.zip](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
+- Source: `apps/vintrack-browser-sync-extension`
+- Install in Chrome: open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the extracted extension folder
+- Connect in Vintrack: open **Account**, click **Download Extension** if needed, then **Link With Installed Extension**
+- What it syncs: `access_token_web`, `refresh_token_web`, Vinted domain, browser user agent, and the Vintrack light/dark theme
+- What it does not sync: the full cookie header or full cookie jar
+
+For distribution, the recommended path is to attach a versioned ZIP named `vintrack-browser-sync-extension.zip` to every GitHub release. The live demo and documentation can always point to `/releases/latest/download/vintrack-browser-sync-extension.zip`, so users do not need to browse the repo.
 
 ### Experimental Buy Disclaimer
 
@@ -110,11 +126,11 @@ Vintrack includes an experimental buy module for controlled checkout tests. It i
 
 - The buy module is experimental and may break when Vinted changes authentication or checkout protection.
 - Use a dedicated buy account for this module, not your main personal Vinted account.
-- The PayPal checkout flow uses the shipping address, checkout details, and payment context already stored on your linked Vinted account.
-- Vintrack opens the returned PayPal payment link, but it does not fully complete the purchase inside Vintrack itself.
-- Vintrack does not replace or override your delivery address in this flow.
-- A valid `refresh_token_web` is strongly recommended, otherwise automatic session recovery may fail.
-- Use the experimental buy actions only if you understand that they may reserve an item before the PayPal step is completed.
+- The browser-assisted checkout flow uses the shipping address and checkout context already stored on your linked Vinted account.
+- Vintrack opens the native Vinted checkout link; the user chooses the payment method and completes payment manually.
+- Vintrack does not replace or override your delivery address or payment method in this flow.
+- The extension is strongly recommended, otherwise automatic session recovery may fail.
+- Use experimental buy actions only if you understand that Vinted may reserve an item before payment is completed.
 
 ### Discord Notifications
 
