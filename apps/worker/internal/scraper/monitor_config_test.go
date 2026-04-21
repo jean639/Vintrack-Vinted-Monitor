@@ -75,6 +75,8 @@ func TestMonitorConfigFingerprintIgnoresWebhookState(t *testing.T) {
 	updated := base
 	updated.DiscordWebhook = sql.NullString{Valid: true, String: "https://discord.test/other"}
 	updated.WebhookActive = true
+	updated.TelegramChatID = sql.NullString{Valid: true, String: "-1001234567890"}
+	updated.TelegramActive = true
 	updated.Status = "paused"
 
 	if got := monitorConfigFingerprint(updated); got != monitorConfigFingerprint(base) {
