@@ -12,11 +12,12 @@ import { RegionPicker } from "@/components/monitors/region-picker";
 import { CountryFilterPicker } from "@/components/monitors/country-filter-picker";
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
+import { Switch } from "@/components/ui/switch";
 import { getStatusLocaleForRegionCodes } from "@/lib/regions";
 import { buildVintedMonitorUrl } from "@/lib/vinted-url";
 import { ArrowLeft, Copy, ExternalLink, Plus, Send } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 
 type ProxyGroupOption = {
@@ -41,6 +42,8 @@ export default function NewMonitorPage() {
   const [userRole, setUserRole] = useState<string>("free");
   const [selectedProxyGroup, setSelectedProxyGroup] = useState<string>("");
   const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [hasTelegramConnection, setHasTelegramConnection] = useState(false);
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -86,41 +89,31 @@ export default function NewMonitorPage() {
   );
 
   useEffect(() => {
-    fetch("/api/proxy-groups")
-      .then((res) => res.json())
-      .then((data) => {
-        setProxyGroups(data.groups || []);
-        setUserRole(data.role || "free");
+    Promise.all([
+      fetch("/api/proxy-groups").then((res) => res.json()),
+      fetch("/api/telegram/connection").then((res) => res.json()),
+    ])
+      .then(([proxyData, telegramData]) => {
+        setProxyGroups(proxyData.groups || []);
+        setUserRole(proxyData.role || "free");
+        setHasTelegramConnection(Boolean(telegramData.connected));
+        setTelegramEnabled(Boolean(telegramData.connected));
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
-  const previewUrl = useMemo(
-    () =>
-      buildVintedMonitorUrl({
-        region: selectedRegion,
-        query,
-        priceMin,
-        priceMax,
-        sizeIds: selectedSizes,
-        catalogIds: selectedCategories,
-        brandIds: selectedBrands,
-        colorIds: selectedColors,
-        statusIds: selectedStatuses,
-      }),
-    [
-      selectedRegion,
-      query,
-      priceMin,
-      priceMax,
-      selectedSizes,
-      selectedCategories,
-      selectedBrands,
-      selectedColors,
-      selectedStatuses,
-    ]
-  );
+  const previewUrl = buildVintedMonitorUrl({
+    region: selectedRegion,
+    query,
+    priceMin,
+    priceMax,
+    sizeIds: selectedSizes,
+    catalogIds: selectedCategories,
+    brandIds: selectedBrands,
+    colorIds: selectedColors,
+    statusIds: selectedStatuses,
+  });
 
   return (
     <div className="space-y-6 mx-auto max-w-4xl">
@@ -374,6 +367,29 @@ export default function NewMonitorPage() {
                   <Send className="w-4 h-4" />
                   {isTestingWebhook ? "Testing..." : "Test"}
                 </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <input
+                type="hidden"
+                name="telegram_active"
+                value={telegramEnabled ? "true" : "false"}
+              />
+              <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/30 p-3">
+                <div className="space-y-0.5">
+                  <Label className="text-[13px]">Telegram Notifications</Label>
+                  <p className="text-[12px] text-muted-foreground">
+                    {hasTelegramConnection
+                      ? "Send alerts for this monitor to your connected Telegram chat."
+                      : "Connect Telegram from the dashboard notification settings first."}
+                  </p>
+                </div>
+                <Switch
+                  checked={telegramEnabled}
+                  disabled={!hasTelegramConnection}
+                  onCheckedChange={setTelegramEnabled}
+                />
               </div>
             </div>
 
