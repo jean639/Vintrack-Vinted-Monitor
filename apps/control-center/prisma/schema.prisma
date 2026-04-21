@@ -47,6 +47,8 @@ model User {
   
   monitors      monitors[]
   proxy_groups  proxy_groups[]
+  telegram_connections telegram_connections[]
+  telegram_connect_codes telegram_connect_codes[]
 }
 
 model VerificationToken {
@@ -80,9 +82,34 @@ model monitors {
   items      items[]
   discord_webhook String?
   webhook_active  Boolean  @default(true)
+  telegram_active  Boolean  @default(false)
 
   proxy_group_id Int?
   proxy_group    proxy_groups? @relation(fields: [proxy_group_id], references: [id], onDelete: SetNull)
+}
+
+model telegram_connections {
+  id         Int      @id @default(autoincrement())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  chat_id    String
+  chat_type  String?  @db.VarChar(50)
+  chat_title String?  @db.VarChar(255)
+  username   String?  @db.VarChar(255)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @updatedAt @db.Timestamp(6)
+}
+
+model telegram_connect_codes {
+  id         Int       @id @default(autoincrement())
+  code       String    @unique @db.VarChar(32)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expires_at DateTime  @db.Timestamp(6)
+  used_at    DateTime? @db.Timestamp(6)
+  created_at DateTime  @default(now()) @db.Timestamp(6)
 }
 
 model items {
