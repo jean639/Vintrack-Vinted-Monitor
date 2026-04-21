@@ -47,7 +47,7 @@ export default async function Home() {
 
           <p className="mx-auto max-w-md text-lg leading-relaxed text-muted-foreground">
             The fastest Vinted monitor for resellers. Real-time alerts,
-            multi-region scraping, and instant Discord notifications.
+            multi-region scraping, and instant Discord or Telegram notifications.
           </p>
 
           <div className="flex gap-3 justify-center pt-2">
@@ -87,10 +87,10 @@ export default async function Home() {
               <Shield className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-semibold text-foreground">
-              Discord Alerts
+              Instant Alerts
             </h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Webhook notifications with seller ratings and region data.
+              Discord and Telegram notifications with seller ratings and region data.
             </p>
           </div>
         </div>

@@ -32,7 +32,7 @@ const highlights = [
   {
     icon: Bell,
     title: "Instant alerts",
-    copy: "Discord webhooks, live feed updates and linked account actions.",
+    copy: "Discord and Telegram alerts, live feed updates and linked account actions.",
   },
   {
     icon: ShieldCheck,
