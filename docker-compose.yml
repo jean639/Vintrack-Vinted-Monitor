@@ -63,7 +63,11 @@ services:
       - AUTH_DISCORD_SECRET=${AUTH_DISCORD_SECRET}
       - AUTH_TRUST_HOST=true
       - AUTH_URL=${AUTH_URL:-http://localhost:3000}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3000}
       - VINTED_SERVICE_URL=http://vinted-service:4000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -77,8 +81,9 @@ services:
     build:
       context: ./apps/control-center
       dockerfile: Dockerfile
-      target: migrate
+    image: ghcr.io/jakobaiodev/vintrack-vinted-monitor/control-center:latest
     container_name: vintrack_migrate
+    command: ["sh", "-c", "npx prisma migrate deploy"]
     environment:
       - DATABASE_URL=postgresql://vinuser:vinpassword@postgres:5432/vintrack
     depends_on:
@@ -118,6 +123,8 @@ services:
       - ENRICH_SELLER_INFO=${ENRICH_SELLER_INFO:-true}
       - CLIENT_POOL_SIZE=${CLIENT_POOL_SIZE:-5}
       - RACE_FETCHERS=${RACE_FETCHERS:-2}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3000}
     volumes:
       - ./apps/worker/proxies.txt:/app/proxies.txt
     depends_on:
