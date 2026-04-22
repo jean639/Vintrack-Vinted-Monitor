@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
 const PERIODIC_SYNC_ALARM = "vintrackPeriodicSync";
 const PERIODIC_SYNC_MINUTES = 30;
 const BUY_TAB_READY_TIMEOUT_MS = 20000;
+const extensionApi = globalThis.browser || globalThis.chrome;
 
 function sanitizeDomain(domain) {
   return (domain || "").replace(/^\./, "").trim().toLowerCase();
@@ -50,7 +51,7 @@ function itemUrlForDomain(itemUrl, domain, itemId) {
 }
 
 async function getConfig() {
-  return chrome.storage.local.get(Object.values(STORAGE_KEYS));
+  return extensionApi.storage.local.get(Object.values(STORAGE_KEYS));
 }
 
 async function clearLocalExtensionState() {
@@ -58,11 +59,11 @@ async function clearLocalExtensionState() {
     clearTimeout(timer);
   }
   syncTimers.clear();
-  await chrome.storage.local.remove(Object.values(STORAGE_KEYS));
+  await extensionApi.storage.local.remove(Object.values(STORAGE_KEYS));
 }
 
 async function getStoredCheckoutLinks() {
-  const storage = await chrome.storage.local.get(STORAGE_KEYS.checkoutLinks);
+  const storage = await extensionApi.storage.local.get(STORAGE_KEYS.checkoutLinks);
   return Array.isArray(storage[STORAGE_KEYS.checkoutLinks]) ? storage[STORAGE_KEYS.checkoutLinks] : [];
 }
 
@@ -101,7 +102,7 @@ async function storeCheckoutLink(entry) {
     }),
   ].slice(0, 20);
 
-  await chrome.storage.local.set({ [STORAGE_KEYS.checkoutLinks]: nextLinks });
+  await extensionApi.storage.local.set({ [STORAGE_KEYS.checkoutLinks]: nextLinks });
 }
 
 async function findStoredCheckoutLink(match) {
@@ -127,7 +128,7 @@ async function findStoredCheckoutLink(match) {
 
 async function findExistingCheckoutTab(domain) {
   const normalizedDomain = sanitizeDomain(domain);
-  const matchingTabs = await chrome.tabs.query({ url: [`https://${normalizedDomain}/checkout*`] });
+  const matchingTabs = await extensionApi.tabs.query({ url: [`https://${normalizedDomain}/checkout*`] });
   const existingTab = matchingTabs
     .filter((tab) => typeof tab.id === "number" && typeof tab.url === "string")
     .sort((a, b) => (b.id || 0) - (a.id || 0))[0];
@@ -135,7 +136,7 @@ async function findExistingCheckoutTab(domain) {
 }
 
 function ensurePeriodicSyncAlarm() {
-  chrome.alarms.create(PERIODIC_SYNC_ALARM, {
+  extensionApi.alarms.create(PERIODIC_SYNC_ALARM, {
     periodInMinutes: PERIODIC_SYNC_MINUTES,
   });
 }
@@ -146,7 +147,7 @@ async function persistSyncState(results) {
     .map((result) => result.domain);
   const failedResult = results.find((result) => !result.ok);
 
-  await chrome.storage.local.set({
+  await extensionApi.storage.local.set({
     [STORAGE_KEYS.lastSyncAt]: new Date().toISOString(),
     [STORAGE_KEYS.lastSyncStatus]:
       successfulDomains.length > 0 ? "ok" : failedResult ? "error" : "idle",
@@ -196,11 +197,11 @@ async function syncDomain(domain) {
     return { ok: false, reason: "not-configured" };
   }
 
-  const accessCookie = await chrome.cookies.get({
+  const accessCookie = await extensionApi.cookies.get({
     url: `https://${normalizedDomain}/`,
     name: "access_token_web",
   });
-  const refreshCookie = await chrome.cookies.get({
+  const refreshCookie = await extensionApi.cookies.get({
     url: `https://${normalizedDomain}/`,
     name: "refresh_token_web",
   });
@@ -237,7 +238,7 @@ async function syncDomain(domain) {
 }
 
 async function syncAllVintedDomains() {
-  const cookies = await chrome.cookies.getAll({ name: "access_token_web" });
+  const cookies = await extensionApi.cookies.getAll({ name: "access_token_web" });
   const domains = [...new Set(cookies.map((cookie) => sanitizeDomain(cookie.domain)).filter(isVintedDomain))];
   const results = [];
 
@@ -311,7 +312,7 @@ async function syncAndPersistDomain(domain) {
 function waitForTabLoad(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(handleUpdate);
+      extensionApi.tabs.onUpdated.removeListener(handleUpdate);
       reject(new Error("Timed out waiting for Vinted tab to load"));
     }, timeoutMs);
 
@@ -321,26 +322,26 @@ function waitForTabLoad(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
       }
 
       clearTimeout(timeout);
-      chrome.tabs.onUpdated.removeListener(handleUpdate);
+      extensionApi.tabs.onUpdated.removeListener(handleUpdate);
       resolve();
     }
 
-    chrome.tabs.get(tabId, (tab) => {
-      if (chrome.runtime.lastError) {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(handleUpdate);
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
+    extensionApi.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab?.status === "complete") {
+          clearTimeout(timeout);
+          resolve();
+          return;
+        }
 
-      if (tab?.status === "complete") {
+        extensionApi.tabs.onUpdated.addListener(handleUpdate);
+      })
+      .catch((error) => {
         clearTimeout(timeout);
-        resolve();
-        return;
-      }
-
-      chrome.tabs.onUpdated.addListener(handleUpdate);
-    });
+        extensionApi.tabs.onUpdated.removeListener(handleUpdate);
+        reject(error);
+      });
   });
 }
 
@@ -349,7 +350,7 @@ async function waitForTabBridge(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const response = await chrome.tabs.sendMessage(tabId, { type: "VINTRACK_TAB_PING" });
+      const response = await extensionApi.tabs.sendMessage(tabId, { type: "VINTRACK_TAB_PING" });
       if (response?.ok) {
         return;
       }
@@ -365,19 +366,19 @@ async function waitForTabBridge(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
 
 async function ensureVintedBuyTab(targetUrl) {
   const target = new URL(targetUrl);
-  const matchingTabs = await chrome.tabs.query({ url: [`https://${target.host}/*`] });
+  const matchingTabs = await extensionApi.tabs.query({ url: [`https://${target.host}/*`] });
   const existingTab = matchingTabs.find((tab) => typeof tab.id === "number");
 
   if (existingTab?.id) {
     if (existingTab.url !== targetUrl) {
-      await chrome.tabs.update(existingTab.id, { url: targetUrl, active: false });
+      await extensionApi.tabs.update(existingTab.id, { url: targetUrl, active: false });
       await waitForTabLoad(existingTab.id);
     }
     await waitForTabBridge(existingTab.id);
     return { tabId: existingTab.id, created: false };
   }
 
-  const createdTab = await chrome.tabs.create({ url: targetUrl, active: false });
+  const createdTab = await extensionApi.tabs.create({ url: targetUrl, active: false });
   if (typeof createdTab.id !== "number") {
     throw new Error("Failed to open Vinted tab for browser checkout");
   }
@@ -418,7 +419,7 @@ async function handleBrowserBuy(payload) {
     const checkoutDomain = sanitizeDomain(domain);
     const targetUrl = itemUrlForDomain(itemUrl, checkoutDomain, itemId);
     const { tabId, created } = await ensureVintedBuyTab(targetUrl);
-    const result = await chrome.tabs.sendMessage(tabId, {
+    const result = await extensionApi.tabs.sendMessage(tabId, {
       type: "VINTRACK_RUN_BROWSER_BUY",
       payload: {
         requestId,
@@ -452,7 +453,7 @@ async function handleBrowserBuy(payload) {
     !["datadome_challenge", "payment_already_processing"].includes(result.code)
   ) {
     if (created) {
-      await chrome.tabs.remove(tabId).catch(() => {});
+      await extensionApi.tabs.remove(tabId).catch(() => {});
     }
     attempt = await runCheckoutOnDomain(fallbackDomain);
     result = attempt.result;
@@ -475,9 +476,9 @@ async function handleBrowserBuy(payload) {
 
     const nextUrl = result.paymentUrl || result.checkoutUrl;
     if (nextUrl) {
-      await chrome.tabs.create({ url: nextUrl, active: true });
+      await extensionApi.tabs.create({ url: nextUrl, active: true });
       if (created) {
-        await chrome.tabs.remove(tabId).catch(() => {});
+        await extensionApi.tabs.remove(tabId).catch(() => {});
       }
       return { ...result, openedPayment: true };
     }
@@ -486,9 +487,9 @@ async function handleBrowserBuy(payload) {
   if (result?.code === "payment_already_processing") {
     const existingCheckoutTab = await findExistingCheckoutTab(checkoutDomain);
     if (existingCheckoutTab?.id) {
-      await chrome.tabs.update(existingCheckoutTab.id, { active: true });
+      await extensionApi.tabs.update(existingCheckoutTab.id, { active: true });
       if (created) {
-        await chrome.tabs.remove(tabId).catch(() => {});
+        await extensionApi.tabs.remove(tabId).catch(() => {});
       }
       return {
         ok: true,
@@ -505,9 +506,9 @@ async function handleBrowserBuy(payload) {
       domain: checkoutDomain,
     });
     if (storedCheckout?.checkoutUrl) {
-      await chrome.tabs.create({ url: storedCheckout.checkoutUrl, active: true });
+      await extensionApi.tabs.create({ url: storedCheckout.checkoutUrl, active: true });
       if (created) {
-        await chrome.tabs.remove(tabId).catch(() => {});
+        await extensionApi.tabs.remove(tabId).catch(() => {});
       }
       return {
         ok: true,
@@ -521,12 +522,12 @@ async function handleBrowserBuy(payload) {
 
   if (result?.code === "datadome_challenge") {
     if (result.captchaUrl) {
-      await chrome.tabs.update(tabId, {
+      await extensionApi.tabs.update(tabId, {
         active: true,
         url: result.captchaUrl,
       });
     } else {
-      await chrome.tabs.update(tabId, {
+      await extensionApi.tabs.update(tabId, {
         active: true,
       });
     }
@@ -565,31 +566,31 @@ function scheduleSync(domain) {
   syncTimers.set(normalizedDomain, timer);
 }
 
-chrome.cookies.onChanged.addListener(({ cookie }) => {
+extensionApi.cookies.onChanged.addListener(({ cookie }) => {
   if (!cookie || !["access_token_web", "refresh_token_web"].includes(cookie.name)) {
     return;
   }
   scheduleSync(cookie.domain);
 });
 
-chrome.runtime.onStartup.addListener(() => {
+extensionApi.runtime.onStartup.addListener(() => {
   ensurePeriodicSyncAlarm();
   void syncAndPersistAllDomains();
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+extensionApi.runtime.onInstalled.addListener(() => {
   ensurePeriodicSyncAlarm();
   void syncAndPersistAllDomains();
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+extensionApi.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== PERIODIC_SYNC_ALARM) {
     return;
   }
   void syncAndPersistAllDomains();
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message?.type === "VINTRACK_EXTENSION_PING") {
       const config = await getConfig();
@@ -606,7 +607,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      await chrome.storage.local.set({
+      await extensionApi.storage.local.set({
         [STORAGE_KEYS.token]: token,
         [STORAGE_KEYS.appOrigin]: appOrigin,
       });
@@ -657,7 +658,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      await chrome.storage.local.set({ [STORAGE_KEYS.theme]: theme });
+      await extensionApi.storage.local.set({ [STORAGE_KEYS.theme]: theme });
       sendResponse({ ok: true, theme });
       return;
     }
