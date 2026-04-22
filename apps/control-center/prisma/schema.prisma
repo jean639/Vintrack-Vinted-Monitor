@@ -49,6 +49,7 @@ model User {
   proxy_groups  proxy_groups[]
   telegram_connections telegram_connections[]
   telegram_connect_codes telegram_connect_codes[]
+  vinted_session vinted_sessions?
 }
 
 model VerificationToken {
@@ -147,4 +148,34 @@ model proxy_groups {
   bandwidth_reset_at  DateTime? @db.Timestamp(6)
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   monitors            monitors[]
+}
+
+model vinted_sessions {
+  id                        Int      @id @default(autoincrement())
+  userId                    String   @unique @map("user_id")
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vinted_user_id            BigInt   @default(0)
+  vinted_name               String   @default("")
+  access_token_ciphertext   String   @db.Text
+  refresh_token_ciphertext  String?  @db.Text
+  cookie_header_ciphertext  String?  @db.Text
+  csrf_token_ciphertext     String?  @db.Text
+  anon_id_ciphertext        String?  @db.Text
+  user_agent                String?  @db.Text
+  phone_number_ciphertext   String?  @db.Text
+  browser_linked            Boolean  @default(false)
+  domain                    String   @db.VarChar(255)
+  status                    String   @default("active") @db.VarChar(50)
+  linked_at                 DateTime? @db.Timestamp(6)
+  last_check                DateTime? @db.Timestamp(6)
+  warmed_at                 DateTime? @db.Timestamp(6)
+  last_browser_sync_at      DateTime? @db.Timestamp(6)
+  last_refresh_at           DateTime? @db.Timestamp(6)
+  last_valid_at             DateTime? @db.Timestamp(6)
+  invalid_reason            String?  @db.Text
+  created_at                DateTime @default(now()) @db.Timestamp(6)
+  updated_at                DateTime @updatedAt @db.Timestamp(6)
+
+  @@index([status])
+  @@index([last_check])
 }
