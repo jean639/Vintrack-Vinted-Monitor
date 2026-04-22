@@ -72,3 +72,16 @@ func TestNormalizeBrowserSessionInput_RequiresAccessToken(t *testing.T) {
 		t.Fatal("normalizeBrowserSessionInput() error = nil, want non-nil")
 	}
 }
+
+func TestNormalizeBrowserSessionInput_AllowsRefreshOnly(t *testing.T) {
+	accessToken, refreshToken, _, _, err := normalizeBrowserSessionInput("", "refresh-456", "", "")
+	if err != nil {
+		t.Fatalf("normalizeBrowserSessionInput() error = %v", err)
+	}
+	if accessToken != "" {
+		t.Fatalf("accessToken = %q, want empty", accessToken)
+	}
+	if refreshToken != "refresh-456" {
+		t.Fatalf("refreshToken = %q, want %q", refreshToken, "refresh-456")
+	}
+}

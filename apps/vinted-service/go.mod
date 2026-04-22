@@ -6,6 +6,7 @@ require (
 	github.com/bogdanfinn/fhttp v0.6.8
 	github.com/bogdanfinn/tls-client v1.14.0
 	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.11.1
 	github.com/redis/go-redis/v9 v9.18.0
 )
 

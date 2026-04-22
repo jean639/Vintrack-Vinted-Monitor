@@ -21,9 +21,11 @@ func main() {
 
 	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
 	redisPassword := getEnv("REDIS_PASSWORD", "")
+	databaseURL := getEnv("DATABASE_URL", "")
+	encryptionKey := getEnv("VINTED_SESSION_ENCRYPTION_KEY", "")
 	listenAddr := getEnv("LISTEN_ADDR", ":4000")
 
-	sessionMgr, err := session.NewManager(redisAddr, redisPassword)
+	sessionMgr, err := session.NewManager(redisAddr, redisPassword, databaseURL, encryptionKey)
 	if err != nil {
 		log.Fatalf("Session manager: %v", err)
 	}
@@ -37,6 +39,11 @@ func main() {
 		_ = client.WarmUp()
 
 		if client.ValidateSession() {
+			now := time.Now().UTC().Format(time.RFC3339)
+			sess.LastValidAt = now
+			sess.LastCheck = now
+			sess.Status = "active"
+			sess.InvalidReason = ""
 			return true
 		}
 
@@ -48,8 +55,12 @@ func main() {
 			}
 
 			updated := client.GetSession()
+			now := time.Now().UTC().Format(time.RFC3339)
 			updated.Status = "active"
-			updated.LastCheck = time.Now().UTC().Format(time.RFC3339)
+			updated.LastCheck = now
+			updated.LastRefreshAt = now
+			updated.LastValidAt = now
+			updated.InvalidReason = ""
 			_ = sessionMgr.Store(*updated)
 			sess.AccessToken = updated.AccessToken
 			sess.RefreshToken = updated.RefreshToken

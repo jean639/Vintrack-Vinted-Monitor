@@ -15,6 +15,11 @@ type VintedAccountStatus = {
     domain?: string;
     linked_at?: string;
     last_check?: string;
+    last_refresh_at?: string;
+    last_valid_at?: string;
+    invalid_reason?: string;
+    has_refresh_token?: boolean;
+    requires_browser_reauth?: boolean;
     has_browser_session?: boolean;
     browser_linked?: boolean;
     last_browser_sync?: string;

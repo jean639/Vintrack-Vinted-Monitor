@@ -30,6 +30,9 @@ type VintedSession struct {
 	Status          string `json:"status"`
 	LinkedAt        string `json:"linked_at"`
 	LastCheck       string `json:"last_check"`
+	LastRefreshAt   string `json:"last_refresh_at,omitempty"`
+	LastValidAt     string `json:"last_valid_at,omitempty"`
+	InvalidReason   string `json:"invalid_reason,omitempty"`
 }
 
 type CheckoutLink struct {
@@ -68,9 +71,10 @@ type BrowserLink struct {
 type Manager struct {
 	redis *redis.Client
 	ctx   context.Context
+	store *persistentStore
 }
 
-func NewManager(redisAddr, redisPassword string) (*Manager, error) {
+func NewManager(redisAddr, redisPassword, databaseURL, encryptionKey string) (*Manager, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         redisAddr,
 		Password:     redisPassword,
@@ -89,10 +93,32 @@ func NewManager(redisAddr, redisPassword string) (*Manager, error) {
 	}
 
 	log.Printf("Session manager connected to Redis: %s", redisAddr)
-	return &Manager{redis: client, ctx: ctx}, nil
+
+	var store *persistentStore
+	if databaseURL != "" {
+		var err error
+		store, err = newPersistentStore(databaseURL, encryptionKey)
+		if err != nil {
+			_ = client.Close()
+			return nil, err
+		}
+		log.Printf("Session manager connected to PostgreSQL durable session store")
+	} else {
+		log.Printf("Session manager running without durable PostgreSQL session store")
+	}
+
+	manager := &Manager{redis: client, ctx: ctx, store: store}
+	if manager.store != nil {
+		manager.migrateCachedSessionsToStore()
+	}
+
+	return manager, nil
 }
 
 func (m *Manager) Close() error {
+	if m.store != nil {
+		_ = m.store.Close()
+	}
 	return m.redis.Close()
 }
 
@@ -100,15 +126,78 @@ func (m *Manager) sessionKey(userID string) string {
 	return fmt.Sprintf("vinted:session:%s", userID)
 }
 
-func (m *Manager) Store(sess VintedSession) error {
-	data, err := json.Marshal(sess)
+func (m *Manager) migrateCachedSessionsToStore() {
+	keys, err := m.redis.Keys(m.ctx, "vinted:session:*").Result()
 	if err != nil {
-		return fmt.Errorf("marshal session: %w", err)
+		log.Printf("[session] failed to scan Redis sessions for durable migration: %v", err)
+		return
 	}
-	return m.redis.Set(m.ctx, m.sessionKey(sess.UserID), data, 7*24*time.Hour).Err()
+	if len(keys) == 0 {
+		return
+	}
+
+	values, err := m.redis.MGet(m.ctx, keys...).Result()
+	if err != nil {
+		log.Printf("[session] failed to read Redis sessions for durable migration: %v", err)
+		return
+	}
+
+	migrated := 0
+	for _, val := range values {
+		s, ok := val.(string)
+		if !ok || s == "" {
+			continue
+		}
+
+		var sess VintedSession
+		if err := json.Unmarshal([]byte(s), &sess); err != nil || sess.UserID == "" || sess.AccessToken == "" {
+			continue
+		}
+		if err := m.store.Save(m.ctx, sess); err != nil {
+			log.Printf("[session] failed to migrate cached session for user %s: %v", sess.UserID, err)
+			continue
+		}
+		migrated++
+	}
+	if migrated > 0 {
+		log.Printf("[session] migrated %d cached Vinted session(s) to PostgreSQL", migrated)
+	}
+}
+
+func (m *Manager) Store(sess VintedSession) error {
+	if m.store != nil {
+		if err := m.store.Save(m.ctx, sess); err != nil {
+			return err
+		}
+	}
+
+	return m.cacheSession(sess)
 }
 
 func (m *Manager) Get(userID string) (*VintedSession, error) {
+	sess, err := m.getCached(userID)
+	if err != nil {
+		return nil, err
+	}
+	if sess != nil {
+		return sess, nil
+	}
+
+	if m.store == nil {
+		return nil, nil
+	}
+
+	sess, err = m.store.Get(m.ctx, userID)
+	if err != nil || sess == nil {
+		return sess, err
+	}
+	if err := m.cacheSession(*sess); err != nil {
+		log.Printf("[session] failed to repopulate Redis cache for user %s: %v", userID, err)
+	}
+	return sess, nil
+}
+
+func (m *Manager) getCached(userID string) (*VintedSession, error) {
 	data, err := m.redis.Get(m.ctx, m.sessionKey(userID)).Bytes()
 	if err == redis.Nil {
 		return nil, nil
@@ -123,11 +212,60 @@ func (m *Manager) Get(userID string) (*VintedSession, error) {
 	return &sess, nil
 }
 
+func (m *Manager) cacheSession(sess VintedSession) error {
+	data, err := json.Marshal(sess)
+	if err != nil {
+		return fmt.Errorf("marshal session: %w", err)
+	}
+	return m.redis.Set(m.ctx, m.sessionKey(sess.UserID), data, 7*24*time.Hour).Err()
+}
+
+func (m *Manager) refreshLockKey(userID string) string {
+	return fmt.Sprintf("vinted:session-refresh-lock:%s", userID)
+}
+
+func (m *Manager) AcquireRefreshLock(userID string, ttl time.Duration) (string, bool, error) {
+	token, err := m.newBrowserSyncCode()
+	if err != nil {
+		return "", false, err
+	}
+	ok, err := m.redis.SetNX(m.ctx, m.refreshLockKey(userID), token, ttl).Result()
+	return token, ok, err
+}
+
+func (m *Manager) ReleaseRefreshLock(userID, token string) error {
+	const script = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0
+`
+	return m.redis.Eval(m.ctx, script, []string{m.refreshLockKey(userID)}, token).Err()
+}
+
 func (m *Manager) Delete(userID string) error {
+	if m.store != nil {
+		if err := m.store.Delete(m.ctx, userID); err != nil {
+			return err
+		}
+	}
 	return m.redis.Del(m.ctx, m.sessionKey(userID)).Err()
 }
 
 func (m *Manager) GetAllSessions() ([]VintedSession, error) {
+	if m.store != nil {
+		sessions, err := m.store.List(m.ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sess := range sessions {
+			if err := m.cacheSession(sess); err != nil {
+				log.Printf("[session] failed to cache durable session for user %s: %v", sess.UserID, err)
+			}
+		}
+		return sessions, nil
+	}
+
 	keys, err := m.redis.Keys(m.ctx, "vinted:session:*").Result()
 	if err != nil {
 		return nil, err
@@ -402,7 +540,7 @@ func (m *Manager) StartKeepAlive(validateFn func(sess *VintedSession) bool) {
 		}
 
 		for _, sess := range sessions {
-			if sess.Status != "active" {
+			if sess.Status != "active" && sess.Status != "degraded" {
 				continue
 			}
 
@@ -419,11 +557,15 @@ func (m *Manager) StartKeepAlive(validateFn func(sess *VintedSession) bool) {
 			}
 
 			if valid {
-				sess.LastCheck = time.Now().UTC().Format(time.RFC3339)
+				now := time.Now().UTC().Format(time.RFC3339)
+				sess.LastCheck = now
+				sess.LastValidAt = now
 				sess.Status = "active"
+				sess.InvalidReason = ""
 			} else {
-				log.Printf("[keep-alive] session expired for user %s (@%s) after 3 attempts", sess.UserID, sess.VintedName)
-				sess.Status = "expired"
+				log.Printf("[keep-alive] session degraded for user %s (@%s) after 3 attempts", sess.UserID, sess.VintedName)
+				sess.Status = "degraded"
+				sess.InvalidReason = "keep_alive_validation_failed"
 			}
 			if err := m.Store(sess); err != nil {
 				log.Printf("[keep-alive] failed to update session for %s: %v", sess.UserID, err)

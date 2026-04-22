@@ -5,6 +5,11 @@ import { db } from "@/lib/db"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
+  session: {
+    strategy: "database",
+    maxAge: 180 * 24 * 60 * 60,
+    updateAge: 24 * 60 * 60,
+  },
   providers: [Discord],
   pages: {
     signIn: "/login",

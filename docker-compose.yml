@@ -100,12 +100,18 @@ services:
     environment:
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=
+      - DATABASE_URL=postgres://vinuser:vinpassword@postgres:5432/vintrack?sslmode=disable
+      - VINTED_SESSION_ENCRYPTION_KEY=${VINTED_SESSION_ENCRYPTION_KEY}
       - LISTEN_ADDR=:4000
     ports:
       - "127.0.0.1:4000:4000"
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
+      control-center-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   worker:
