@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,8 @@ func NewServer(sessions *session.Manager, addr string) *Server {
 
 const browserSyncTTL = 10 * time.Minute
 const browserLinkTTL = 180 * 24 * time.Hour
+const proactiveRefreshWindow = 15 * time.Minute
+const refreshLockTTL = 45 * time.Second
 
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
@@ -203,11 +206,54 @@ func normalizeBrowserSessionInput(accessToken, refreshToken, cookieHeader, userA
 		}
 	}
 
-	if normalizedAccessToken == "" {
-		return "", "", "", "", errors.New("access_token is required or must be present in the cookie header")
+	if normalizedAccessToken == "" && normalizedRefreshToken == "" {
+		return "", "", "", "", errors.New("access_token or refresh_token is required or must be present in the cookie header")
 	}
 
 	return normalizedAccessToken, normalizedRefreshToken, normalizedCookieHeader, normalizedUserAgent, nil
+}
+
+func accessTokenExpiresWithin(token string, window time.Duration) bool {
+	expiry, ok := accessTokenExpiry(token)
+	if !ok {
+		return false
+	}
+	return time.Until(expiry) <= window
+}
+
+func accessTokenExpired(token string) bool {
+	expiry, ok := accessTokenExpiry(token)
+	if !ok {
+		return false
+	}
+	return time.Now().After(expiry)
+}
+
+func accessTokenExpiry(token string) (time.Time, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+
+	payload := parts[1]
+	decoded, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		decoded, err = base64.URLEncoding.DecodeString(payload)
+	}
+	if err != nil {
+		return time.Time{}, false
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return time.Time{}, false
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok || exp <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(int64(exp), 0), true
 }
 
 func (s *Server) canonicalizeSessionDomain(sess *session.VintedSession) {
@@ -224,6 +270,113 @@ func (s *Server) canonicalizeSessionDomain(sess *session.VintedSession) {
 	if err := s.sessions.Store(*sess); err != nil {
 		log.Printf("[server] failed to persist canonical domain for user %s: %v", sess.UserID, err)
 	}
+}
+
+func (s *Server) refreshSessionWithLock(userID string, sess *session.VintedSession) (*session.VintedSession, *vinted.Client, error) {
+	if sess == nil {
+		return nil, nil, errors.New("no linked Vinted account")
+	}
+	if strings.TrimSpace(sess.RefreshToken) == "" {
+		sess.Status = "missing_refresh_token"
+		sess.InvalidReason = "missing_refresh_token"
+		_ = s.sessions.Store(*sess)
+		return nil, nil, errors.New("no refresh token available")
+	}
+
+	lockToken, acquired, err := s.sessions.AcquireRefreshLock(userID, refreshLockTTL)
+	if err != nil {
+		log.Printf("[session] failed to acquire refresh lock for user %s: %v", userID, err)
+	}
+
+	if !acquired {
+		for attempt := 0; attempt < 10; attempt++ {
+			time.Sleep(500 * time.Millisecond)
+			latest, err := s.sessions.Get(userID)
+			if err != nil || latest == nil {
+				continue
+			}
+			if latest.AccessToken != sess.AccessToken && !accessTokenExpiresWithin(latest.AccessToken, proactiveRefreshWindow) {
+				client, clientErr := vinted.NewClient(latest)
+				if clientErr != nil {
+					return nil, nil, clientErr
+				}
+				if warmErr := client.WarmUp(); warmErr != nil {
+					log.Printf("[session] warmup warning after refresh wait for user %s: %v", userID, warmErr)
+				}
+				return latest, client, nil
+			}
+		}
+		return nil, nil, errors.New("session refresh is already in progress")
+	}
+	defer func() {
+		if err := s.sessions.ReleaseRefreshLock(userID, lockToken); err != nil {
+			log.Printf("[session] failed to release refresh lock for user %s: %v", userID, err)
+		}
+	}()
+
+	latest, err := s.sessions.Get(userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if latest != nil {
+		sess = latest
+	}
+	if !accessTokenExpiresWithin(sess.AccessToken, proactiveRefreshWindow) && sess.Status == "active" {
+		client, err := vinted.NewClient(sess)
+		if err == nil {
+			if warmErr := client.WarmUp(); warmErr != nil {
+				log.Printf("[session] warmup warning for already fresh session %s: %v", userID, warmErr)
+			}
+		}
+		return sess, client, err
+	}
+
+	client, err := vinted.NewClient(sess)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := client.WarmUp(); err != nil {
+		log.Printf("[session] warmup warning before locked refresh for user %s: %v", userID, err)
+	}
+
+	if err := client.RefreshAccessToken(); err != nil {
+		return nil, nil, err
+	}
+
+	updated := client.GetSession()
+	now := time.Now().UTC().Format(time.RFC3339)
+	updated.Status = "active"
+	updated.LastCheck = now
+	updated.LastRefreshAt = now
+	updated.LastValidAt = now
+	updated.InvalidReason = ""
+	if err := s.sessions.Store(*updated); err != nil {
+		return nil, nil, err
+	}
+
+	return updated, client, nil
+}
+
+func accountInfoWithRefresh(client *vinted.Client) (*vinted.AccountInfo, error) {
+	info, err := client.GetAccountInfo()
+	if err == nil {
+		return info, nil
+	}
+
+	sess := client.GetSession()
+	if sess == nil || strings.TrimSpace(sess.RefreshToken) == "" {
+		return nil, err
+	}
+
+	if refreshErr := client.RefreshAccessToken(); refreshErr != nil {
+		return nil, fmt.Errorf("%v (refresh failed: %v)", err, refreshErr)
+	}
+
+	info, retryErr := client.GetAccountInfo()
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	return info, nil
 }
 
 func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*session.VintedSession, *vinted.Client, bool) {
@@ -245,6 +398,25 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 
 	s.canonicalizeSessionDomain(sess)
 
+	if sess.RefreshToken != "" && accessTokenExpiresWithin(sess.AccessToken, proactiveRefreshWindow) {
+		refreshed, refreshedClient, err := s.refreshSessionWithLock(userID, sess)
+		if err != nil {
+			log.Printf("[session] proactive token refresh failed for user %s: %v", userID, err)
+			if accessTokenExpired(sess.AccessToken) {
+				sess.Status = "needs_browser_reauth"
+				sess.InvalidReason = "access_token_expired_refresh_failed"
+				_ = s.sessions.Store(*sess)
+				writeError(w, "Vinted session needs browser re-authentication", 403)
+				return nil, nil, false
+			}
+			sess.Status = "degraded"
+			sess.InvalidReason = "proactive_refresh_failed"
+			_ = s.sessions.Store(*sess)
+		} else {
+			return refreshed, refreshedClient, true
+		}
+	}
+
 	client, err := vinted.NewClient(sess)
 	if err != nil {
 		writeError(w, "failed to create Vinted client", 500)
@@ -262,26 +434,32 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 
 		if sess.RefreshToken != "" {
 			log.Printf("[session] attempting token refresh for user %s...", userID)
-			if err := client.RefreshAccessToken(); err != nil {
+			updated, updatedClient, err := s.refreshSessionWithLock(userID, sess)
+			if err != nil {
 				log.Printf("[session] token refresh failed for user %s: %v", userID, err)
 			} else {
 				log.Printf("[session] token refresh succeeded for user %s", userID)
-				updated := client.GetSession()
-				updated.Status = "active"
-				updated.LastCheck = time.Now().UTC().Format(time.RFC3339)
-				_ = s.sessions.Store(*updated)
-				sess = updated
-				return sess, client, true
+				return updated, updatedClient, true
 			}
 		}
 
 		if client.ValidateSession() {
 			log.Printf("[session] re-validation succeeded for user %s, reactivating session", userID)
+			now := time.Now().UTC().Format(time.RFC3339)
 			sess.Status = "active"
-			sess.LastCheck = time.Now().UTC().Format(time.RFC3339)
+			sess.LastCheck = now
+			sess.LastValidAt = now
+			sess.InvalidReason = ""
 			_ = s.sessions.Store(*sess)
 		} else {
-			writeError(w, "Vinted session is "+sess.Status+", please re-link", 403)
+			if sess.Status == "degraded" {
+				writeError(w, "Vinted session is temporarily degraded; retry or sync the browser extension", 503)
+			} else {
+				sess.Status = "needs_browser_reauth"
+				sess.InvalidReason = "validation_failed_after_refresh"
+				_ = s.sessions.Store(*sess)
+				writeError(w, "Vinted session needs browser re-authentication", 403)
+			}
 			return nil, nil, false
 		}
 	}
@@ -355,7 +533,8 @@ func (s *Server) buildLinkedSession(userID string, req linkRequest) (*session.Vi
 		preservedAnonID = strings.TrimSpace(existingSession.AnonID)
 	}
 
-	linkedAt := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
+	linkedAt := now
 	if existingSession != nil && strings.TrimSpace(existingSession.LinkedAt) != "" {
 		linkedAt = existingSession.LinkedAt
 	}
@@ -376,10 +555,18 @@ func (s *Server) buildLinkedSession(userID string, req linkRequest) (*session.Vi
 			}
 			return existingSession.LastBrowserSync
 		}()),
-		Domain:    domain,
-		Status:    "active",
-		LinkedAt:  linkedAt,
-		LastCheck: time.Now().UTC().Format(time.RFC3339),
+		Domain:      domain,
+		Status:      "active",
+		LinkedAt:    linkedAt,
+		LastCheck:   now,
+		LastValidAt: now,
+		LastRefreshAt: firstNonEmpty(func() string {
+			if existingSession == nil {
+				return ""
+			}
+			return existingSession.LastRefreshAt
+		}()),
+		InvalidReason: "",
 	}, nil
 }
 
@@ -421,7 +608,7 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[link] warmup warning for user %s: %v", userID, err)
 	}
 
-	info, err := client.GetAccountInfo()
+	info, err := accountInfoWithRefresh(client)
 	if err != nil {
 		writeError(w, "invalid token: "+err.Error(), 401)
 		return
@@ -430,6 +617,9 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 	linkedSession := client.GetSession()
 	linkedSession.VintedUserID = info.ID
 	linkedSession.VintedName = info.Login
+	linkedSession.Status = "active"
+	linkedSession.LastValidAt = time.Now().UTC().Format(time.RFC3339)
+	linkedSession.InvalidReason = ""
 
 	if err := s.sessions.Store(*linkedSession); err != nil {
 		writeError(w, "failed to save session", 500)
@@ -549,7 +739,7 @@ func (s *Server) handleBrowserSyncComplete(w http.ResponseWriter, r *http.Reques
 		log.Printf("[browser-sync] warmup warning for user %s: %v", syncReq.UserID, err)
 	}
 
-	info, err := client.GetAccountInfo()
+	info, err := accountInfoWithRefresh(client)
 	if err != nil {
 		syncReq.Status = "failed"
 		syncReq.Domain = req.Domain
@@ -563,7 +753,10 @@ func (s *Server) handleBrowserSyncComplete(w http.ResponseWriter, r *http.Reques
 	linkedSession.VintedUserID = info.ID
 	linkedSession.VintedName = info.Login
 	linkedSession.BrowserLinked = true
-	linkedSession.LastBrowserSync = time.Now().UTC().Format(time.RFC3339)
+	linkedSession.Status = "active"
+	linkedSession.LastValidAt = time.Now().UTC().Format(time.RFC3339)
+	linkedSession.InvalidReason = ""
+	linkedSession.LastBrowserSync = linkedSession.LastValidAt
 
 	if err := s.sessions.Store(*linkedSession); err != nil {
 		writeError(w, "failed to save session", 500)
@@ -682,9 +875,33 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 		log.Printf("[extension-sync] warmup warning for user %s: %v", link.UserID, err)
 	}
 
-	info, err := client.GetAccountInfo()
+	info, err := accountInfoWithRefresh(client)
 	if err != nil {
+		if existingSession != nil && existingSession.Status == "active" && !accessTokenExpired(existingSession.AccessToken) {
+			if err := s.sessions.TouchBrowserLink(req.LinkToken); err != nil {
+				log.Printf("[extension-sync] failed to touch browser link for user %s: %v", link.UserID, err)
+			}
+			writeJSON(w, 200, map[string]interface{}{
+				"status":         "ignored_invalid_browser_session",
+				"domain":         existingSession.Domain,
+				"ignored_domain": incomingDomain,
+			})
+			return
+		}
 		writeError(w, "invalid browser token sync: "+err.Error(), 401)
+		return
+	}
+
+	if existingSession != nil && existingSession.VintedUserID > 0 && info.ID > 0 && existingSession.VintedUserID != info.ID {
+		if err := s.sessions.TouchBrowserLink(req.LinkToken); err != nil {
+			log.Printf("[extension-sync] failed to touch browser link for user %s: %v", link.UserID, err)
+		}
+		writeJSON(w, 200, map[string]interface{}{
+			"status":            "ignored_account",
+			"domain":            existingSession.Domain,
+			"ignored_domain":    incomingDomain,
+			"ignored_vinted_id": info.ID,
+		})
 		return
 	}
 
@@ -692,7 +909,10 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 	linkedSession.VintedUserID = info.ID
 	linkedSession.VintedName = info.Login
 	linkedSession.BrowserLinked = true
-	linkedSession.LastBrowserSync = time.Now().UTC().Format(time.RFC3339)
+	linkedSession.Status = "active"
+	linkedSession.LastValidAt = time.Now().UTC().Format(time.RFC3339)
+	linkedSession.InvalidReason = ""
+	linkedSession.LastBrowserSync = linkedSession.LastValidAt
 
 	if err := s.sessions.Store(*linkedSession); err != nil {
 		writeError(w, "failed to save session", 500)
@@ -836,17 +1056,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.canonicalizeSessionDomain(sess)
 
 	writeJSON(w, 200, map[string]interface{}{
-		"linked":              true,
-		"status":              sess.Status,
-		"vinted_name":         sess.VintedName,
-		"vinted_id":           sess.VintedUserID,
-		"domain":              sess.Domain,
-		"linked_at":           sess.LinkedAt,
-		"last_check":          sess.LastCheck,
-		"has_browser_session": sess.CookieHeader != "",
-		"browser_linked":      sess.BrowserLinked,
-		"last_browser_sync":   sess.LastBrowserSync,
-		"has_phone_number":    sess.PhoneNumber != "",
+		"linked":                  true,
+		"status":                  sess.Status,
+		"vinted_name":             sess.VintedName,
+		"vinted_id":               sess.VintedUserID,
+		"domain":                  sess.Domain,
+		"linked_at":               sess.LinkedAt,
+		"last_check":              sess.LastCheck,
+		"last_refresh_at":         sess.LastRefreshAt,
+		"last_valid_at":           sess.LastValidAt,
+		"invalid_reason":          sess.InvalidReason,
+		"has_refresh_token":       sess.RefreshToken != "",
+		"requires_browser_reauth": sess.Status == "needs_browser_reauth" || sess.Status == "missing_refresh_token",
+		"has_browser_session":     sess.CookieHeader != "",
+		"browser_linked":          sess.BrowserLinked,
+		"last_browser_sync":       sess.LastBrowserSync,
+		"has_phone_number":        sess.PhoneNumber != "",
 	})
 }
 
@@ -1285,13 +1510,20 @@ func (s *Server) persistSessionIfChanged(original *session.VintedSession, update
 	if original == nil || updated == nil {
 		return
 	}
+	tokenChanged := original.AccessToken != updated.AccessToken || original.RefreshToken != updated.RefreshToken
 	if !sessionChanged(original, updated) {
 		return
 	}
 
 	if markHealthy {
+		now := time.Now().UTC().Format(time.RFC3339)
 		updated.Status = "active"
-		updated.LastCheck = time.Now().UTC().Format(time.RFC3339)
+		updated.LastCheck = now
+		updated.LastValidAt = now
+		updated.InvalidReason = ""
+		if tokenChanged {
+			updated.LastRefreshAt = now
+		}
 	}
 
 	if err := s.sessions.Store(*updated); err != nil {
@@ -1310,7 +1542,10 @@ func sessionChanged(original *session.VintedSession, updated *session.VintedSess
 		original.AnonID != updated.AnonID ||
 		original.WarmedAt != updated.WarmedAt ||
 		original.Status != updated.Status ||
-		original.LastCheck != updated.LastCheck
+		original.LastCheck != updated.LastCheck ||
+		original.LastRefreshAt != updated.LastRefreshAt ||
+		original.LastValidAt != updated.LastValidAt ||
+		original.InvalidReason != updated.InvalidReason
 }
 
 func (s *Server) storeCheckoutLink(userID string, sess *session.VintedSession, link session.CheckoutLink) {
@@ -1485,33 +1720,10 @@ func (s *Server) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := vinted.NewClient(sess)
+	updated, _, err := s.refreshSessionWithLock(userID, sess)
 	if err != nil {
-		writeError(w, "failed to create client", 500)
-		return
-	}
-
-	if err := client.WarmUp(); err != nil {
-		log.Printf("[refresh] warmup warning for user %s: %v", userID, err)
-	}
-
-	if err := client.RefreshAccessToken(); err != nil {
 		log.Printf("[refresh] token refresh failed for user %s: %v", userID, err)
-
-		var body struct {
-			RefreshToken string `json:"refresh_token"`
-		}
-		_ = json.NewDecoder(strings.NewReader("")).Decode(&body)
-
 		writeError(w, "token refresh failed: "+err.Error(), 502)
-		return
-	}
-
-	updated := client.GetSession()
-	updated.Status = "active"
-	updated.LastCheck = time.Now().UTC().Format(time.RFC3339)
-	if err := s.sessions.Store(*updated); err != nil {
-		writeError(w, "failed to save refreshed session", 500)
 		return
 	}
 
