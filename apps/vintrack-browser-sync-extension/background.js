@@ -9,7 +9,7 @@ const STORAGE_KEYS = {
   theme: "vintrackTheme",
 };
 const PERIODIC_SYNC_ALARM = "vintrackPeriodicSync";
-const PERIODIC_SYNC_MINUTES = 30;
+const PERIODIC_SYNC_MINUTES = 10;
 const BUY_TAB_READY_TIMEOUT_MS = 20000;
 const extensionApi = globalThis.browser || globalThis.chrome;
 
@@ -32,6 +32,27 @@ function domainFromUrl(value) {
   } catch {
     return "";
   }
+}
+
+function cookieLookupDetails(domain, name, storeId) {
+  const details = {
+    url: `https://${sanitizeDomain(domain)}/`,
+    name,
+  };
+  if (storeId) {
+    details.storeId = storeId;
+  }
+  return details;
+}
+
+function cookieSyncKey(domain, storeId) {
+  return `${sanitizeDomain(domain)}|${storeId || ""}`;
+}
+
+function cookieDomainMatches(cookieDomain, targetDomain) {
+  const cookieHost = sanitizeDomain(cookieDomain);
+  const targetHost = sanitizeDomain(targetDomain);
+  return cookieHost === targetHost || targetHost.endsWith(`.${cookieHost}`) || cookieHost.endsWith(`.${targetHost}`);
 }
 
 function itemUrlForDomain(itemUrl, domain, itemId) {
@@ -143,7 +164,7 @@ function ensurePeriodicSyncAlarm() {
 
 async function persistSyncState(results) {
   const successfulDomains = results
-    .filter((result) => result.ok && result.domain)
+    .filter((result) => result.ok && result.domain && (!result.status || result.status === "completed" || result.status === "refreshed"))
     .map((result) => result.domain);
   const failedResult = results.find((result) => !result.ok);
 
@@ -186,8 +207,9 @@ function formatRuntimeState(storage) {
   };
 }
 
-async function syncDomain(domain) {
+async function syncDomain(domain, options = {}) {
   const normalizedDomain = sanitizeDomain(domain);
+  const storeId = typeof options.storeId === "string" ? options.storeId : "";
   if (!isVintedDomain(normalizedDomain)) {
     return { ok: false, reason: "unsupported-domain" };
   }
@@ -197,17 +219,15 @@ async function syncDomain(domain) {
     return { ok: false, reason: "not-configured" };
   }
 
-  const accessCookie = await extensionApi.cookies.get({
-    url: `https://${normalizedDomain}/`,
-    name: "access_token_web",
-  });
-  const refreshCookie = await extensionApi.cookies.get({
-    url: `https://${normalizedDomain}/`,
-    name: "refresh_token_web",
-  });
+  const accessCookie = await extensionApi.cookies.get(
+    cookieLookupDetails(normalizedDomain, "access_token_web", storeId)
+  );
+  const refreshCookie = await extensionApi.cookies.get(
+    cookieLookupDetails(normalizedDomain, "refresh_token_web", storeId)
+  );
 
-  if (!accessCookie?.value) {
-    return { ok: false, reason: "missing-access-token" };
+  if (!accessCookie?.value && !refreshCookie?.value) {
+    return { ok: false, reason: "missing-browser-token" };
   }
 
   const response = await fetch(
@@ -219,7 +239,7 @@ async function syncDomain(domain) {
       },
       body: JSON.stringify({
         link_token: browserLinkToken,
-        access_token: accessCookie.value,
+        access_token: accessCookie?.value || "",
         refresh_token: refreshCookie?.value || "",
         domain: normalizedDomain,
         user_agent: navigator.userAgent,
@@ -234,21 +254,39 @@ async function syncDomain(domain) {
     );
   }
 
-  return { ok: true, domain: normalizedDomain };
+  const data = await response.json().catch(() => ({}));
+  return {
+    ok: true,
+    domain: sanitizeDomain(data.domain || normalizedDomain),
+    status: typeof data.status === "string" ? data.status : "completed",
+    storeId,
+  };
 }
 
 async function syncAllVintedDomains() {
-  const cookies = await extensionApi.cookies.getAll({ name: "access_token_web" });
-  const domains = [...new Set(cookies.map((cookie) => sanitizeDomain(cookie.domain)).filter(isVintedDomain))];
+  const accessCookies = await extensionApi.cookies.getAll({ name: "access_token_web" });
+  const refreshCookies = await extensionApi.cookies.getAll({ name: "refresh_token_web" });
+  const candidates = new Map();
+
+  for (const cookie of [...accessCookies, ...refreshCookies]) {
+    const domain = sanitizeDomain(cookie.domain);
+    if (!isVintedDomain(domain)) {
+      continue;
+    }
+    const storeId = typeof cookie.storeId === "string" ? cookie.storeId : "";
+    candidates.set(cookieSyncKey(domain, storeId), { domain, storeId });
+  }
+
   const results = [];
 
-  for (const domain of domains) {
+  for (const candidate of candidates.values()) {
     try {
-      results.push(await syncDomain(domain));
+      results.push(await syncDomain(candidate.domain, { storeId: candidate.storeId }));
     } catch (error) {
       results.push({
         ok: false,
-        domain,
+        domain: candidate.domain,
+        storeId: candidate.storeId,
         error: error instanceof Error ? error.message : "unknown-error",
       });
     }
@@ -260,6 +298,38 @@ async function syncAllVintedDomains() {
 async function syncPreferredOrAllDomains(preferredDomain) {
   const normalizedPreferredDomain = sanitizeDomain(preferredDomain);
   if (normalizedPreferredDomain && isVintedDomain(normalizedPreferredDomain)) {
+    const cookies = (await extensionApi.cookies.getAll({ name: "access_token_web" })).filter((cookie) =>
+      cookieDomainMatches(cookie.domain, normalizedPreferredDomain)
+    );
+    const refreshCookies = (await extensionApi.cookies.getAll({ name: "refresh_token_web" })).filter((cookie) =>
+      cookieDomainMatches(cookie.domain, normalizedPreferredDomain)
+    );
+    const storeIds = [
+      ...new Set(
+        [...cookies, ...refreshCookies]
+          .map((cookie) => (typeof cookie.storeId === "string" ? cookie.storeId : ""))
+      ),
+    ];
+    const targets = storeIds.length > 0 ? storeIds : [""];
+    const results = [];
+
+    for (const storeId of targets) {
+      try {
+        results.push(await syncDomain(normalizedPreferredDomain, { storeId }));
+      } catch (error) {
+        results.push({
+          ok: false,
+          domain: normalizedPreferredDomain,
+          storeId,
+          error: error instanceof Error ? error.message : "unknown-error",
+        });
+      }
+    }
+
+    if (results.some((result) => result.ok)) {
+      return results;
+    }
+
     try {
       return [await syncDomain(normalizedPreferredDomain)];
     } catch (error) {
@@ -288,15 +358,16 @@ async function syncAndPersistAllDomains() {
   return results;
 }
 
-async function syncAndPersistDomain(domain) {
+async function syncAndPersistDomain(domain, options = {}) {
   let result;
 
   try {
-    result = await syncDomain(domain);
+    result = await syncDomain(domain, options);
   } catch (error) {
     result = {
       ok: false,
       domain: sanitizeDomain(domain),
+      storeId: typeof options.storeId === "string" ? options.storeId : "",
       error: error instanceof Error ? error.message : "unknown-error",
     };
   }
@@ -543,34 +614,58 @@ async function handleBrowserBuy(payload) {
 
 const syncTimers = new Map();
 
-function scheduleSync(domain) {
+function scheduleSync(domain, options = {}) {
   const normalizedDomain = sanitizeDomain(domain);
+  const storeId = typeof options.storeId === "string" ? options.storeId : "";
   if (!isVintedDomain(normalizedDomain)) {
     return;
   }
 
-  const existingTimer = syncTimers.get(normalizedDomain);
+  const key = cookieSyncKey(normalizedDomain, storeId);
+  const existingTimer = syncTimers.get(key);
   if (existingTimer) {
     clearTimeout(existingTimer);
   }
 
   const timer = setTimeout(async () => {
-    syncTimers.delete(normalizedDomain);
+    syncTimers.delete(key);
     try {
-      await syncAndPersistDomain(normalizedDomain);
+      await syncAndPersistDomain(normalizedDomain, { storeId });
     } catch (error) {
       console.warn("[vintrack-extension] sync failed", normalizedDomain, error);
     }
   }, 800);
 
-  syncTimers.set(normalizedDomain, timer);
+  syncTimers.set(key, timer);
+}
+
+async function scheduleSyncForTab(tab) {
+  const domain = domainFromUrl(tab?.url || "");
+  if (!domain || !isVintedDomain(domain)) {
+    return;
+  }
+  scheduleSync(domain, { storeId: typeof tab?.cookieStoreId === "string" ? tab.cookieStoreId : "" });
 }
 
 extensionApi.cookies.onChanged.addListener(({ cookie }) => {
   if (!cookie || !["access_token_web", "refresh_token_web"].includes(cookie.name)) {
     return;
   }
-  scheduleSync(cookie.domain);
+  scheduleSync(cookie.domain, { storeId: typeof cookie.storeId === "string" ? cookie.storeId : "" });
+});
+
+extensionApi.tabs.onActivated.addListener(({ tabId }) => {
+  extensionApi.tabs
+    .get(tabId)
+    .then(scheduleSyncForTab)
+    .catch(() => {});
+});
+
+extensionApi.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo.url && changeInfo.status !== "complete") {
+    return;
+  }
+  void scheduleSyncForTab(tab || { id: tabId, url: changeInfo.url });
 });
 
 extensionApi.runtime.onStartup.addListener(() => {
@@ -618,7 +713,9 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         ok: true,
         ...formatRuntimeState(config),
-        syncedDomains: results.filter((result) => result.ok).map((result) => result.domain),
+        syncedDomains: results
+          .filter((result) => result.ok && (!result.status || result.status === "completed" || result.status === "refreshed"))
+          .map((result) => result.domain),
         results,
       });
       return;
