@@ -50,7 +50,7 @@ You can try Vintrack without hosting anything yourself:
 - **URL:** https://vintrack.jakobaio.dev
 - **Login:** sign up with Discord OAuth
 - **Default role:** new accounts start as **Free**
-- **Browser extension:** download the latest ZIP from [GitHub releases](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
+- **Browser extension:** download the latest Chrome ZIP or Firefox XPI from GitHub releases
 - **Support:** join the Discord server if you need help: https://discord.gg/WbEpEjaWjP
 
 ### Demo Quick Start
@@ -129,14 +129,16 @@ The recommended linking flow is the browser extension. Install it once, sign in 
 
 The extension is the easiest way to use linked Vinted accounts on the live demo and in self-hosted installs.
 
-- Download: [vintrack-browser-sync-extension.zip](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
+- Chrome download: [vintrack-browser-sync-extension.zip](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
+- Firefox download: [vintrack-browser-sync-extension-firefox.xpi](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension-firefox.xpi)
 - Source: `apps/vintrack-browser-sync-extension`
 - Install in Chrome: open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the extracted extension folder
+- Install in Firefox: open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, and select the Firefox build during development. For normal users, publish a Mozilla-signed `.xpi`.
 - Connect in Vintrack: open **Account**, click **Download Extension** if needed, then **Link With Installed Extension**
 - What it syncs: `access_token_web`, `refresh_token_web`, Vinted domain, browser user agent, and the Vintrack light/dark theme
 - What it does not sync: the full cookie header or full cookie jar
 
-For distribution, the recommended path is to attach a versioned ZIP named `vintrack-browser-sync-extension.zip` to every GitHub release. The live demo and documentation can always point to `/releases/latest/download/vintrack-browser-sync-extension.zip`, so users do not need to browse the repo.
+For distribution, attach `vintrack-browser-sync-extension.zip` and the Mozilla-signed `vintrack-browser-sync-extension-firefox.xpi` to every GitHub release. The live demo and documentation can point to `/releases/latest/download/...`, so users do not need to browse the repo.
 
 ### Experimental Buy Disclaimer
 
