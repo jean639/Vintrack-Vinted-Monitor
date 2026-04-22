@@ -29,6 +29,10 @@ import {
     Download,
     Eye,
     EyeOff,
+    CheckCircle2,
+    AlertCircle,
+    Cable,
+    ExternalLink,
 } from "lucide-react";
 import { REGIONS } from "@/lib/regions";
 import { cn } from "@/lib/utils";
@@ -50,6 +54,11 @@ export interface AccountStatus {
     domain?: string;
     linked_at?: string;
     last_check?: string;
+    last_refresh_at?: string;
+    last_valid_at?: string;
+    invalid_reason?: string;
+    has_refresh_token?: boolean;
+    requires_browser_reauth?: boolean;
     has_browser_session?: boolean;
     browser_linked?: boolean;
     last_browser_sync?: string;
@@ -67,10 +76,61 @@ type BrowserSyncState = {
     error?: string;
 };
 
+type ExtensionSyncResult = {
+    ok?: boolean;
+    status?: string;
+    domain?: string;
+    error?: string;
+    reason?: string;
+};
+
 const CHROME_EXTENSION_DOWNLOAD_URL =
     "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip";
 const FIREFOX_EXTENSION_DOWNLOAD_URL =
     "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension-firefox.xpi";
+
+function sessionStatusLabel(value?: string) {
+    switch (value) {
+        case "active":
+            return "Active";
+        case "degraded":
+            return "Retrying";
+        case "needs_browser_reauth":
+            return "Browser re-auth needed";
+        case "missing_refresh_token":
+            return "Refresh token missing";
+        case "refreshing":
+            return "Refreshing";
+        default:
+            return value || "Unknown";
+    }
+}
+
+function formatSessionTimestamp(value?: string) {
+    if (!value) return "not yet";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "not yet";
+    return date.toLocaleString();
+}
+
+function getCompletedSyncs(results?: ExtensionSyncResult[]) {
+    return (results || []).filter(
+        (result) =>
+            result.ok &&
+            (!result.status ||
+                result.status === "completed" ||
+                result.status === "refreshed"),
+    );
+}
+
+function getSyncIssue(results?: ExtensionSyncResult[]) {
+    return (results || []).find(
+        (result) =>
+            !result.ok ||
+            result.status === "ignored_invalid_browser_session" ||
+            result.status === "ignored_account",
+    );
+}
 
 export function AccountClient({
     initialStatus,
@@ -145,6 +205,7 @@ export function AccountClient({
                     error?: string;
                     syncedDomains?: string[];
                     configured?: boolean;
+                    results?: ExtensionSyncResult[];
                 };
 
                 if (!payload?.ok) {
@@ -161,16 +222,25 @@ export function AccountClient({
                         ? {
                               ...current,
                               configured: true,
-                              syncedDomains: payload.syncedDomains || [],
+                              syncedDomains:
+                                  payload.syncedDomains ||
+                                  getCompletedSyncs(payload.results)
+                                      .map((result) => result.domain || "")
+                                      .filter(Boolean),
                           }
                         : current,
                 );
 
-                toast.success(
-                    payload.syncedDomains?.length
-                        ? `Extension connected and synced ${payload.syncedDomains.length} Vinted session(s)`
-                        : "Extension connected",
-                );
+                const completedSyncs = getCompletedSyncs(payload.results);
+                const syncedCount =
+                    completedSyncs.length || payload.syncedDomains?.length || 0;
+                if (syncedCount > 0) {
+                    toast.success(
+                        `Extension connected and synced ${syncedCount} Vinted session${syncedCount === 1 ? "" : "s"}`,
+                    );
+                } else {
+                    toast.success("Extension connected");
+                }
 
                 void getAccountStatus().then((updated) => {
                     setStatus(updated);
@@ -182,7 +252,7 @@ export function AccountClient({
                 const payload = event.data.payload as {
                     ok?: boolean;
                     error?: string;
-                    results?: Array<{ ok?: boolean }>;
+                    results?: ExtensionSyncResult[];
                 };
 
                 if (!payload?.ok) {
@@ -190,14 +260,19 @@ export function AccountClient({
                     return;
                 }
 
-                const syncedCount = (payload.results || []).filter(
-                    (result) => result.ok,
-                ).length;
-                toast.success(
-                    syncedCount > 0
-                        ? `Synced ${syncedCount} Vinted session(s)`
-                        : "No active Vinted session found",
-                );
+                const completedSyncs = getCompletedSyncs(payload.results);
+                if (completedSyncs.length > 0) {
+                    toast.success(
+                        `Synced ${completedSyncs.length} Vinted session${completedSyncs.length === 1 ? "" : "s"}`,
+                    );
+                } else {
+                    const issue = getSyncIssue(payload.results);
+                    toast.warning(
+                        issue?.error ||
+                            issue?.reason ||
+                            "No fresh Vinted browser session was found.",
+                    );
+                }
                 void getAccountStatus().then((updated) => {
                     setStatus(updated);
                 });
@@ -398,6 +473,24 @@ export function AccountClient({
         );
     };
 
+    const extensionReady = extensionInstalled && extensionConfigured;
+    const extensionStatusTitle = !extensionInstalled
+        ? "Extension not detected"
+        : extensionConfigured
+          ? "Extension connected"
+          : "Extension detected";
+    const extensionStatusCopy = !extensionInstalled
+        ? "Install the browser extension, reload this page, then connect it here."
+        : extensionConfigured
+          ? "This browser can refresh the saved Vinted session automatically."
+          : "Connect this browser once to start automatic Vinted session sync.";
+    const lastBrowserSyncLabel =
+        status.last_browser_sync || browserSync?.last_used_at
+            ? formatSessionTimestamp(
+                  status.last_browser_sync || browserSync?.last_used_at,
+              )
+            : "not synced yet";
+
     return (
         <div className="space-y-6 mx-auto max-w-4xl">
             <div>
@@ -411,43 +504,96 @@ export function AccountClient({
             </div>
 
             <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">
-                        Browser Extension
-                    </CardTitle>
-                    <CardDescription>
-                        {status.linked
-                            ? "Keeps your Vinted session fresh in this browser."
-                            : "Link from the browser where you are already signed in to Vinted."}
-                    </CardDescription>
+                <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <CardTitle className="text-base">
+                            Browser Extension
+                        </CardTitle>
+                        <CardDescription>
+                            Keep Vintrack supplied with a fresh Vinted browser
+                            session from this device.
+                        </CardDescription>
+                    </div>
+                    <div
+                        className={cn(
+                            "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium",
+                            extensionReady
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                : extensionInstalled
+                                  ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+                                  : "border-border bg-muted/40 text-muted-foreground",
+                        )}
+                    >
+                        {extensionReady ? (
+                            <CheckCircle2 className="h-4 w-4" />
+                        ) : extensionInstalled ? (
+                            <Cable className="h-4 w-4" />
+                        ) : (
+                            <AlertCircle className="h-4 w-4" />
+                        )}
+                        {extensionStatusTitle}
+                    </div>
                 </CardHeader>
-                <CardContent className="space-y-5">
-                    <div className="flex flex-wrap items-center gap-2 py-3">
-                        <Badge
-                            variant={
-                                extensionInstalled ? "default" : "destructive"
-                            }
-                        >
-                            {extensionInstalled
-                                ? "Extension detected"
-                                : "Extension not detected"}
-                        </Badge>
-                        <Badge
-                            variant={
-                                extensionConfigured ? "default" : "outline"
-                            }
-                        >
-                            {extensionConfigured
-                                ? "Connected"
-                                : "Not connected"}
-                        </Badge>
+                <CardContent className="space-y-5 pt-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                        <div className="rounded-md border border-border/80 bg-background/60 p-3">
+                            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                Browser
+                            </p>
+                            <p className="mt-1 text-sm font-medium">
+                                {extensionInstalled ? "Detected" : "Missing"}
+                            </p>
+                        </div>
+                        <div className="rounded-md border border-border/80 bg-background/60 p-3">
+                            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                Connection
+                            </p>
+                            <p className="mt-1 text-sm font-medium">
+                                {extensionConfigured
+                                    ? "Connected"
+                                    : "Not connected"}
+                            </p>
+                        </div>
+                        <div className="rounded-md border border-border/80 bg-background/60 p-3">
+                            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                Last browser sync
+                            </p>
+                            <p className="mt-1 text-sm font-medium">
+                                {lastBrowserSyncLabel}
+                            </p>
+                        </div>
                     </div>
 
-                    <p className="text-sm text-muted-foreground">
-                        Install the extension once, sign in to Vinted, then
-                        connect it here. Future browser logins sync
-                        automatically.
-                    </p>
+                    <div className="rounded-md border border-border/80 bg-muted/30 p-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                                <p className="text-sm font-medium">
+                                    {extensionStatusCopy}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Sign in to Vinted in this same browser. The
+                                    extension syncs only session tokens and the
+                                    selected Vinted domain.
+                                </p>
+                            </div>
+                            <Button
+                                onClick={handleBrowserSyncStart}
+                                disabled={isBrowserSyncStarting}
+                                className="gap-2 md:shrink-0"
+                            >
+                                {isBrowserSyncStarting ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : extensionConfigured ? (
+                                    <RefreshCw className="w-4 h-4" />
+                                ) : (
+                                    <Bot className="w-4 h-4" />
+                                )}
+                                {extensionConfigured
+                                    ? "Reconnect"
+                                    : "Connect Extension"}
+                            </Button>
+                        </div>
+                    </div>
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                         <Button asChild variant="outline" className="gap-2">
@@ -457,7 +603,8 @@ export function AccountClient({
                                 rel="noopener noreferrer"
                             >
                                 <Download className="h-4 w-4" />
-                                Download Chrome Extension
+                                Chrome Extension
+                                <ExternalLink className="h-3.5 w-3.5" />
                             </a>
                         </Button>
                         <Button asChild variant="outline" className="gap-2">
@@ -467,37 +614,27 @@ export function AccountClient({
                                 rel="noopener noreferrer"
                             >
                                 <Download className="h-4 w-4" />
-                                Download Firefox Extension
+                                Firefox Extension
+                                <ExternalLink className="h-3.5 w-3.5" />
                             </a>
-                        </Button>
-                        <Button
-                            onClick={handleBrowserSyncStart}
-                            disabled={isBrowserSyncStarting}
-                            className="gap-2"
-                        >
-                            {isBrowserSyncStarting ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Bot className="w-4 h-4" />
-                            )}
-                            {status.linked
-                                ? "Connect Installed Extension"
-                                : "Link With Installed Extension"}
                         </Button>
                         {extensionInstalled ? (
                             <Button
                                 type="button"
                                 variant="outline"
                                 onClick={handleManualExtensionSync}
+                                className="gap-2"
                             >
-                                Sync Now
+                                <RefreshCw className="h-4 w-4" />
+                                Sync now
                             </Button>
                         ) : null}
                     </div>
 
                     {browserSync?.syncedDomains?.length ? (
                         <p className="text-xs text-muted-foreground">
-                            Last synced: {browserSync.syncedDomains.join(", ")}
+                            Synced domains:{" "}
+                            {browserSync.syncedDomains.join(", ")}
                         </p>
                     ) : null}
                 </CardContent>
@@ -524,27 +661,63 @@ export function AccountClient({
                                 variant={
                                     status.status === "active"
                                         ? "default"
-                                        : "destructive"
+                                        : status.status === "degraded"
+                                          ? "outline"
+                                          : "destructive"
                                 }
                             >
-                                {status.status}
+                                {sessionStatusLabel(status.status)}
                             </Badge>
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                        {status.requires_browser_reauth ||
+                        status.status === "degraded" ? (
+                            <div className="rounded-md border border-border/80 bg-muted/40 p-3 text-sm">
+                                <p className="font-medium">
+                                    {status.requires_browser_reauth
+                                        ? "Open Vinted in the connected browser and sync the extension."
+                                        : "Vintrack is retrying session validation automatically."}
+                                </p>
+                                {status.invalid_reason ? (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Reason: {status.invalid_reason}
+                                    </p>
+                                ) : null}
+                            </div>
+                        ) : null}
                         <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground">
                             <span>
-                                Last sync:{" "}
+                                Last browser sync:{" "}
                                 <strong className="font-medium text-foreground">
-                                    {status.last_browser_sync
-                                        ? new Date(
-                                              status.last_browser_sync,
-                                          ).toLocaleString()
-                                        : status.last_check
-                                          ? new Date(
-                                                status.last_check,
-                                            ).toLocaleString()
-                                          : "not yet"}
+                                    {formatSessionTimestamp(
+                                        status.last_browser_sync,
+                                    )}
+                                </strong>
+                            </span>
+                            <span>
+                                Last valid:{" "}
+                                <strong className="font-medium text-foreground">
+                                    {formatSessionTimestamp(
+                                        status.last_valid_at ||
+                                            status.last_check,
+                                    )}
+                                </strong>
+                            </span>
+                            <span>
+                                Last refresh:{" "}
+                                <strong className="font-medium text-foreground">
+                                    {formatSessionTimestamp(
+                                        status.last_refresh_at,
+                                    )}
+                                </strong>
+                            </span>
+                            <span>
+                                Refresh token:{" "}
+                                <strong className="font-medium text-foreground">
+                                    {status.has_refresh_token
+                                        ? "saved"
+                                        : "missing"}
                                 </strong>
                             </span>
                             <span>
@@ -892,9 +1065,9 @@ export function AccountClient({
                     <DialogHeader>
                         <DialogTitle>Unlink Vinted account?</DialogTitle>
                         <DialogDescription>
-                            This removes the saved Vinted session from
-                            Vintrack. You can link the account again with the
-                            browser extension or manual tokens.
+                            This removes the saved Vinted session from Vintrack.
+                            You can link the account again with the browser
+                            extension or manual tokens.
                         </DialogDescription>
                     </DialogHeader>
 
