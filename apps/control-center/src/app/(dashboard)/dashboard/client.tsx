@@ -9,6 +9,10 @@ import {
   Plus,
   StopCircle,
   Webhook,
+  MessageCircle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
   Radio,
   Package,
   ArrowRight,
@@ -37,6 +41,7 @@ import {
   toggleMonitor,
   updateMonitorWebhook,
   toggleWebhookStatus,
+  toggleTelegramStatus,
 } from "@/actions/dashboard-actions";
 import { testDiscordWebhook } from "@/actions/monitor";
 import { getBrandLabels } from "@/lib/brands";
@@ -70,10 +75,38 @@ export type Monitor = {
   allowed_countries: string | null;
   discord_webhook: string | null;
   webhook_active: boolean;
+  telegram_active: boolean;
   proxy_group_name: string | null;
   _count: { items: number };
   created_at: string;
 };
+
+type TelegramConnectionState = {
+  connected: boolean;
+  botUsername: string | null;
+  connection: {
+    chat_type: string | null;
+    chat_title: string | null;
+    username: string | null;
+    updated_at: string;
+  } | null;
+};
+
+type TelegramConnectCode = {
+  code: string;
+  expiresAt: string;
+  botUsername: string | null;
+  botLink: string | null;
+};
+
+async function readApiError(res: Response, fallback: string) {
+  try {
+    const data = await res.json();
+    return data.error || fallback;
+  } catch {
+    return `${fallback} (${res.status})`;
+  }
+}
 
 function hasProxyWarning(h?: MonitorHealth): boolean {
   if (!h) return false;
@@ -92,7 +125,14 @@ export function DashboardClient({
   const [webhookInput, setWebhookInput] = useState("");
   const [isWebhookOpen, setIsWebhookOpen] = useState(false);
   const [isWebhookActive, setIsWebhookActive] = useState(true);
+  const [isTelegramActive, setIsTelegramActive] = useState(false);
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  const [isCreatingTelegramCode, setIsCreatingTelegramCode] = useState(false);
+  const [telegramConnection, setTelegramConnection] =
+    useState<TelegramConnectionState | null>(null);
+  const [telegramConnectCode, setTelegramConnectCode] =
+    useState<TelegramConnectCode | null>(null);
   const [monitors, setMonitors] = useState<Monitor[]>(initialMonitors);
   const [healthMap, setHealthMap] = useState<Record<number, MonitorHealth>>({});
 
@@ -109,6 +149,72 @@ export function DashboardClient({
       toast.error(result.error);
     } else {
       toast.success("Test webhook sent successfully!");
+    }
+  };
+
+  const fetchTelegramConnection = useCallback(async () => {
+    try {
+      const res = await fetch("/api/telegram/connection", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as TelegramConnectionState;
+      setTelegramConnection(data);
+      if (data.connected) {
+        setTelegramConnectCode(null);
+      }
+    } catch {
+      setTelegramConnection(null);
+    }
+  }, []);
+
+  const handleCreateTelegramCode = async () => {
+    setIsCreatingTelegramCode(true);
+    try {
+      const res = await fetch("/api/telegram/connect-code", {
+        method: "POST",
+      });
+      if (!res.ok) {
+        toast.error(await readApiError(res, "Failed to create Telegram connect code"));
+        return;
+      }
+      const data = await res.json();
+      setTelegramConnectCode(data);
+      toast.success("Telegram connect code created");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to create Telegram connect code"
+      );
+    } finally {
+      setIsCreatingTelegramCode(false);
+    }
+  };
+
+  const handleCopyTelegramCode = async () => {
+    if (!telegramConnectCode) return;
+    try {
+      await navigator.clipboard.writeText(`/connect ${telegramConnectCode.code}`);
+      toast.success("Telegram command copied");
+    } catch {
+      toast.error("Failed to copy Telegram command");
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    setIsTestingTelegram(true);
+    try {
+      const res = await fetch("/api/telegram/test", { method: "POST" });
+      if (!res.ok) {
+        toast.error(await readApiError(res, "Failed to send Telegram test"));
+        return;
+      }
+      toast.success("Test Telegram message sent successfully!");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send Telegram test"
+      );
+    } finally {
+      setIsTestingTelegram(false);
     }
   };
 
@@ -131,10 +237,31 @@ export function DashboardClient({
     };
   }, [fetchHealth]);
 
+  useEffect(() => {
+    if (!isWebhookOpen) return;
+    fetchTelegramConnection();
+  }, [fetchTelegramConnection, isWebhookOpen]);
+
+  useEffect(() => {
+    if (!isWebhookOpen || !telegramConnectCode || telegramConnection?.connected) {
+      return;
+    }
+
+    const interval = setInterval(fetchTelegramConnection, 2_000);
+    return () => clearInterval(interval);
+  }, [
+    fetchTelegramConnection,
+    isWebhookOpen,
+    telegramConnectCode,
+    telegramConnection?.connected,
+  ]);
+
   const openWebhookDialog = (monitor: Monitor) => {
     setSelectedMonitor(monitor);
     setWebhookInput(monitor.discord_webhook || "");
     setIsWebhookActive(monitor.webhook_active);
+    setIsTelegramActive(monitor.telegram_active);
+    setTelegramConnectCode(null);
     setIsWebhookOpen(true);
   };
 
@@ -184,7 +311,11 @@ export function DashboardClient({
     setMonitors((prev) =>
       prev.map((m) =>
         m.id === selectedMonitor.id
-          ? { ...m, discord_webhook: webhookInput }
+          ? {
+              ...m,
+              discord_webhook: webhookInput || null,
+              webhook_active: webhookInput ? true : false,
+            }
           : m
       )
     );
@@ -192,9 +323,9 @@ export function DashboardClient({
       loading: "Saving...",
       success: () => {
         setIsWebhookOpen(false);
-        return "Webhook saved";
+        return "Discord webhook saved";
       },
-      error: "Failed to save webhook",
+      error: "Failed to save Discord webhook",
     });
   };
 
@@ -349,11 +480,12 @@ export function DashboardClient({
                     <button
                       onClick={() => openWebhookDialog(m)}
                       className="rounded-md p-1.5 text-muted-foreground/55 transition-colors hover:bg-accent hover:text-accent-foreground"
-                      title="Configure webhook"
+                      title="Configure notifications"
                     >
                       <Webhook
                         className={`w-3.5 h-3.5 ${
-                          m.discord_webhook && m.webhook_active
+                          (m.discord_webhook && m.webhook_active) ||
+                          m.telegram_active
                             ? "text-indigo-400"
                             : ""
                         }`}
@@ -495,7 +627,7 @@ export function DashboardClient({
       <Dialog open={isWebhookOpen} onOpenChange={setIsWebhookOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discord Webhook</DialogTitle>
+            <DialogTitle>Notifications</DialogTitle>
             <DialogDescription>
               Configure notifications for{" "}
               <strong>
@@ -508,7 +640,7 @@ export function DashboardClient({
 
           <div className="grid gap-5 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="webhook">Webhook URL</Label>
+              <Label htmlFor="webhook">Discord Webhook URL</Label>
               <div className="flex gap-2">
                 <Input
                   id="webhook"
@@ -548,6 +680,13 @@ export function DashboardClient({
                   checked={isWebhookActive}
                   onCheckedChange={async (checked) => {
                     setIsWebhookActive(checked);
+                    setMonitors((prev) =>
+                      prev.map((m) =>
+                        selectedMonitor && m.id === selectedMonitor.id
+                          ? { ...m, webhook_active: checked }
+                          : m
+                      )
+                    );
                     if (selectedMonitor) {
                       toast.promise(
                         toggleWebhookStatus(selectedMonitor.id, !checked),
@@ -556,6 +695,132 @@ export function DashboardClient({
                             ? "Webhook activated"
                             : "Webhook deactivated",
                           error: "Failed to toggle",
+                        }
+                      );
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            <div className="grid gap-3 rounded-lg border border-border/80 bg-muted/25 p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <Label className="text-sm">Telegram</Label>
+                  {telegramConnection?.connected ? (
+                    <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                      Connected to {telegramConnection.connection?.chat_title || "Telegram"}
+                    </p>
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground">
+                      Connect your Telegram once, then enable it per monitor.
+                    </p>
+                  )}
+                </div>
+                {telegramConnection?.connected ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleTestTelegram}
+                    disabled={isTestingTelegram}
+                    className="gap-2 shrink-0"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    {isTestingTelegram ? "Testing..." : "Test"}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCreateTelegramCode}
+                    disabled={isCreatingTelegramCode}
+                    className="gap-2 shrink-0"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    {isCreatingTelegramCode ? "Creating..." : "Connect Telegram"}
+                  </Button>
+                )}
+              </div>
+
+              {!telegramConnection?.connected && telegramConnectCode && (
+                <div className="rounded-md border border-border/80 bg-background p-3 text-[12px]">
+                  <p className="font-medium text-foreground">
+                    Send this command to{" "}
+                    {telegramConnectCode.botUsername ? (
+                      <span>@{telegramConnectCode.botUsername}</span>
+                    ) : (
+                      "the Vintrack bot"
+                    )}
+                    :
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="flex-1 rounded-md bg-muted px-2 py-1.5 text-foreground">
+                      /connect {telegramConnectCode.code}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={handleCopyTelegramCode}
+                      title="Copy command"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    {telegramConnectCode.botLink && (
+                      <a
+                        href={telegramConnectCode.botLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        title="Open Telegram"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </div>
+                  <p className="mt-2 text-muted-foreground">
+                    Use the open button to jump directly to the bot. The dashboard
+                    will detect the connection automatically after you send it.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {telegramConnection?.connected && (
+              <div className="flex items-center justify-between space-x-2 rounded-lg border border-border/80 bg-muted/45 p-3">
+                <div className="flex flex-col space-y-0.5">
+                  <Label
+                    htmlFor="telegram-active-mode"
+                    className="font-medium cursor-pointer text-sm"
+                  >
+                    Enable Telegram
+                  </Label>
+                  <span className="text-[12px] text-muted-foreground">
+                    Send new item and monitor status notifications to Telegram.
+                  </span>
+                </div>
+                <Switch
+                  id="telegram-active-mode"
+                  checked={isTelegramActive}
+                  onCheckedChange={async (checked) => {
+                    setIsTelegramActive(checked);
+                    setMonitors((prev) =>
+                      prev.map((m) =>
+                        selectedMonitor && m.id === selectedMonitor.id
+                          ? { ...m, telegram_active: checked }
+                          : m
+                      )
+                    );
+                    if (selectedMonitor) {
+                      toast.promise(
+                        toggleTelegramStatus(selectedMonitor.id, !checked),
+                        {
+                          success: checked
+                            ? "Telegram activated"
+                            : "Telegram deactivated",
+                          error: "Failed to toggle Telegram",
                         }
                       );
                     }

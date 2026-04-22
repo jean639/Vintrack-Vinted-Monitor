@@ -4,6 +4,25 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { isValidDiscordWebhook } from "@/lib/validation";
+import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
+import { getTelegramConnection } from "@/lib/telegram-connection";
+
+async function sendTelegramStatusIfConfigured(
+  monitor: { name: string; userId: string; telegram_active: boolean },
+  status: "started" | "paused"
+) {
+  if (!monitor.telegram_active) return;
+
+  const connection = await getTelegramConnection(monitor.userId);
+  if (!connection) return;
+  const result = await sendTelegramMessage(
+    connection.chat_id,
+    monitorStatusTelegramText(monitor.name, status)
+  );
+  if ("error" in result) {
+    console.error("Failed to send Telegram status message", result.error);
+  }
+}
 
 export async function stopAllMonitors() {
   const session = await auth();
@@ -48,6 +67,7 @@ export async function stopAllMonitors() {
           console.error("Failed to send status webhook for", monitor.id, error);
         }
       }
+      await sendTelegramStatusIfConfigured(monitor, "paused");
     })
   ).catch(console.error);
 
@@ -96,6 +116,11 @@ export async function toggleMonitor(id: number, currentStatus: string) {
     }
   }
 
+  await sendTelegramStatusIfConfigured(
+    monitor,
+    newStatus === "active" ? "started" : "paused"
+  );
+
   revalidatePath("/dashboard");
   return { success: true, status: newStatus };
 }
@@ -114,7 +139,7 @@ export async function updateMonitorWebhook(monitorId: number, webhookUrl: string
         where: { id: monitorId, userId: session.user.id },
         data: { 
             discord_webhook: urlToSave,
-            webhook_active: true
+            webhook_active: urlToSave ? true : false
         }
     });
 
@@ -133,4 +158,22 @@ export async function toggleWebhookStatus(monitorId: number, currentStatus: bool
 
     revalidatePath("/dashboard");
     return { success: true, message: !currentStatus ? "Webhook activated" : "Webhook deactivated" };
+}
+
+export async function toggleTelegramStatus(monitorId: number, currentStatus: boolean) {
+    const session = await auth();
+    if (!session?.user) throw new Error("Unauthorized");
+
+    if (!currentStatus) {
+        const connection = await getTelegramConnection(session.user.id);
+        if (!connection) throw new Error("Connect Telegram first");
+    }
+
+    await db.monitors.update({
+        where: { id: monitorId, userId: session.user.id },
+        data: { telegram_active: !currentStatus }
+    });
+
+    revalidatePath("/dashboard");
+    return { success: true, message: !currentStatus ? "Telegram activated" : "Telegram deactivated" };
 }

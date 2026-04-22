@@ -55,3 +55,13 @@ apps/worker/proxies.txt
 # Docker Volumes
 postgres_data/
 redis_data/
+
+*.har
+*.zip
+
+edge-scanner/
+id-scanner/
+ios-details/
+ios-monitor/
+vinted-dataset-service/
+vinted-uploader/

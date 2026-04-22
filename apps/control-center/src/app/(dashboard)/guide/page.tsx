@@ -148,7 +148,7 @@ export default function GuidePage() {
             <div className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400 font-bold shadow-sm text-lg">
               3
             </div>
-            <h2 className="text-2xl font-bold text-foreground">Discord Notifications</h2>
+            <h2 className="text-2xl font-bold text-foreground">Discord and Telegram Notifications</h2>
           </div>
           
           <Card className="shadow-sm overflow-hidden">
@@ -162,7 +162,7 @@ export default function GuidePage() {
                     <h3 className="text-lg font-bold text-foreground">Stay Alert</h3>
                   </div>
                   <p className="text-[15px] text-muted-foreground leading-relaxed">
-                    Use Webhooks to receive instant item cards directly in your Discord server.
+                    Use Discord webhooks or connect the Vintrack Telegram bot to receive instant item cards.
                   </p>
                   <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-100 dark:border-purple-500/20 flex items-center gap-3">
                     <Smartphone className="w-5 h-5 text-purple-600 dark:text-purple-400" />
@@ -177,8 +177,9 @@ export default function GuidePage() {
                   <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
                     <li>In Discord: <strong>Channel Settings</strong> &gt; <strong>Integrations</strong>.</li>
                     <li>Click <strong>Create Webhook</strong> and copy the URL.</li>
-                    <li>Paste the URL into your monitor settings.</li>
-                    <li>Toggle <strong>Webhook Active</strong> to ON.</li>
+                    <li>Paste the URL into your monitor notification settings.</li>
+                    <li>For Telegram: open the monitor notification dialog and click <strong>Connect Telegram</strong>.</li>
+                    <li>Send the generated code to the bot, then enable Telegram for the monitor.</li>
                   </ol>
                 </div>
               </div>

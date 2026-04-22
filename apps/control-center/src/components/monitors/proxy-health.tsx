@@ -26,9 +26,12 @@ export function ProxyHealthCard({ monitorId }: { monitorId: number }) {
   }, [monitorId]);
 
   useEffect(() => {
-    fetchHealth();
+    const timeout = window.setTimeout(fetchHealth, 0);
     const interval = setInterval(fetchHealth, 10_000);
-    return () => clearInterval(interval);
+    return () => {
+      window.clearTimeout(timeout);
+      clearInterval(interval);
+    };
   }, [fetchHealth]);
 
   if (!health) return null;

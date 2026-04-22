@@ -7,3 +7,11 @@ export function isValidDiscordWebhook(url: string): boolean {
     /^https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]+$/;
   return discordWebhookRegex.test(url);
 }
+
+/**
+ * Validates if a string is a Telegram chat ID.
+ * User and group IDs are numeric; group/channel IDs can be negative.
+ */
+export function isValidTelegramChatId(chatId: string): boolean {
+  return /^-?\d+$/.test(chatId.trim());
+}

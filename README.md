@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Open-source Vinted monitoring platform for resellers.</b><br/>
-  Real-time scraping · Instant Discord alerts · Proxy rotation · Account linking · Beautiful dashboard
+  Real-time scraping · Discord & Telegram alerts · Proxy rotation · Account linking · Beautiful dashboard
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   <a href="#tech-stack"><img src="https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go" /></a>
   <a href="#tech-stack"><img src="https://img.shields.io/badge/PostgreSQL-15-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" /></a>
   <a href="#tech-stack"><img src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis" /></a>
-  <a href="#getting-started"><img src="https://img.shields.io/badge/deploy-one_command-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
+  <a href="#self-hosting"><img src="https://img.shields.io/badge/deploy-one_command-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
 </p>
 
 <p align="center">
@@ -33,12 +33,11 @@
 <p align="center">
   <a href="#live-demo">Live Demo</a> •
   <a href="#browser-extension">Browser Extension</a> •
-  <a href="#getting-started">Getting Started</a> •
+  <a href="#self-hosting">Self-Hosting</a> •
   <a href="#features">Features</a> •
   <a href="#community--support">Community</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#screenshots">Screenshots</a> •
-  <a href="#self-hosting">Self-Hosting</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -46,19 +45,38 @@
 
 ## Live Demo
 
-You can test Vintrack live at:
+You can try Vintrack without hosting anything yourself:
 
 - **URL:** https://vintrack.jakobaio.dev
-- **Login:** Anyone can sign up via Discord OAuth
-- **Default role:** New accounts are assigned **Free**
-- **Browser extension:** download the latest ZIP from the [GitHub releases](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
-- **Important:** Persistent server proxies are not guaranteed on the demo instance, so reliability may vary over time
+- **Login:** sign up with Discord OAuth
+- **Default role:** new accounts start as **Free**
+- **Browser extension:** download the latest ZIP from [GitHub releases](https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip)
+- **Support:** join the Discord server if you need help: https://discord.gg/WbEpEjaWjP
+
+### Demo Quick Start
+
+1. Open https://vintrack.jakobaio.dev and sign in with Discord.
+2. Open **Proxies** and add your own proxy group if your account does not have server proxy access.
+3. Open **Monitors** or the dashboard and create a monitor with your Vinted search, region, price, size, brand, and country filters.
+4. Enable notifications:
+   - **Discord:** paste your Discord webhook URL in the monitor notification dialog.
+   - **Telegram:** click **Connect Telegram**, send the generated `/connect ...` command to the bot shown in the dialog, then enable Telegram for the monitor.
+5. Watch new items in the dashboard, live feed, Discord, or Telegram.
+6. Optional: install the browser extension and link your Vinted account from the **Account** page to like items, send offers, message sellers, and keep your Vinted session synced.
+
+### Demo Notes
+
+- Free demo accounts normally use their own proxies. Server proxies are not guaranteed on the public demo.
+- The demo is shared infrastructure, so monitoring reliability can vary.
+- Telegram users never need a bot token or chat ID. The public demo shows the bot username during the connect flow.
+- Discord notifications require your own Discord webhook URL.
+- Vinted account linking is optional, but it is required for actions such as liking items, sending offers, sending messages, and checkout-link tools.
 
 ---
 
 ## Why Vintrack?
 
-Vinted doesn't have a proper notification system — you either refresh manually or miss the deal. Vintrack solves this by monitoring listings **every 1.5 seconds** and sending alerts to Discord **before anyone else** can see the item.
+Vinted doesn't have a proper notification system — you either refresh manually or miss the deal. Vintrack solves this by monitoring listings and sending alerts to Discord or Telegram **before anyone else** can see the item.
 
 Built for resellers who need speed. Open-sourced for the community.
 
@@ -132,14 +150,16 @@ Vintrack includes an experimental buy module for controlled checkout tests. It i
 - The extension is strongly recommended, otherwise automatic session recovery may fail.
 - Use experimental buy actions only if you understand that Vinted may reserve an item before payment is completed.
 
-### Discord Notifications
+### Discord & Telegram Notifications
 
-Rich embed webhooks sent instantly when a new item is found:
+Rich alerts sent instantly when a new item is found:
 
 - Item image, title, price (including fees), size, condition
 - Seller region & rating (enriched via HTML scraping)
 - Direct buy link + app deep link + dashboard link
-- Per-webhook toggle — pause without deleting
+- Discord webhooks per monitor
+- Telegram account connection via one-time bot code — users never see the bot token or chat ID
+- Per-monitor notification toggles
 
 ### Live Feed
 
@@ -232,8 +252,8 @@ Need help, want to exchange setups with other users, or report a bug?
               └──────┬──────────┬──┘  └────────┬────────┘
                      │          │              │
             ┌────────▼──┐  ┌───▼───────┐  ┌───▼────────┐
-            │ Vinted API │ │  Discord  │  │ Vinted API │
-            │ (Proxied)  │ │(Webhooks) │  │  (Authed)  │
+            │ Vinted API │ │ Alerts    │  │ Vinted API │
+            │ (Proxied)  │ │Discord/TG │  │  (Authed)  │
             └────────────  └───────────┘  └────────────┘
 ```
 
@@ -243,7 +263,7 @@ Need help, want to exchange setups with other users, or report a bug?
 2. Go Worker detects the new monitor within 5s and starts a goroutine
 3. Goroutine polls Vinted API through rotating proxies
 4. New items are deduplicated via Redis, stored in PostgreSQL, published via SSE
-5. Discord webhooks fire immediately for configured monitors
+5. Discord and Telegram notifications fire immediately for configured monitors
 6. Users with a linked Vinted account can like items, send offers, and message sellers directly via the Vinted Service
 
 ---
@@ -265,13 +285,19 @@ Need help, want to exchange setups with other users, or report a bug?
 
 ---
 
-## Getting Started
+## Self-Hosting
 
-### Prerequisites
+Use this section if you want to run your own Vintrack instance instead of using the public demo.
+
+### What You Need
+
+Before starting, prepare:
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2
 - [Discord Developer App](https://discord.com/developers/applications) (for OAuth2 login)
-- Proxies (residential recommended)
+- Proxies for Vinted monitoring (residential recommended)
+- A public HTTPS domain for production
+- Optional: a Telegram bot from [@BotFather](https://t.me/BotFather) if you want Telegram notifications
 
 ### Proxy Recommendation (Referral)
 
@@ -280,31 +306,85 @@ If you need proxies, I currently recommend **Webshare Proxy Server** as the bett
 - Referral link: https://www.webshare.io/?referral_code=qhu9q567qrqp
 - You can check your proxies here to see whether they work with Vinted: https://proxy6.net/checker
 
-### Quick Start
+### 1. Clone the Repository
 
 ```bash
-# 1. Clone
 git clone https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor
 cd vintrack
-
-# 2. Configure
-cp .env.example .env
-# Edit .env with your Discord OAuth credentials
-
-# 3. Add proxies
-nano apps/worker/proxies.txt
-# One proxy per line: http://user:pass@host:port
-
-# 4. Launch
-docker compose up -d --build
-
-# 5. Open dashboard
-open http://localhost:3000
 ```
 
-### Environment Variables
+### 2. Create the Environment File
 
-Create a `.env` file in the project root:
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and configure at least the required auth values:
+
+```env
+# Generate with: openssl rand -base64 32
+AUTH_SECRET=your-random-secret
+
+# From Discord Developer Portal
+AUTH_DISCORD_ID=your-discord-client-id
+AUTH_DISCORD_SECRET=your-discord-client-secret
+
+# Local development
+AUTH_URL=http://localhost:3000
+DASHBOARD_URL=http://localhost:3000
+```
+
+For production, both URLs must use your public HTTPS domain:
+
+```env
+AUTH_URL=https://your-domain.com
+DASHBOARD_URL=https://your-domain.com
+```
+
+`DASHBOARD_URL` is used for dashboard links in notifications. If it is missing or set to `localhost`, Telegram item alerts still send, but the Telegram dashboard button is omitted because Telegram rejects local URLs.
+
+### 3. Configure Discord OAuth
+
+In the Discord Developer Portal:
+
+1. Create an application.
+2. Open **OAuth2**.
+3. Add your redirect URL:
+   - Local: `http://localhost:3000/api/auth/callback/discord`
+   - Production: `https://your-domain.com/api/auth/callback/discord`
+4. Copy the client ID and client secret into `.env`.
+
+### 4. Add Proxies
+
+Add one proxy per line:
+
+```bash
+nano apps/worker/proxies.txt
+```
+
+Example:
+
+```txt
+http://user:pass@host:port
+```
+
+Free users can also add their own proxy groups from the dashboard. Admin and premium users can use server proxies when configured.
+
+### 5. Start Vintrack
+
+```bash
+docker compose up -d --build
+```
+
+Open:
+
+```txt
+http://localhost:3000
+```
+
+### Environment Variables Reference
+
+The most important variables are:
 
 ```env
 # Required — generate with: openssl rand -base64 32
@@ -313,7 +393,109 @@ AUTH_SECRET=your-random-secret
 # Required — from Discord Developer Portal
 AUTH_DISCORD_ID=your-discord-client-id
 AUTH_DISCORD_SECRET=your-discord-client-secret
+
+# Required in production — public app URL used by auth and dashboard links
+AUTH_URL=https://your-domain.com
+DASHBOARD_URL=https://your-domain.com
+
+# Optional — Telegram notifications
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_BOT_USERNAME=your_bot_username_without_at
+TELEGRAM_WEBHOOK_SECRET=your-random-webhook-secret
 ```
+
+### Telegram Setup for Self-Hosted Instances
+
+Telegram support uses a secure connect-code flow. The bot token stays on the server; users connect from the dashboard by sending a generated `/connect VT-...` command to your bot.
+
+1. Create a Telegram bot with [@BotFather](https://t.me/BotFather).
+2. Set these variables in the root `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_BOT_USERNAME=your_bot_username_without_at
+TELEGRAM_WEBHOOK_SECRET=your-random-webhook-secret
+```
+
+3. Make sure `DASHBOARD_URL` points to your public HTTPS dashboard:
+
+```env
+DASHBOARD_URL=https://your-domain.com
+```
+
+4. After deploying Vintrack on HTTPS, register the webhook:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://your-domain.com/api/telegram/webhook&secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+5. Verify delivery:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+6. In Vintrack, open a monitor's notification dialog, click **Connect Telegram**, send the generated command to the bot shown in the dialog, then enable Telegram for that monitor.
+
+Users do not need to know the bot token or chat ID. They only need the bot username shown in Vintrack and the one-time connect command.
+
+### Local Telegram Testing
+
+Telegram webhooks require a public HTTPS URL. For local testing, expose `localhost:3000` with ngrok or Cloudflare Tunnel.
+
+Example with an ngrok URL:
+
+```env
+AUTH_URL=http://localhost:3000
+DASHBOARD_URL=https://your-ngrok-subdomain.ngrok-free.dev
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_BOT_USERNAME=your_bot_username_without_at
+TELEGRAM_WEBHOOK_SECRET=your-random-webhook-secret
+```
+
+Then register the webhook against the tunnel URL:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://your-ngrok-subdomain.ngrok-free.dev/api/telegram/webhook&secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+Recreate the services after changing `.env`:
+
+```bash
+docker compose up -d --force-recreate control-center worker
+```
+
+### Production Deployment
+
+For a first production deployment from the published images:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+If you want to build the images directly on the server instead:
+
+```bash
+docker compose up -d --build
+```
+
+Make sure your domain points to the server and ports `80` and `443` are available for Caddy.
+
+### Production Updates & Database Migrations
+
+For release updates on a server, pull the new images and run the migration service before recreating the app services:
+
+```bash
+git pull
+docker compose pull
+docker compose up --force-recreate control-center-migrate
+docker compose up -d --force-recreate control-center worker vinted-service caddy
+```
+
+The `control-center-migrate` service uses the same pulled `control-center` image and runs `npx prisma migrate deploy`, so new Prisma migrations are applied even when deploying with `docker compose pull`.
+
+Do not use `prisma db push --accept-data-loss` in production. Schema changes should be represented as committed Prisma migrations.
 
 ### Proxy Formats
 
@@ -336,7 +518,7 @@ Invalid lines are automatically skipped with a warning in logs.
 - [x] Like / Unlike items
 - [x] Send offers to sellers
 - [x] Send messages to sellers
-- [ ] One-click buy
+- [x] One-click buy
 - [ ] Auto-buy with price rules
 - [ ] Auto Chat Module
 - [ ] Price history tracking & charts

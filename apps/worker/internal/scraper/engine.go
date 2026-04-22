@@ -17,6 +17,7 @@ import (
 	"vintrack-worker/internal/discord"
 	"vintrack-worker/internal/model"
 	"vintrack-worker/internal/proxy"
+	"vintrack-worker/internal/telegram"
 
 	http "github.com/bogdanfinn/fhttp"
 )
@@ -133,6 +134,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		if m.WebhookActive && m.DiscordWebhook.String != "" {
 			discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, -1)
 		}
+		if m.TelegramActive && m.TelegramChatID.String != "" {
+			telegram.SendAutoStop(m.TelegramChatID.String, m.Name, -1)
+		}
 		return
 	}
 	log.Printf("[%d] proxy source: %s (%d proxies)", m.ID, proxySource, pm.Count())
@@ -158,6 +162,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	log.Printf("[%d] started | name=%q | query=%q | race=%d | url=%s", m.ID, m.Name, m.Query, raceFetchers, apiURL)
 	if m.WebhookActive && m.DiscordWebhook.String != "" {
 		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Name)
+	}
+	if m.TelegramActive && m.TelegramChatID.String != "" {
+		telegram.SendStartup(m.TelegramChatID.String, m.Name)
 	}
 
 	reportHealth := func(lastErr string) {
@@ -325,6 +332,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 					if m.WebhookActive && m.DiscordWebhook.String != "" {
 						discord.SendProxyWarningWebhook(m.DiscordWebhook.String, m.Name, consecutiveErrors)
 					}
+					if m.TelegramActive && m.TelegramChatID.String != "" {
+						telegram.SendProxyWarning(m.TelegramChatID.String, m.Name, consecutiveErrors)
+					}
 				}
 			}
 			if consecutiveErrors >= maxConsecutiveErrors {
@@ -332,6 +342,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				e.db.SetMonitorStatus(m.ID, "error")
 				if m.WebhookActive && m.DiscordWebhook.String != "" {
 					discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, consecutiveErrors)
+				}
+				if m.TelegramActive && m.TelegramChatID.String != "" {
+					telegram.SendAutoStop(m.TelegramChatID.String, m.Name, consecutiveErrors)
 				}
 				return
 			}
@@ -381,7 +394,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			e.db.MarkItemsSeen(m.ID, seedIDs)
 
 			seedBuiltItems := e.buildItems(m, seedItems)
-			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
+			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
 
 			initialized = true
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
@@ -424,7 +437,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		e.db.MarkItemsSeen(m.ID, newIDs)
 		initialized = true
 
-		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
+		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -521,7 +534,7 @@ func resolveRedirectURL(currentURL string, location string) (string, error) {
 	return base.ResolveReference(next).String(), nil
 }
 
-func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, monitorName string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
+func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, telegramChatID string, telegramActive bool, monitorName string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
 	if e.enrichSeller && enricher != nil {
 		sem := make(chan struct{}, 10)
 		var wg sync.WaitGroup
@@ -604,6 +617,14 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 			default:
 			}
 			discord.SendWebhook(webhook, items[i], monitorName, ps)
+		}
+		if telegramChatID != "" && telegramActive {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			telegram.SendItem(telegramChatID, items[i], monitorName, ps)
 		}
 	}
 }

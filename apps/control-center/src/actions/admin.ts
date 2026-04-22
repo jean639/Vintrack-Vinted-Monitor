@@ -3,6 +3,8 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
+import { getTelegramConnection } from "@/lib/telegram-connection";
 
 async function requireAdmin() {
   const session = await auth();
@@ -69,6 +71,19 @@ async function sendPausedWebhook(name: string, monitorId: number, webhookUrl: st
   }
 }
 
+async function sendPausedTelegram(name: string, monitorId: number, userId: string) {
+  const connection = await getTelegramConnection(userId);
+  if (!connection) return;
+
+  const result = await sendTelegramMessage(
+    connection.chat_id,
+    monitorStatusTelegramText(name, "paused")
+  );
+  if ("error" in result) {
+    console.error("Failed to send admin pause Telegram message for", monitorId, result.error);
+  }
+}
+
 export async function setUserRole(userId: string, role: string) {
   await requireAdmin();
 
@@ -91,8 +106,10 @@ export async function stopUserActiveMonitors(userId: string) {
     select: {
       id: true,
       name: true,
+      userId: true,
       discord_webhook: true,
       webhook_active: true,
+      telegram_active: true,
     },
   });
 
@@ -112,6 +129,13 @@ export async function stopUserActiveMonitors(userId: string) {
           monitor.name,
           monitor.id,
           monitor.discord_webhook
+        );
+      }
+      if (monitor.telegram_active) {
+        await sendPausedTelegram(
+          monitor.name,
+          monitor.id,
+          monitor.userId
         );
       }
     })
@@ -137,8 +161,10 @@ export async function stopSingleUserMonitor(userId: string, monitorId: number) {
     select: {
       id: true,
       name: true,
+      userId: true,
       discord_webhook: true,
       webhook_active: true,
+      telegram_active: true,
     },
   });
 
@@ -153,6 +179,11 @@ export async function stopSingleUserMonitor(userId: string, monitorId: number) {
 
   if (monitor.discord_webhook && monitor.webhook_active) {
     sendPausedWebhook(monitor.name, monitor.id, monitor.discord_webhook).catch(
+      console.error
+    );
+  }
+  if (monitor.telegram_active) {
+    sendPausedTelegram(monitor.name, monitor.id, monitor.userId).catch(
       console.error
     );
   }

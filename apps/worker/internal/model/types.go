@@ -22,6 +22,8 @@ type Monitor struct {
 	Status               string
 	DiscordWebhook       sql.NullString
 	WebhookActive        bool
+	TelegramChatID       sql.NullString
+	TelegramActive       bool
 	ProxyGroupID         *int
 	ProxyGroupName       sql.NullString
 	ProxyGroupLimitBytes *int64

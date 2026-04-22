@@ -52,6 +52,7 @@ type UserMonitor = {
   price_max: number | null;
   discord_webhook: string | null;
   webhook_active: boolean;
+  telegram_active: boolean;
   proxy_group: { name: string } | null;
   _count: { items: number };
 };
@@ -689,9 +690,10 @@ export function AdminClient({
                               <span>Max {monitor.price_max} EUR</span>
                             ) : null}
                             <span>
-                              {monitor.discord_webhook && monitor.webhook_active
-                                ? "Webhook active"
-                                : "Webhook off"}
+                              {[
+                                monitor.discord_webhook && monitor.webhook_active ? "Discord" : null,
+                                monitor.telegram_active ? "Telegram" : null,
+                              ].filter(Boolean).join(" + ") || "Notifications off"}
                             </span>
                           </div>
                         </div>
@@ -764,11 +766,14 @@ export function AdminClient({
                             </span>
                             <span className="inline-flex items-center gap-1">
                               <Webhook className="h-3.5 w-3.5" />
-                              {monitor.discord_webhook && monitor.webhook_active
-                                ? "Webhook active"
-                                : monitor.discord_webhook
-                                  ? "Webhook saved, paused"
-                                  : "No webhook"}
+                              {[
+                                monitor.discord_webhook
+                                  ? monitor.webhook_active
+                                    ? "Discord active"
+                                    : "Discord paused"
+                                  : null,
+                                monitor.telegram_active ? "Telegram active" : null,
+                              ].filter(Boolean).join(" / ") || "No notifications"}
                             </span>
                           </div>
                         </div>

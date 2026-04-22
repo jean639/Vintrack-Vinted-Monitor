@@ -45,6 +45,7 @@ export default async function AdminPage() {
           price_max: true,
           discord_webhook: true,
           webhook_active: true,
+          telegram_active: true,
           proxy_group: {
             select: {
               name: true,

@@ -5,6 +5,25 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth"; 
 import { isValidDiscordWebhook } from "@/lib/validation";
+import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
+import { getTelegramConnection } from "@/lib/telegram-connection";
+
+async function sendTelegramStatusIfConfigured(
+  monitor: { name: string; userId: string; telegram_active: boolean },
+  status: "created" | "started" | "paused"
+) {
+  if (!monitor.telegram_active) return;
+
+  const connection = await getTelegramConnection(monitor.userId);
+  if (!connection) return;
+  const result = await sendTelegramMessage(
+    connection.chat_id,
+    monitorStatusTelegramText(monitor.name, status)
+  );
+  if ("error" in result) {
+    console.error("Failed to send Telegram status message", result.error);
+  }
+}
 
 export async function createMonitor(formData: FormData) {
 
@@ -25,6 +44,7 @@ export async function createMonitor(formData: FormData) {
   const region = (formData.get("region") as string) || "de";
   const allowedCountries = (formData.get("allowed_countries") as string) || null;
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
+  const wantsTelegramActive = formData.get("telegram_active") === "true";
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
   const normalizedName = name?.trim() ?? "";
@@ -68,6 +88,9 @@ export async function createMonitor(formData: FormData) {
   if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
     throw new Error("Invalid Discord Webhook URL");
   }
+  const telegramConnection = wantsTelegramActive
+    ? await getTelegramConnection(session.user.id)
+    : null;
 
   const monitor = await db.monitors.create({
     data: {
@@ -84,6 +107,7 @@ export async function createMonitor(formData: FormData) {
       region,
       allowed_countries: allowedCountries || null,
       discord_webhook: urlToSave,
+      telegram_active: Boolean(telegramConnection),
       proxy_group_id: proxyGroupId,
       status: "active",
       webhook_active: urlToSave ? true : false,
@@ -119,6 +143,8 @@ export async function createMonitor(formData: FormData) {
     }
   }
 
+  await sendTelegramStatusIfConfigured(monitor, "created");
+
   revalidatePath("/dashboard");
   redirect(`/monitors/${monitor.id}`);
 }
@@ -140,6 +166,7 @@ export async function updateMonitor(id: number, formData: FormData) {
   const allowedCountries = (formData.get("allowed_countries") as string) || null;
   const returnTo = (formData.get("return_to") as string) || "detail";
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
+  const wantsTelegramActive = formData.get("telegram_active") === "true";
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
   const normalizedName = name?.trim() ?? "";
@@ -181,6 +208,9 @@ export async function updateMonitor(id: number, formData: FormData) {
   if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
     throw new Error("Invalid Discord Webhook URL");
   }
+  const telegramConnection = wantsTelegramActive
+    ? await getTelegramConnection(session.user.id)
+    : null;
 
   await db.monitors.update({
     where: { id, userId: session.user.id },
@@ -198,7 +228,8 @@ export async function updateMonitor(id: number, formData: FormData) {
       allowed_countries: allowedCountries || null,
       discord_webhook: urlToSave,
       proxy_group_id: proxyGroupId,
-      ...(urlToSave ? { webhook_active: true } : {}),
+      webhook_active: urlToSave ? true : false,
+      telegram_active: Boolean(telegramConnection),
     },
   });
 
@@ -230,6 +261,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
   const allowedCountries = (formData.get("allowed_countries") as string) || null;
   const returnTo = (formData.get("return_to") as string) || "detail";
   const discordWebhook = (formData.get("discord_webhook") as string) || null;
+  const wantsTelegramActive = formData.get("telegram_active") === "true";
   const proxyGroupRaw = formData.get("proxy_group_id") as string;
 
   const normalizedName = name?.trim() ?? "";
@@ -270,6 +302,9 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
   if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
     throw new Error("Invalid Discord Webhook URL");
   }
+  const telegramConnection = wantsTelegramActive
+    ? await getTelegramConnection(session.user.id)
+    : null;
 
   await db.monitors.update({
     where: { id, userId: session.user.id },
@@ -287,7 +322,8 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
       allowed_countries: allowedCountries || null,
       discord_webhook: urlToSave,
       proxy_group_id: proxyGroupId,
-      ...(urlToSave ? { webhook_active: true } : {}),
+      webhook_active: urlToSave ? true : false,
+      telegram_active: Boolean(telegramConnection),
     },
   });
 
@@ -341,6 +377,11 @@ export async function toggleMonitorStatus(id: number, currentStatus: string) {
       console.error("Failed to send status webhook", error);
     }
   }
+
+  await sendTelegramStatusIfConfigured(
+    monitor,
+    newStatus === "active" ? "started" : "paused"
+  );
 
   revalidatePath(`/monitors/${id}`);
   revalidatePath("/dashboard");
@@ -424,7 +465,9 @@ export async function testDiscordWebhook(url: string) {
     }
 
     return { success: true };
-  } catch (error: any) {
-    return { error: error.message || "Failed to send webhook" };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Failed to send webhook",
+    };
   }
 }
