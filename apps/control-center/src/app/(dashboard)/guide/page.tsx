@@ -22,8 +22,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-const EXTENSION_DOWNLOAD_URL =
+const CHROME_EXTENSION_DOWNLOAD_URL =
   "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip";
+const FIREFOX_EXTENSION_DOWNLOAD_URL =
+  "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension-firefox.xpi";
 
 export default function GuidePage() {
   return (
@@ -232,17 +234,23 @@ export default function GuidePage() {
                     How to Setup
                   </h3>
                   <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
-                    <li>Download and unzip the Vintrack extension.</li>
-                    <li>Open <strong>chrome://extensions</strong>, enable <strong>Developer mode</strong>, then click <strong>Load unpacked</strong>.</li>
-                    <li>Select the extracted extension folder.</li>
+                    <li>Download the Vintrack extension for Chrome or Firefox.</li>
+                    <li>Chrome: unzip the package, open <strong>chrome://extensions</strong>, enable <strong>Developer mode</strong>, then click <strong>Load unpacked</strong>.</li>
+                    <li>Firefox: install the signed XPI, or use <strong>about:debugging</strong> for a temporary development install.</li>
                     <li>Sign in to Vinted in the same browser.</li>
                     <li>Go to <Link href="/account" className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4">Account</Link> and click <strong>Link With Installed Extension</strong>.</li>
                   </ol>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <a href={EXTENSION_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+                    <a href={CHROME_EXTENSION_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
                       <Badge className="w-full justify-center bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30 hover:bg-amber-200 dark:hover:bg-amber-500/30 cursor-pointer px-4 py-1.5 font-bold">
                         <Download className="mr-1.5 h-3.5 w-3.5" />
-                        Download Extension
+                        Chrome Extension
+                      </Badge>
+                    </a>
+                    <a href={FIREFOX_EXTENSION_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+                      <Badge className="w-full justify-center bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30 hover:bg-amber-200 dark:hover:bg-amber-500/30 cursor-pointer px-4 py-1.5 font-bold">
+                        <Download className="mr-1.5 h-3.5 w-3.5" />
+                        Firefox Extension
                       </Badge>
                     </a>
                     <Link href="/account">

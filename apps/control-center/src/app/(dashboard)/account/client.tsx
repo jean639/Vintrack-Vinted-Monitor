@@ -67,8 +67,10 @@ type BrowserSyncState = {
     error?: string;
 };
 
-const EXTENSION_DOWNLOAD_URL =
+const CHROME_EXTENSION_DOWNLOAD_URL =
     "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension.zip";
+const FIREFOX_EXTENSION_DOWNLOAD_URL =
+    "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension-firefox.xpi";
 
 export function AccountClient({
     initialStatus,
@@ -450,12 +452,22 @@ export function AccountClient({
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                         <Button asChild variant="outline" className="gap-2">
                             <a
-                                href={EXTENSION_DOWNLOAD_URL}
+                                href={CHROME_EXTENSION_DOWNLOAD_URL}
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
                                 <Download className="h-4 w-4" />
-                                Download Extension
+                                Download Chrome Extension
+                            </a>
+                        </Button>
+                        <Button asChild variant="outline" className="gap-2">
+                            <a
+                                href={FIREFOX_EXTENSION_DOWNLOAD_URL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <Download className="h-4 w-4" />
+                                Download Firefox Extension
                             </a>
                         </Button>
                         <Button
