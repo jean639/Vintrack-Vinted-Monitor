@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { isValidDiscordWebhook } from "@/lib/validation";
 import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
+import { normalizeQueryDelayMs } from "@/lib/monitor-delay";
 
 async function sendTelegramStatusIfConfigured(
   monitor: { name: string; userId: string; telegram_active: boolean },
@@ -34,6 +35,7 @@ export async function createMonitor(formData: FormData) {
 
   const name = formData.get("name") as string;
   const query = formData.get("query") as string;
+  const queryDelayMs = normalizeQueryDelayMs(formData.get("query_delay_ms"));
   const priceMin = formData.get("price_min") ? Number(formData.get("price_min")) : null;
   const priceMax = formData.get("price_max") ? Number(formData.get("price_max")) : null;
   const sizeId = formData.get("size_id") as string;
@@ -97,6 +99,7 @@ export async function createMonitor(formData: FormData) {
       userId: session.user.id,
       name: normalizedName,
       query: normalizedQuery,
+      query_delay_ms: queryDelayMs,
       price_min: priceMin,
       price_max: priceMax,
       size_id: sizeId,
@@ -155,6 +158,7 @@ export async function updateMonitor(id: number, formData: FormData) {
 
   const name = formData.get("name") as string;
   const query = formData.get("query") as string;
+  const queryDelayMs = normalizeQueryDelayMs(formData.get("query_delay_ms"));
   const priceMin = formData.get("price_min") ? Number(formData.get("price_min")) : null;
   const priceMax = formData.get("price_max") ? Number(formData.get("price_max")) : null;
   const sizeId = formData.get("size_id") as string;
@@ -217,6 +221,7 @@ export async function updateMonitor(id: number, formData: FormData) {
     data: {
       name: normalizedName,
       query: normalizedQuery,
+      query_delay_ms: queryDelayMs,
       price_min: priceMin,
       price_max: priceMax,
       size_id: sizeId,
@@ -250,6 +255,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
 
   const name = formData.get("name") as string;
   const query = formData.get("query") as string;
+  const queryDelayMs = normalizeQueryDelayMs(formData.get("query_delay_ms"));
   const priceMin = formData.get("price_min") ? Number(formData.get("price_min")) : null;
   const priceMax = formData.get("price_max") ? Number(formData.get("price_max")) : null;
   const sizeId = formData.get("size_id") as string;
@@ -311,6 +317,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
     data: {
       name: normalizedName,
       query: normalizedQuery,
+      query_delay_ms: queryDelayMs,
       price_min: priceMin,
       price_max: priceMax,
       size_id: sizeId,
