@@ -14,10 +14,15 @@ import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
 import { Switch } from "@/components/ui/switch";
 import { getStatusLocaleForRegionCodes } from "@/lib/regions";
+import {
+  DEFAULT_QUERY_DELAY_MS,
+  MAX_QUERY_DELAY_MS,
+  MIN_QUERY_DELAY_MS,
+} from "@/lib/monitor-delay";
 import { buildVintedMonitorUrl } from "@/lib/vinted-url";
 import { ArrowLeft, Copy, ExternalLink, Loader2, Save, Send, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type FocusEvent, type FormEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -31,6 +36,7 @@ type MonitorData = {
   id: number;
   name: string;
   query: string;
+  query_delay_ms: number;
   price_min: number | null;
   price_max: number | null;
   size_id: string | null;
@@ -86,6 +92,24 @@ export default function EditMonitorPage() {
       toast.error(result.error);
     } else {
       toast.success("Test webhook sent successfully!");
+    }
+  };
+
+  const handleQueryDelayInput = (event: FormEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    if (Number.isFinite(input.valueAsNumber) && input.valueAsNumber > MAX_QUERY_DELAY_MS) {
+      input.value = String(MAX_QUERY_DELAY_MS);
+    }
+  };
+
+  const handleQueryDelayBlur = (event: FocusEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    if (!input.value || !Number.isFinite(input.valueAsNumber)) {
+      input.value = String(DEFAULT_QUERY_DELAY_MS);
+      return;
+    }
+    if (input.valueAsNumber < MIN_QUERY_DELAY_MS) {
+      input.value = String(MIN_QUERY_DELAY_MS);
     }
   };
 
@@ -253,6 +277,27 @@ export default function EditMonitorPage() {
               />
               <p className="text-[12px] text-muted-foreground">
                 Optional Vinted text search. Leave empty if you only want to filter by category, brand, price, size, etc.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="query_delay_ms" className="text-[13px]">
+                Query Delay
+              </Label>
+              <Input
+                type="number"
+                name="query_delay_ms"
+                id="query_delay_ms"
+                min={MIN_QUERY_DELAY_MS}
+                max={MAX_QUERY_DELAY_MS}
+                step={100}
+                defaultValue={monitor.query_delay_ms ?? DEFAULT_QUERY_DELAY_MS}
+                onInput={handleQueryDelayInput}
+                onBlur={handleQueryDelayBlur}
+                required
+              />
+              <p className="text-[12px] text-muted-foreground">
+                Time between Vinted catalog checks in milliseconds. Minimum is {MIN_QUERY_DELAY_MS} ms.
               </p>
             </div>
 

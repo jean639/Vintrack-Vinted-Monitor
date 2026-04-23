@@ -22,7 +22,12 @@ import (
 	http "github.com/bogdanfinn/fhttp"
 )
 
-const maxAPIResponseBytes = 2 * 1024 * 1024 // 2 MB
+const (
+	maxAPIResponseBytes = 2 * 1024 * 1024 // 2 MB
+	defaultQueryDelayMS = 1500
+	minQueryDelayMS     = 500
+	maxQueryDelayMS     = 60000
+)
 
 type Engine struct {
 	db           *database.Store
@@ -151,7 +156,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 
 	apiURL := BuildVintedURL(m)
 
-	interval := getEnvInt("CHECK_INTERVAL_MS", 500)
+	interval := resolveQueryDelayMs(m.QueryDelayMs)
 	maxConsecutiveErrors := getEnvInt("MAX_CONSECUTIVE_ERRORS", 20)
 	raceFetchers := getEnvInt("RACE_FETCHERS", 2)
 	consecutiveErrors := 0
@@ -159,7 +164,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	initialized := false
 	var totalErrors int64
 
-	log.Printf("[%d] started | name=%q | query=%q | race=%d | url=%s", m.ID, m.Name, m.Query, raceFetchers, apiURL)
+	log.Printf("[%d] started | name=%q | query=%q | delay=%dms | race=%d | url=%s", m.ID, m.Name, m.Query, interval, raceFetchers, apiURL)
 	if m.WebhookActive && m.DiscordWebhook.String != "" {
 		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Name)
 	}
@@ -697,4 +702,22 @@ func getEnvInt(key string, fallback int) int {
 		return val
 	}
 	return fallback
+}
+
+func resolveQueryDelayMs(value int) int {
+	if value == 0 {
+		return clampQueryDelayMs(getEnvInt("CHECK_INTERVAL_MS", defaultQueryDelayMS))
+	}
+
+	return clampQueryDelayMs(value)
+}
+
+func clampQueryDelayMs(value int) int {
+	if value < minQueryDelayMS {
+		return minQueryDelayMS
+	}
+	if value > maxQueryDelayMS {
+		return maxQueryDelayMS
+	}
+	return value
 }
