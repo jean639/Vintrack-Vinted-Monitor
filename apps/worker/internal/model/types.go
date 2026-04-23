@@ -10,6 +10,7 @@ type Monitor struct {
 	ID                   int
 	Name                 string
 	Query                string
+	QueryDelayMs         int
 	PriceMin             *int
 	PriceMax             *int
 	SizeID               *string
