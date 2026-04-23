@@ -20,6 +20,7 @@ func TestMonitorConfigFingerprintIncludesRuntimeFilters(t *testing.T) {
 	base := model.Monitor{
 		ID:               7,
 		Query:            "nike",
+		QueryDelayMs:     1500,
 		PriceMin:         &min,
 		PriceMax:         &max,
 		SizeID:           &sizeID,
@@ -40,6 +41,7 @@ func TestMonitorConfigFingerprintIncludesRuntimeFilters(t *testing.T) {
 		mutate func(*model.Monitor)
 	}{
 		{name: "query", mutate: func(m *model.Monitor) { m.Query = "adidas" }},
+		{name: "query delay", mutate: func(m *model.Monitor) { m.QueryDelayMs = 2000 }},
 		{name: "price min", mutate: func(m *model.Monitor) { v := 11; m.PriceMin = &v }},
 		{name: "price max", mutate: func(m *model.Monitor) { v := 51; m.PriceMax = &v }},
 		{name: "size", mutate: func(m *model.Monitor) { v := "3,4"; m.SizeID = &v }},

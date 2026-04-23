@@ -248,6 +248,26 @@ func TestSplitIncomingItems_AfterInitializationOnlyNewItems(t *testing.T) {
 	}
 }
 
+func TestResolveQueryDelayMs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input int
+		want  int
+	}{
+		{name: "valid monitor value", input: 1500, want: 1500},
+		{name: "clamps below minimum", input: 100, want: 500},
+		{name: "clamps above maximum", input: 120000, want: 60000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveQueryDelayMs(tt.input); got != tt.want {
+				t.Fatalf("resolveQueryDelayMs(%d) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveRedirectURL(t *testing.T) {
 	tests := []struct {
 		name     string
