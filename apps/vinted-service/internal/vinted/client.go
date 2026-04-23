@@ -518,6 +518,30 @@ type NotificationsResponse struct {
 	Pagination    FavoritesPagination `json:"pagination"`
 }
 
+type BrandOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type brandFilterEntry struct {
+	ID    interface{} `json:"id"`
+	Value interface{} `json:"value"`
+	Code  interface{} `json:"code"`
+	Title string      `json:"title"`
+	Label string      `json:"label"`
+	Name  string      `json:"name"`
+}
+
+type brandFilterPayload struct {
+	Options []brandFilterEntry `json:"options"`
+	Filters []brandFilterEntry `json:"filters"`
+	Facets  []brandFilterEntry `json:"facets"`
+}
+
+func DefaultBrandCatalogIDs() []string {
+	return []string{"1904", "5", "2993", "1193", "1918", "2994", "2309", "4824", "4332"}
+}
+
 type userWrapper struct {
 	User AccountInfo `json:"user"`
 }
@@ -1944,6 +1968,161 @@ func (c *Client) doGetWardrobe(vintedUserID int64, page, perPage int, order stri
 	}
 
 	return &wardrobe, nil
+}
+
+func (c *Client) SearchBrands(catalogIDs []string, query string) ([]BrandOption, error) {
+	brands, err := c.doSearchBrands(catalogIDs, query)
+	if err != nil && shouldAttemptTokenRefresh(err) && c.session.RefreshToken != "" {
+		log.Printf("[vinted] brand search got %v, attempting token refresh...", err)
+		if refreshErr := c.RefreshAccessToken(); refreshErr != nil {
+			log.Printf("[vinted] token refresh failed: %v", refreshErr)
+			return nil, err
+		}
+		return c.doSearchBrands(catalogIDs, query)
+	}
+	return brands, err
+}
+
+func (c *Client) doSearchBrands(catalogIDs []string, query string) ([]BrandOption, error) {
+	if err := c.WarmUp(); err != nil {
+		log.Printf("[vinted] warmup failed before brand search: %v", err)
+	}
+
+	normalizedQuery := strings.TrimSpace(query)
+	if normalizedQuery == "" {
+		return nil, errors.New("query is required")
+	}
+
+	normalizedCatalogIDs := normalizeCatalogIDs(catalogIDs)
+	if len(normalizedCatalogIDs) == 0 {
+		normalizedCatalogIDs = DefaultBrandCatalogIDs()
+	}
+
+	params := url.Values{
+		"catalog_ids":        {strings.Join(normalizedCatalogIDs, ",")},
+		"size_ids":           {""},
+		"brand_ids":          {""},
+		"status_ids":         {""},
+		"color_ids":          {""},
+		"patterns_ids":       {""},
+		"material_ids":       {""},
+		"filter_search_code": {"brand"},
+		"filter_search_text": {normalizedQuery},
+	}
+
+	u := fmt.Sprintf("https://%s/api/v2/catalog/filters/search?%s", c.session.Domain, params.Encode())
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create brand search request: %w", err)
+	}
+
+	req.Header = c.apiHeaders()
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/catalog?search_text=%s", c.session.Domain, url.QueryEscape(normalizedQuery)))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("brand search request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[vinted] GET /api/v2/catalog/filters/search brand query=%q catalogs=%s -> %d (%.300s)", normalizedQuery, strings.Join(normalizedCatalogIDs, ","), resp.StatusCode, string(body))
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var payload brandFilterPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("unmarshal brand search: %w", err)
+	}
+
+	return normalizeBrandFilterPayload(payload), nil
+}
+
+func normalizeCatalogIDs(catalogIDs []string) []string {
+	seen := make(map[string]struct{}, len(catalogIDs))
+	normalized := make([]string, 0, len(catalogIDs))
+	for _, raw := range catalogIDs {
+		for _, part := range strings.Split(raw, ",") {
+			value := strings.TrimSpace(part)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			normalized = append(normalized, value)
+		}
+	}
+	return normalized
+}
+
+func normalizeBrandFilterPayload(payload brandFilterPayload) []BrandOption {
+	entries := payload.Options
+	if len(entries) == 0 {
+		entries = payload.Filters
+	}
+	if len(entries) == 0 {
+		entries = payload.Facets
+	}
+
+	brands := make([]BrandOption, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		id := optionIDString(firstNonNil(entry.ID, entry.Value, entry.Code))
+		label := strings.TrimSpace(firstNonEmptyString(entry.Title, entry.Label, entry.Name))
+		if id == "" || label == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		brands = append(brands, BrandOption{ID: id, Label: label})
+	}
+	return brands
+}
+
+func firstNonNil(values ...interface{}) interface{} {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func optionIDString(value interface{}) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed == float64(int64(typed)) {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case json.Number:
+		return typed.String()
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
 
 var isoCountryMap = map[string]string{

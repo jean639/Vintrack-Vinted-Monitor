@@ -357,6 +357,7 @@ export default function EditMonitorPage() {
               <BrandPicker
                 selected={selectedBrands}
                 onChange={setSelectedBrands}
+                catalogIds={selectedCategories}
               />
               <input
                 type="hidden"

@@ -54,6 +54,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/items/liked", s.handleLikedItems)
 	mux.HandleFunc("GET /api/items/favorites", s.handleFavorites)
 	mux.HandleFunc("GET /api/items/wardrobe", s.handleWardrobe)
+	mux.HandleFunc("GET /api/catalog/brands", s.handleBrandSearch)
 
 	mux.HandleFunc("GET /api/messages/inbox", s.handleInbox)
 	mux.HandleFunc("GET /api/notifications", s.handleNotifications)
@@ -108,6 +109,28 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func splitCommaList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func queryStringList(values url.Values, keys ...string) []string {
+	result := make([]string, 0)
+	for _, key := range keys {
+		for _, raw := range values[key] {
+			result = append(result, splitCommaList(raw)...)
+		}
+	}
+	return result
 }
 
 func extractHeaderValue(raw, name string) string {
@@ -1402,6 +1425,36 @@ func (s *Server) handleWardrobe(w http.ResponseWriter, r *http.Request) {
 
 	s.persistIfRefreshed(sess, client)
 	writeJSON(w, 200, wardrobe)
+}
+
+func (s *Server) handleBrandSearch(w http.ResponseWriter, r *http.Request) {
+	sess, client, ok := s.getSessionAndClient(r, w)
+	if !ok {
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	if query == "" {
+		query = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
+	if query == "" {
+		writeError(w, "query is required", 400)
+		return
+	}
+
+	catalogIDs := queryStringList(r.URL.Query(), "catalog_ids", "catalog_ids[]", "catalog[]")
+	if len(catalogIDs) == 0 {
+		catalogIDs = vinted.DefaultBrandCatalogIDs()
+	}
+
+	brands, err := client.SearchBrands(catalogIDs, query)
+	if err != nil {
+		writeError(w, "failed to search brands: "+err.Error(), 502)
+		return
+	}
+
+	s.persistIfRefreshed(sess, client)
+	writeJSON(w, 200, map[string]interface{}{"brands": brands})
 }
 
 func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
