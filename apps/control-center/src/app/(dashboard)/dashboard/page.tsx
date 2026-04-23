@@ -24,6 +24,7 @@ export default async function DashboardPage() {
       id: m.id,
       name: m.name,
       query: m.query,
+      query_delay_ms: m.query_delay_ms,
       status: m.status ?? "paused",
       price_max: m.price_max,
       catalog_ids: m.catalog_ids ?? null,

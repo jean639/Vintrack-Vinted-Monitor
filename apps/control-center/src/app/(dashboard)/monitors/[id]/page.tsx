@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { LiveFeed } from "@/components/monitors/live-feed";
 import { Button } from "@/components/ui/button";
 import { toggleMonitorStatus, deleteMonitor } from "@/actions/monitor";
-import { ArrowLeft, PauseCircle, PlayCircle, Trash2, Tag, Globe, Zap, Pencil } from "lucide-react";
+import { ArrowLeft, PauseCircle, PlayCircle, Trash2, Tag, Globe, Zap, Pencil, Timer } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { getCategoryLabelsForRegion } from "@/lib/categories.server";
@@ -12,6 +12,7 @@ import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
 import { getRegionLabel, getRegionFlags, getStatusLocaleForRegionCodes } from "@/lib/regions";
 import { getStatusLabels } from "@/lib/statuses";
+import { formatQueryDelay } from "@/lib/monitor-delay";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
@@ -85,7 +86,7 @@ export default async function MonitorPage({
               </Badge>
             </div>
 
-            <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
               {monitor.query && (
                 <>
                   <span>Keywords: {monitor.query}</span>
@@ -105,6 +106,10 @@ export default async function MonitorPage({
               <MonitorItemCount />
               <span className="text-muted-foreground/50">·</span>
               <span>{getRegionLabel(monitor.region)}</span>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="flex items-center gap-1">
+                <Timer className="h-3 w-3" /> {formatQueryDelay(monitor.query_delay_ms)}
+              </span>
               <span className="text-muted-foreground/50">·</span>
               {monitor.proxy_group ? (
                 <span className="flex items-center gap-1">

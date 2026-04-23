@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Pencil,
   Send,
+  Timer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,6 +50,7 @@ import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
 import { getRegionLabel, getRegionFlags, getStatusLocaleForRegionCodes } from "@/lib/regions";
 import { getStatusLabels } from "@/lib/statuses";
+import { formatQueryDelay } from "@/lib/monitor-delay";
 
 type MonitorHealth = {
   monitor_id: number;
@@ -63,6 +65,7 @@ export type Monitor = {
   id: number;
   name: string;
   query: string;
+  query_delay_ms: number;
   status: string;
   price_max: number | null;
   catalog_ids: string | null;
@@ -429,7 +432,7 @@ export function DashboardClient({
                     >
                       {m.name}
                     </h3>
-                    <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
                       <Badge
                         variant={
                           m.status === "active" ? "default" : "secondary"
@@ -466,6 +469,10 @@ export function DashboardClient({
                           {getRegionLabel(m.region)}
                         </span>
                       )}
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Timer className="h-3 w-3" />
+                        {formatQueryDelay(m.query_delay_ms)}
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
