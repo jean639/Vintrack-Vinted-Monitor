@@ -69,6 +69,7 @@ model monitors {
 
   name       String    @db.VarChar(255)
   query      String    @db.VarChar(255)
+  query_delay_ms Int    @default(1500)
   price_min  Int?
   price_max  Int?
   size_id    String?   @db.VarChar(50)

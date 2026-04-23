@@ -1,0 +1,1 @@
+ALTER TABLE "monitors" ADD COLUMN "query_delay_ms" INTEGER NOT NULL DEFAULT 1500;
