@@ -269,6 +269,7 @@ export default function NewMonitorPage() {
               <BrandPicker
                 selected={selectedBrands}
                 onChange={setSelectedBrands}
+                catalogIds={selectedCategories}
               />
               <input
                 type="hidden"
