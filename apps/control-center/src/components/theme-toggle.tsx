@@ -14,20 +14,6 @@ export function ThemeToggle({
   compact = false,
 }: ThemeToggleProps) {
   const { resolvedTheme, setTheme } = useTheme();
-
-  if (!resolvedTheme) {
-    return (
-      <div
-        className={cn(
-          compact
-            ? "h-8 w-8 rounded-lg border border-border/70 bg-background/60"
-            : "h-9 w-full rounded-xl border border-border/70 bg-background/60",
-          className
-        )}
-      />
-    );
-  }
-
   const isDark = resolvedTheme === "dark";
 
   return (
@@ -41,24 +27,23 @@ export function ThemeToggle({
           : "h-9 w-full justify-between rounded-xl px-3",
         className
       )}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label="Toggle color theme"
+      title="Toggle color theme"
     >
       <span className="flex items-center gap-2">
-        {isDark ? (
-          <MoonStar className="h-4 w-4" />
-        ) : (
-          <SunMedium className="h-4 w-4" />
-        )}
+        <SunMedium className="h-4 w-4 dark:hidden" />
+        <MoonStar className="hidden h-4 w-4 dark:block" />
         {!compact && (
           <span className="text-xs font-medium">
-            {isDark ? "Dark Mode" : "Light Mode"}
+            <span className="dark:hidden">Light Mode</span>
+            <span className="hidden dark:inline">Dark Mode</span>
           </span>
         )}
       </span>
       {!compact && (
         <span className="text-[11px] text-muted-foreground">
-          {isDark ? "On" : "Off"}
+          <span className="dark:hidden">Off</span>
+          <span className="hidden dark:inline">On</span>
         </span>
       )}
     </button>
