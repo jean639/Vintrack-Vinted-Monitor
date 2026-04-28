@@ -65,6 +65,19 @@ export function ColorPicker({ selected, onChange }: ColorPickerProps) {
         />
       );
     }
+    if (hex === "transparent") {
+      return (
+        <span
+          className="inline-block rounded-full border border-input shrink-0"
+          style={{
+            width: size,
+            height: size,
+            background:
+              "linear-gradient(135deg, transparent 45%, #ef4444 45%, #ef4444 55%, transparent 55%), repeating-conic-gradient(#ffffff 0% 25%, #d4d4d8 0% 50%) 50% / 6px 6px",
+          }}
+        />
+      );
+    }
     return (
       <span
         className="inline-block rounded-full border border-input shrink-0"
