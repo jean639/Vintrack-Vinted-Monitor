@@ -4,27 +4,29 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 
-export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
+export default async function DashboardLayout({
+    children,
+}: {
+    children: React.ReactNode;
+}) {
+    const session = await auth();
 
-  if (!session?.user?.id) {
-    redirect("/login");
-  }
+    if (!session?.user?.id) {
+        redirect("/login");
+    }
 
-  let role = "free";
-  const dbUser = await db.user.findUnique({
-    where: { id: session.user.id },
-    select: { role: true },
-  });
-  role = dbUser?.role ?? "free";
+    let role = "free";
+    const dbUser = await db.user.findUnique({
+        where: { id: session.user.id },
+        select: { role: true },
+    });
+    role = dbUser?.role ?? "free";
 
-  const user = { ...session.user, role };
+    const user = { ...session.user, role };
 
-  return (
-    <AccountProvider>
-      <DashboardShell user={user}>
-        {children}
-      </DashboardShell>
-    </AccountProvider>
-  );
+    return (
+        <AccountProvider>
+            <DashboardShell user={user}>{children}</DashboardShell>
+        </AccountProvider>
+    );
 }

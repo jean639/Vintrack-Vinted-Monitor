@@ -105,12 +105,12 @@ export default function FeedPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">
                         Live Feed
                     </h1>
-                    <p className="text-sm text-muted-foreground mt-0.5">
+                    <p className="text-muted-foreground mt-0.5 text-sm">
                         Real-time stream across all your monitors.
                     </p>
                 </div>
@@ -119,8 +119,8 @@ export default function FeedPage() {
                 >
                     {hasActiveMonitors ? (
                         <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                         </span>
                     ) : (
                         <span className="h-2 w-2 rounded-full bg-amber-500/80" />
@@ -131,7 +131,7 @@ export default function FeedPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {loading && items.length === 0
                     ? [...Array(8)].map((_, i) => <ItemCardSkeleton key={i} />)
                     : items.map((item) => (
@@ -140,14 +140,14 @@ export default function FeedPage() {
             </div>
 
             {items.length === 0 && !loading && (
-                <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-card/75 py-20 shadow-sm backdrop-blur">
-                    <div className="mb-4 rounded-xl bg-muted p-3">
-                        <Search className="w-6 h-6 text-muted-foreground" />
+                <div className="border-border/80 bg-card/75 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-20 shadow-sm backdrop-blur">
+                    <div className="bg-muted mb-4 rounded-xl p-3">
+                        <Search className="text-muted-foreground h-6 w-6" />
                     </div>
-                    <h3 className="text-base font-semibold text-foreground">
+                    <h3 className="text-foreground text-base font-semibold">
                         Waiting for items...
                     </h3>
-                    <p className="mt-1 max-w-sm text-center text-sm text-muted-foreground">
+                    <p className="text-muted-foreground mt-1 max-w-sm text-center text-sm">
                         New items will appear here in real-time as your monitors
                         find them.
                     </p>

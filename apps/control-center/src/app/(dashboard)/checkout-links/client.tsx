@@ -81,12 +81,12 @@ export function CheckoutLinksClient() {
     if (accountLoading) {
         return (
             <div className="space-y-4">
-                <div className="h-10 w-56 animate-pulse rounded-lg bg-muted" />
+                <div className="bg-muted h-10 w-56 animate-pulse rounded-lg" />
                 <div className="grid gap-4">
                     {Array.from({ length: 4 }).map((_, index) => (
                         <div
                             key={index}
-                            className="h-40 animate-pulse rounded-xl bg-muted/50"
+                            className="bg-muted/50 h-40 animate-pulse rounded-xl"
                         />
                     ))}
                 </div>
@@ -103,7 +103,7 @@ export function CheckoutLinksClient() {
                 <h2 className="text-2xl font-bold tracking-tight">
                     Vinted Account Not Linked
                 </h2>
-                <p className="mt-1.5 max-w-sm text-muted-foreground">
+                <p className="text-muted-foreground mt-1.5 max-w-sm">
                     Link your Vinted account first. Saved checkout and payment
                     links will show up here after a buy attempt.
                 </p>
@@ -121,7 +121,7 @@ export function CheckoutLinksClient() {
                     <h1 className="text-2xl font-bold tracking-tight">
                         Checkout Links
                     </h1>
-                    <p className="mt-0.5 text-sm text-muted-foreground">
+                    <p className="text-muted-foreground mt-0.5 text-sm">
                         Recent checkout URLs saved from your buy attempts.
                     </p>
                 </div>
@@ -151,7 +151,7 @@ export function CheckoutLinksClient() {
                                         <CardTitle className="text-base">
                                             Item #{entry.item_id}
                                         </CardTitle>
-                                        <p className="text-sm text-muted-foreground">
+                                        <p className="text-muted-foreground text-sm">
                                             {formatTimestamp(entry.created_at)}
                                             {entry.domain
                                                 ? ` • ${entry.domain}`
@@ -168,24 +168,24 @@ export function CheckoutLinksClient() {
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid gap-3 text-sm sm:grid-cols-3">
-                                    <div className="rounded-md border border-border/70 bg-muted/30 p-3">
-                                        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                    <div className="border-border/70 bg-muted/30 rounded-md border p-3">
+                                        <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                             Purchase ID
                                         </span>
-                                        <p className="mt-1 break-all font-medium">
+                                        <p className="mt-1 font-medium break-all">
                                             {entry.purchase_id || "—"}
                                         </p>
                                     </div>
-                                    <div className="rounded-md border border-border/70 bg-muted/30 p-3">
-                                        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                    <div className="border-border/70 bg-muted/30 rounded-md border p-3">
+                                        <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                             Transaction
                                         </span>
                                         <p className="mt-1 font-medium">
                                             {entry.transaction_id || "—"}
                                         </p>
                                     </div>
-                                    <div className="rounded-md border border-border/70 bg-muted/30 p-3">
-                                        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                    <div className="border-border/70 bg-muted/30 rounded-md border p-3">
+                                        <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                             Seller
                                         </span>
                                         <p className="mt-1 font-medium">
@@ -203,7 +203,7 @@ export function CheckoutLinksClient() {
                                                     Payment URL
                                                 </span>
                                             </div>
-                                            <p className="break-all text-xs text-muted-foreground">
+                                            <p className="text-muted-foreground text-xs break-all">
                                                 {entry.payment_url}
                                             </p>
                                             <div className="mt-3 flex flex-wrap gap-2">
@@ -240,14 +240,14 @@ export function CheckoutLinksClient() {
                                     ) : null}
 
                                     {entry.checkout_url ? (
-                                        <div className="rounded-lg border border-border/70 bg-background p-3">
+                                        <div className="border-border/70 bg-background rounded-lg border p-3">
                                             <div className="mb-2 flex items-center gap-2">
                                                 <Link2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                                                 <span className="text-sm font-medium">
                                                     Checkout URL
                                                 </span>
                                             </div>
-                                            <p className="break-all text-xs text-muted-foreground">
+                                            <p className="text-muted-foreground text-xs break-all">
                                                 {entry.checkout_url}
                                             </p>
                                             <div className="mt-3 flex flex-wrap gap-2">
@@ -291,12 +291,12 @@ export function CheckoutLinksClient() {
                     ))}
                 </div>
             ) : (
-                <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 text-center">
-                    <Link2 className="mb-2 h-8 w-8 text-muted-foreground/30" />
-                    <p className="font-medium text-muted-foreground">
+                <div className="border-border/70 bg-muted/20 flex h-64 flex-col items-center justify-center rounded-xl border border-dashed text-center">
+                    <Link2 className="text-muted-foreground/30 mb-2 h-8 w-8" />
+                    <p className="text-muted-foreground font-medium">
                         No checkout links saved yet
                     </p>
-                    <p className="text-xs text-muted-foreground/60">
+                    <p className="text-muted-foreground/60 text-xs">
                         After a buy attempt, the latest checkout URLs will
                         appear here.
                     </p>

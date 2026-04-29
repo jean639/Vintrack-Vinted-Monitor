@@ -389,7 +389,7 @@ export function OneClickBuyTestClient() {
                     <h1 className="text-2xl font-bold tracking-tight">
                         Experimental Buy Lab
                     </h1>
-                    <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                    <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
                         Runs the experimental Vinted PayPal checkout flow
                         against a test product and prints the exact request,
                         response, status code, and error message.
@@ -425,7 +425,7 @@ export function OneClickBuyTestClient() {
                                     setItemId(event.target.value)
                                 }
                                 inputMode="numeric"
-                                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+                                className="border-border bg-background focus:ring-ring w-full rounded-md border px-3 py-2 font-mono text-sm outline-none focus:ring-2"
                             />
                         </label>
                         <label className="block space-y-2">
@@ -438,7 +438,7 @@ export function OneClickBuyTestClient() {
                                     setSellerId(event.target.value)
                                 }
                                 inputMode="numeric"
-                                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+                                className="border-border bg-background focus:ring-ring w-full rounded-md border px-3 py-2 font-mono text-sm outline-none focus:ring-2"
                             />
                         </label>
                     </div>
@@ -450,7 +450,7 @@ export function OneClickBuyTestClient() {
                                 onChange={(event) =>
                                     setProductTitle(event.target.value)
                                 }
-                                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                                className="border-border bg-background focus:ring-ring w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2"
                             />
                         </label>
                         <label className="block space-y-2">
@@ -462,12 +462,12 @@ export function OneClickBuyTestClient() {
                                 onChange={(event) =>
                                     setProductUrl(event.target.value)
                                 }
-                                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                                className="border-border bg-background focus:ring-ring w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2"
                             />
                         </label>
                     </div>
                     {!hasValidProduct && (
-                        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                        <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm">
                             Item ID and Seller ID must be positive numbers.
                         </div>
                     )}
@@ -548,7 +548,7 @@ export function OneClickBuyTestClient() {
                             }
                             placeholder="Paste a fresh token from the browser request if Vinted rejects checkout/build or checkout/payment."
                             rows={4}
-                            className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+                            className="border-border bg-background focus:ring-ring w-full resize-y rounded-md border px-3 py-2 font-mono text-xs outline-none focus:ring-2"
                         />
                     </label>
 
@@ -562,9 +562,9 @@ export function OneClickBuyTestClient() {
                                 setPhoneNumber(event.target.value)
                             }
                             placeholder="+491234567890"
-                            className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+                            className="border-border bg-background focus:ring-ring w-full rounded-md border px-3 py-2 font-mono text-sm outline-none focus:ring-2"
                         />
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-muted-foreground text-xs">
                             Overrides the linked account phone for this test and
                             is sent to Vinted shipping_contact when the checkout
                             exposes a shipping_order_id.
@@ -582,21 +582,21 @@ export function OneClickBuyTestClient() {
                             }
                             placeholder={DEFAULT_PAYPAL_PAYMENT_METHOD}
                             rows={4}
-                            className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+                            className="border-border bg-background focus:ring-ring w-full resize-y rounded-md border px-3 py-2 font-mono text-xs outline-none focus:ring-2"
                         />
                         {!hasValidPaymentMethod && (
-                            <span className="text-xs text-destructive">
+                            <span className="text-destructive text-xs">
                                 Payment method JSON must be a JSON object, not
                                 an array or scalar.
                             </span>
                         )}
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-muted-foreground text-xs">
                             Default is the PayPal payload captured from Vinted:
                             card_id null and pay_in_method_id 10.
                         </span>
                     </label>
 
-                    <label className="flex items-start gap-2 rounded-lg border border-border/80 p-3 text-sm">
+                    <label className="border-border/80 flex items-start gap-2 rounded-lg border p-3 text-sm">
                         <input
                             type="checkbox"
                             checked={confirmed}
@@ -656,7 +656,7 @@ export function OneClickBuyTestClient() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <pre className="max-h-105 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                        <pre className="bg-muted max-h-105 overflow-auto rounded-lg p-3 text-xs">
                             {formatJSON(requestPayload)}
                         </pre>
                     </CardContent>
@@ -691,7 +691,7 @@ export function OneClickBuyTestClient() {
                                     </Badge>
                                 </div>
                                 {result.errorMessage ? (
-                                    <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                                    <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-lg border p-3 text-sm">
                                         {result.errorMessage}
                                     </div>
                                 ) : (
@@ -760,12 +760,12 @@ export function OneClickBuyTestClient() {
                                         page, then retry with a fresh checkout.
                                     </div>
                                 )}
-                                <pre className="max-h-105 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                                <pre className="bg-muted max-h-105 overflow-auto rounded-lg p-3 text-xs">
                                     {formatJSON(result.response)}
                                 </pre>
                             </>
                         ) : (
-                            <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+                            <div className="border-border text-muted-foreground rounded-lg border border-dashed p-6 text-sm">
                                 No test run yet.
                             </div>
                         )}

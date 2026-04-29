@@ -29,16 +29,16 @@ const FIREFOX_EXTENSION_DOWNLOAD_URL =
 
 export default function GuidePage() {
     return (
-        <div className="space-y-6 mx-auto max-w-4xl">
-            <div className="flex flex-col gap-4 border-b border-border pb-10">
-                <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-sm tracking-wide uppercase">
-                    <Sparkles className="w-4 h-4" />
+        <div className="mx-auto max-w-4xl space-y-6">
+            <div className="border-border flex flex-col gap-4 border-b pb-10">
+                <div className="flex items-center gap-2 text-sm font-bold tracking-wide text-blue-600 uppercase dark:text-blue-400">
+                    <Sparkles className="h-4 w-4" />
                     Documentation
                 </div>
-                <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+                <h1 className="text-foreground text-4xl font-extrabold tracking-tight">
                     Getting Started with Vintrack
                 </h1>
-                <p className="text-muted-foreground text-[17px] max-w-3xl leading-relaxed">
+                <p className="text-muted-foreground max-w-3xl text-[17px] leading-relaxed">
                     Set up proxies, monitors, alerts, and the browser extension
                     for linked Vinted actions.
                 </p>
@@ -47,42 +47,42 @@ export default function GuidePage() {
             <div className="space-y-16">
                 <section className="space-y-6">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-bold shadow-sm text-lg">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-lg font-bold text-emerald-700 shadow-sm dark:bg-emerald-500/20 dark:text-emerald-400">
                             1
                         </div>
-                        <h2 className="text-2xl font-bold text-foreground">
+                        <h2 className="text-foreground text-2xl font-bold">
                             Configuring Proxies (IPv4 & IPv6)
                         </h2>
                     </div>
 
-                    <Card className="shadow-sm overflow-hidden">
-                        <CardContent className="p-8 space-y-8">
-                            <div className="grid md:grid-cols-2 gap-12">
+                    <Card className="overflow-hidden shadow-sm">
+                        <CardContent className="space-y-8 p-8">
+                            <div className="grid gap-12 md:grid-cols-2">
                                 <div className="space-y-5">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
-                                            <Globe className="w-6 h-6" />
+                                        <div className="shrink-0 rounded-xl bg-emerald-50 p-2.5 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+                                            <Globe className="h-6 w-6" />
                                         </div>
-                                        <h3 className="text-lg font-bold text-foreground">
+                                        <h3 className="text-foreground text-lg font-bold">
                                             The Basics
                                         </h3>
                                     </div>
-                                    <p className="text-[15px] text-muted-foreground leading-relaxed">
+                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
                                         Vinted has strict limits on requests
                                         from a single IP. Proxies rotate traffic
                                         through multiple identities to keep
                                         monitoring stable.
                                     </p>
                                     <div className="space-y-3 pt-2">
-                                        <div className="flex items-start gap-3 text-[14px] text-muted-foreground">
-                                            <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-1 shrink-0" />
+                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
+                                            <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-500" />
                                             <span>
                                                 <strong>IPv4 Support:</strong>{" "}
                                                 Stable and universal.
                                             </span>
                                         </div>
-                                        <div className="flex items-start gap-3 text-[14px] text-muted-foreground">
-                                            <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-1 shrink-0" />
+                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
+                                            <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-500" />
                                             <span>
                                                 <strong>IPv6 Support:</strong>{" "}
                                                 Fast and cost-efficient.
@@ -90,17 +90,17 @@ export default function GuidePage() {
                                         </div>
                                     </div>
                                 </div>
-                                <div className="space-y-5 p-6 rounded-2xl bg-muted/50 border border-border/50">
-                                    <h3 className="text-md font-bold text-foreground flex items-center gap-2">
-                                        <Settings className="w-5 h-5 text-muted-foreground" />
+                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
+                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
+                                        <Settings className="text-muted-foreground h-5 w-5" />
                                         How to Setup
                                     </h3>
-                                    <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
+                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
                                         <li>
                                             Go to{" "}
                                             <Link
                                                 href="/proxies"
-                                                className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4"
+                                                className="font-bold text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
                                             >
                                                 Proxy Groups
                                             </Link>
@@ -113,7 +113,7 @@ export default function GuidePage() {
                                         <li>
                                             Paste your proxies in the format:
                                             <br />
-                                            <code className="inline-block mt-2 bg-background px-2 py-1 rounded border border-border text-emerald-700 dark:text-emerald-400 font-mono text-xs">
+                                            <code className="bg-background border-border mt-2 inline-block rounded border px-2 py-1 font-mono text-xs text-emerald-700 dark:text-emerald-400">
                                                 ip:port:user:pass
                                             </code>
                                         </li>
@@ -130,43 +130,43 @@ export default function GuidePage() {
 
                 <section className="space-y-6">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 font-bold shadow-sm text-lg">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-lg font-bold text-blue-700 shadow-sm dark:bg-blue-500/20 dark:text-blue-400">
                             2
                         </div>
-                        <h2 className="text-2xl font-bold text-foreground">
+                        <h2 className="text-foreground text-2xl font-bold">
                             Setting Up Monitors
                         </h2>
                     </div>
 
-                    <Card className="shadow-sm overflow-hidden">
-                        <CardContent className="p-8 space-y-8">
-                            <div className="grid md:grid-cols-2 gap-12">
+                    <Card className="overflow-hidden shadow-sm">
+                        <CardContent className="space-y-8 p-8">
+                            <div className="grid gap-12 md:grid-cols-2">
                                 <div className="space-y-5">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
-                                            <LayoutDashboard className="w-6 h-6" />
+                                        <div className="shrink-0 rounded-xl bg-blue-50 p-2.5 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                                            <LayoutDashboard className="h-6 w-6" />
                                         </div>
-                                        <h3 className="text-lg font-bold text-foreground">
+                                        <h3 className="text-foreground text-lg font-bold">
                                             Create Search Tasks
                                         </h3>
                                     </div>
-                                    <p className="text-[15px] text-muted-foreground leading-relaxed">
+                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
                                         A monitor is your personal search agent.
                                         Define exactly what you want to find,
                                         and Vintrack will notify you the moment
                                         it hits Vinted.
                                     </p>
                                     <div className="space-y-3 pt-2">
-                                        <div className="flex items-start gap-3 text-[14px] text-muted-foreground">
-                                            <Search className="w-4 h-4 text-blue-500 mt-1 shrink-0" />
+                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
+                                            <Search className="mt-1 h-4 w-4 shrink-0 text-blue-500" />
                                             <span>
                                                 <strong>Queries:</strong> Use
                                                 specific keywords for better
                                                 results.
                                             </span>
                                         </div>
-                                        <div className="flex items-start gap-3 text-[14px] text-muted-foreground">
-                                            <Zap className="w-4 h-4 text-amber-500 mt-1 shrink-0" />
+                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
+                                            <Zap className="mt-1 h-4 w-4 shrink-0 text-amber-500" />
                                             <span>
                                                 <strong>Filters:</strong> Set
                                                 price, brand, and size limits.
@@ -174,17 +174,17 @@ export default function GuidePage() {
                                         </div>
                                     </div>
                                 </div>
-                                <div className="space-y-5 p-6 rounded-2xl bg-muted/50 border border-border/50">
-                                    <h3 className="text-md font-bold text-foreground flex items-center gap-2">
-                                        <PlusCircle className="w-5 h-5 text-muted-foreground" />
+                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
+                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
+                                        <PlusCircle className="text-muted-foreground h-5 w-5" />
                                         How to Setup
                                     </h3>
-                                    <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
+                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
                                         <li>
                                             Go to{" "}
                                             <Link
                                                 href="/monitors/new"
-                                                className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4"
+                                                className="font-bold text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
                                             >
                                                 New Monitor
                                             </Link>
@@ -212,45 +212,45 @@ export default function GuidePage() {
 
                 <section className="space-y-6">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400 font-bold shadow-sm text-lg">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-100 text-lg font-bold text-purple-700 shadow-sm dark:bg-purple-500/20 dark:text-purple-400">
                             3
                         </div>
-                        <h2 className="text-2xl font-bold text-foreground">
+                        <h2 className="text-foreground text-2xl font-bold">
                             Discord and Telegram Notifications
                         </h2>
                     </div>
 
-                    <Card className="shadow-sm overflow-hidden">
-                        <CardContent className="p-8 space-y-8">
-                            <div className="grid md:grid-cols-2 gap-12">
+                    <Card className="overflow-hidden shadow-sm">
+                        <CardContent className="space-y-8 p-8">
+                            <div className="grid gap-12 md:grid-cols-2">
                                 <div className="space-y-5">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
-                                            <Bell className="w-6 h-6" />
+                                        <div className="shrink-0 rounded-xl bg-purple-50 p-2.5 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400">
+                                            <Bell className="h-6 w-6" />
                                         </div>
-                                        <h3 className="text-lg font-bold text-foreground">
+                                        <h3 className="text-foreground text-lg font-bold">
                                             Stay Alert
                                         </h3>
                                     </div>
-                                    <p className="text-[15px] text-muted-foreground leading-relaxed">
+                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
                                         Use Discord webhooks or connect the
                                         Vintrack Telegram bot to receive instant
                                         item cards.
                                     </p>
-                                    <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-100 dark:border-purple-500/20 flex items-center gap-3">
-                                        <Smartphone className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                                    <div className="flex items-center gap-3 rounded-xl border border-purple-100 bg-purple-50 p-4 dark:border-purple-500/20 dark:bg-purple-500/10">
+                                        <Smartphone className="h-5 w-5 text-purple-600 dark:text-purple-400" />
                                         <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
                                             Perfect for push notifications on
                                             your phone!
                                         </span>
                                     </div>
                                 </div>
-                                <div className="space-y-5 p-6 rounded-2xl bg-muted/50 border border-border/50">
-                                    <h3 className="text-md font-bold text-foreground flex items-center gap-2">
-                                        <LinkIcon className="w-5 h-5 text-muted-foreground" />
+                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
+                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
+                                        <LinkIcon className="text-muted-foreground h-5 w-5" />
                                         How to Setup
                                     </h3>
-                                    <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
+                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
                                         <li>
                                             In Discord:{" "}
                                             <strong>Channel Settings</strong>{" "}
@@ -284,65 +284,65 @@ export default function GuidePage() {
 
                 <section className="space-y-6">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold shadow-sm text-lg">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-lg font-bold text-amber-700 shadow-sm dark:bg-amber-500/20 dark:text-amber-400">
                             4
                         </div>
-                        <h2 className="text-2xl font-bold text-foreground">
+                        <h2 className="text-foreground text-2xl font-bold">
                             Vinted Account Integration
                         </h2>
                     </div>
 
-                    <Card className="shadow-sm overflow-hidden">
-                        <CardContent className="p-8 space-y-8">
-                            <div className="grid md:grid-cols-2 gap-12">
+                    <Card className="overflow-hidden shadow-sm">
+                        <CardContent className="space-y-8 p-8">
+                            <div className="grid gap-12 md:grid-cols-2">
                                 <div className="space-y-5">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
-                                            <User className="w-6 h-6" />
+                                        <div className="shrink-0 rounded-xl bg-amber-50 p-2.5 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                                            <User className="h-6 w-6" />
                                         </div>
-                                        <h3 className="text-lg font-bold text-foreground">
+                                        <h3 className="text-foreground text-lg font-bold">
                                             Account Actions
                                         </h3>
                                     </div>
-                                    <p className="text-[15px] text-muted-foreground leading-relaxed">
+                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
                                         Link your Vinted account with the
                                         Vintrack extension. It keeps the browser
                                         session fresh without making you copy
                                         tokens manually.
                                     </p>
                                     <div className="grid grid-cols-3 gap-3">
-                                        <div className="p-3 rounded-xl bg-card border border-border shadow-sm text-center space-y-2">
-                                            <Heart className="w-4 h-4 mx-auto text-red-500 fill-red-500" />
-                                            <span className="text-[11px] font-bold block text-foreground">
+                                        <div className="bg-card border-border space-y-2 rounded-xl border p-3 text-center shadow-sm">
+                                            <Heart className="mx-auto h-4 w-4 fill-red-500 text-red-500" />
+                                            <span className="text-foreground block text-[11px] font-bold">
                                                 Like
                                             </span>
                                         </div>
-                                        <div className="p-3 rounded-xl bg-card border border-border shadow-sm text-center space-y-2">
-                                            <MessageSquare className="w-4 h-4 mx-auto text-blue-500" />
-                                            <span className="text-[11px] font-bold block text-foreground">
+                                        <div className="bg-card border-border space-y-2 rounded-xl border p-3 text-center shadow-sm">
+                                            <MessageSquare className="mx-auto h-4 w-4 text-blue-500" />
+                                            <span className="text-foreground block text-[11px] font-bold">
                                                 Message
                                             </span>
                                         </div>
-                                        <div className="p-3 rounded-xl bg-card border border-border shadow-sm text-center space-y-2">
-                                            <Tag className="w-4 h-4 mx-auto text-emerald-500" />
-                                            <span className="text-[11px] font-bold block text-foreground">
+                                        <div className="bg-card border-border space-y-2 rounded-xl border p-3 text-center shadow-sm">
+                                            <Tag className="mx-auto h-4 w-4 text-emerald-500" />
+                                            <span className="text-foreground block text-[11px] font-bold">
                                                 Offer
                                             </span>
                                         </div>
                                     </div>
-                                    <p className="text-[13px] text-muted-foreground leading-relaxed">
+                                    <p className="text-muted-foreground text-[13px] leading-relaxed">
                                         The extension syncs only the Vinted
                                         session tokens, domain, browser user
                                         agent, and Vintrack theme. It does not
                                         send a full cookie header.
                                     </p>
                                 </div>
-                                <div className="space-y-5 p-6 rounded-2xl bg-muted/50 border border-border/50">
-                                    <h3 className="text-md font-bold text-foreground flex items-center gap-2">
-                                        <Settings className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
+                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
+                                        <Settings className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                                         How to Setup
                                     </h3>
-                                    <ol className="text-[15px] text-muted-foreground space-y-4 list-decimal pl-5">
+                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
                                         <li>
                                             Download the Vintrack extension for
                                             Chrome or Firefox.
@@ -368,7 +368,7 @@ export default function GuidePage() {
                                             Go to{" "}
                                             <Link
                                                 href="/account"
-                                                className="text-blue-600 dark:text-blue-400 font-bold hover:underline underline-offset-4"
+                                                className="font-bold text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
                                             >
                                                 Account
                                             </Link>{" "}
@@ -432,15 +432,15 @@ export default function GuidePage() {
                 </section>
             </div>
 
-            <div className="rounded-[2rem] bg-slate-900 p-10 flex flex-col md:flex-row items-center gap-8 shadow-xl">
-                <div className="p-5 rounded-2xl bg-background/10 backdrop-blur-sm border border-white/10">
-                    <Info className="w-9 h-9 text-blue-400" />
+            <div className="flex flex-col items-center gap-8 rounded-[2rem] bg-slate-900 p-10 shadow-xl md:flex-row">
+                <div className="bg-background/10 rounded-2xl border border-white/10 p-5 backdrop-blur-sm">
+                    <Info className="h-9 w-9 text-blue-400" />
                 </div>
                 <div className="space-y-2">
-                    <h3 className="font-bold text-white text-xl">
+                    <h3 className="text-xl font-bold text-white">
                         Still have questions?
                     </h3>
-                    <p className="text-slate-400 text-[15px]">
+                    <p className="text-[15px] text-slate-400">
                         Check out our community or visit the GitHub repository
                         for technical support, feature requests, and updates.
                     </p>
@@ -448,9 +448,9 @@ export default function GuidePage() {
                 <a
                     href="https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor"
                     target="_blank"
-                    className="ml-auto flex items-center gap-2.5 bg-background text-foreground px-8 py-3.5 rounded-2xl font-bold hover:bg-muted transition-all shadow-lg active:scale-95"
+                    className="bg-background text-foreground hover:bg-muted ml-auto flex items-center gap-2.5 rounded-2xl px-8 py-3.5 font-bold shadow-lg transition-all active:scale-95"
                 >
-                    View GitHub <ExternalLink className="w-5 h-5" />
+                    View GitHub <ExternalLink className="h-5 w-5" />
                 </a>
             </div>
         </div>

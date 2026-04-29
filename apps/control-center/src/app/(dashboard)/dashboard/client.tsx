@@ -363,104 +363,104 @@ export function DashboardClient({
 
     return (
         <div className="space-y-8">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">
                         Welcome back, {userName}
                     </h1>
-                    <p className="text-sm text-muted-foreground mt-0.5">
+                    <p className="text-muted-foreground mt-0.5 text-sm">
                         Manage and monitor your Vinted scrapers.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex w-full items-center gap-2 sm:w-auto">
                     {activeCount > 0 && (
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={handleStopAll}
-                            className="flex-1 sm:flex-none gap-1.5 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20 hover:bg-red-50 dark:hover:bg-red-500/10 dark:bg-transparent hover:text-red-700"
+                            className="flex-1 gap-1.5 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:flex-none dark:border-red-500/20 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-500/10"
                         >
-                            <StopCircle className="w-3.5 h-3.5" /> Stop All
+                            <StopCircle className="h-3.5 w-3.5" /> Stop All
                         </Button>
                     )}
                     <Link href="/monitors/new" className="flex-1 sm:flex-none">
                         <Button size="sm" className="w-full gap-1.5">
-                            <Plus className="w-3.5 h-3.5" /> New Monitor
+                            <Plus className="h-3.5 w-3.5" /> New Monitor
                         </Button>
                     </Link>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="rounded-xl border border-border/75 bg-card/80 px-5 py-4 shadow-sm backdrop-blur">
-                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="border-border/75 bg-card/80 rounded-xl border px-5 py-4 shadow-sm backdrop-blur">
+                    <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
                         Total Monitors
                     </p>
-                    <p className="mt-1 text-2xl font-bold text-foreground">
+                    <p className="text-foreground mt-1 text-2xl font-bold">
                         {monitors.length}
                     </p>
                 </div>
-                <div className="rounded-xl border border-border/75 bg-card/80 px-5 py-4 shadow-sm backdrop-blur">
-                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="border-border/75 bg-card/80 rounded-xl border px-5 py-4 shadow-sm backdrop-blur">
+                    <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
                         Active
                     </p>
-                    <div className="flex items-center gap-2 mt-1">
-                        <p className="text-2xl font-bold text-foreground">
+                    <div className="mt-1 flex items-center gap-2">
+                        <p className="text-foreground text-2xl font-bold">
                             {activeCount}
                         </p>
                         {activeCount > 0 && (
                             <span className="relative flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                             </span>
                         )}
                     </div>
                 </div>
-                <div className="rounded-xl border border-border/75 bg-card/80 px-5 py-4 shadow-sm backdrop-blur">
-                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="border-border/75 bg-card/80 rounded-xl border px-5 py-4 shadow-sm backdrop-blur">
+                    <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
                         Items Found
                     </p>
-                    <p className="mt-1 text-2xl font-bold text-foreground">
+                    <p className="text-foreground mt-1 text-2xl font-bold">
                         {totalItems.toLocaleString()}
                     </p>
                 </div>
             </div>
 
             {monitors.length === 0 ? (
-                <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-card/75 py-20 shadow-sm backdrop-blur">
-                    <div className="mb-4 rounded-xl bg-muted p-3">
-                        <Radio className="w-6 h-6 text-muted-foreground" />
+                <div className="border-border/80 bg-card/75 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-20 shadow-sm backdrop-blur">
+                    <div className="bg-muted mb-4 rounded-xl p-3">
+                        <Radio className="text-muted-foreground h-6 w-6" />
                     </div>
-                    <h3 className="text-base font-semibold text-foreground">
+                    <h3 className="text-foreground text-base font-semibold">
                         No monitors yet
                     </h3>
-                    <p className="mb-4 mt-1 text-sm text-muted-foreground">
+                    <p className="text-muted-foreground mt-1 mb-4 text-sm">
                         Create your first monitor to start finding deals.
                     </p>
                     <Link href="/monitors/new">
                         <Button size="sm" className="gap-1.5">
-                            <Plus className="w-3.5 h-3.5" /> Create Monitor
+                            <Plus className="h-3.5 w-3.5" /> Create Monitor
                         </Button>
                     </Link>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {sortedMonitors.map((m) => (
                         <Card
                             key={m.id}
-                            className="group flex flex-col overflow-hidden border-border/75 bg-card/85 transition-colors hover:border-border hover:bg-card"
+                            className="group border-border/75 bg-card/85 hover:border-border hover:bg-card flex flex-col overflow-hidden transition-colors"
                         >
-                            <CardContent className="p-5 flex flex-col flex-1">
-                                <div className="flex items-start justify-between gap-3 mb-3">
+                            <CardContent className="flex flex-1 flex-col p-5">
+                                <div className="mb-3 flex items-start justify-between gap-3">
                                     <div className="min-w-0 flex-1">
                                         <h3
-                                            className="truncate text-[15px] font-semibold text-foreground"
+                                            className="text-foreground truncate text-[15px] font-semibold"
                                             title={m.name}
                                         >
                                             {m.name}
                                         </h3>
-                                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
                                             <Badge
                                                 variant={
                                                     m.status === "active"
@@ -477,12 +477,12 @@ export function DashboardClient({
                                             >
                                                 {m.status === "active" ? (
                                                     <span className="flex items-center gap-1">
-                                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                                                         Running
                                                     </span>
                                                 ) : m.status === "error" ? (
                                                     <span className="flex items-center gap-1">
-                                                        <AlertTriangle className="w-3 h-3" />
+                                                        <AlertTriangle className="h-3 w-3" />
                                                         Proxy Error
                                                     </span>
                                                 ) : (
@@ -490,16 +490,16 @@ export function DashboardClient({
                                                 )}
                                             </Badge>
                                             {m.price_max && (
-                                                <span className="text-[11px] text-muted-foreground">
+                                                <span className="text-muted-foreground text-[11px]">
                                                     Max {m.price_max}€
                                                 </span>
                                             )}
                                             {m.region && m.region && (
-                                                <span className="text-[11px] text-muted-foreground">
+                                                <span className="text-muted-foreground text-[11px]">
                                                     {getRegionLabel(m.region)}
                                                 </span>
                                             )}
-                                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                                            <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
                                                 <Timer className="h-3 w-3" />
                                                 {formatQueryDelay(
                                                     m.query_delay_ms,
@@ -507,24 +507,24 @@ export function DashboardClient({
                                             </span>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-0.5 shrink-0">
+                                    <div className="flex shrink-0 items-center gap-0.5">
                                         <Link
                                             href={`/monitors/${m.id}/edit?from=dashboard`}
                                         >
                                             <button
-                                                className="rounded-md p-1.5 text-muted-foreground/55 transition-colors hover:bg-accent hover:text-accent-foreground"
+                                                className="text-muted-foreground/55 hover:bg-accent hover:text-accent-foreground rounded-md p-1.5 transition-colors"
                                                 title="Edit monitor"
                                             >
-                                                <Pencil className="w-3.5 h-3.5" />
+                                                <Pencil className="h-3.5 w-3.5" />
                                             </button>
                                         </Link>
                                         <button
                                             onClick={() => openWebhookDialog(m)}
-                                            className="rounded-md p-1.5 text-muted-foreground/55 transition-colors hover:bg-accent hover:text-accent-foreground"
+                                            className="text-muted-foreground/55 hover:bg-accent hover:text-accent-foreground rounded-md p-1.5 transition-colors"
                                             title="Configure notifications"
                                         >
                                             <Webhook
-                                                className={`w-3.5 h-3.5 ${
+                                                className={`h-3.5 w-3.5 ${
                                                     (m.discord_webhook &&
                                                         m.webhook_active) ||
                                                     m.telegram_active
@@ -542,7 +542,7 @@ export function DashboardClient({
                                     m.status_ids ||
                                     m.size_id ||
                                     m.allowed_countries) && (
-                                    <div className="flex flex-wrap gap-1 mb-3">
+                                    <div className="mb-3 flex flex-wrap gap-1">
                                         {m.allowed_countries && (
                                             <span
                                                 className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/12 dark:text-emerald-400"
@@ -615,20 +615,20 @@ export function DashboardClient({
 
                                 <div className="flex-1" />
 
-                                <div className="mb-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-                                    <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                                    <span className="font-medium text-foreground">
+                                <div className="text-muted-foreground mb-1.5 flex items-center gap-1.5 text-[13px]">
+                                    <Package className="text-muted-foreground h-3.5 w-3.5" />
+                                    <span className="text-foreground font-medium">
                                         {m._count.items.toLocaleString()}
                                     </span>
                                     items found
                                 </div>
 
-                                <div className="mb-2 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                                <div className="text-muted-foreground mb-2 flex items-center gap-1.5 text-[13px]">
                                     {m.proxy_group_name ? (
                                         <>
-                                            <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+                                            <Globe className="text-muted-foreground h-3.5 w-3.5" />
                                             <span
-                                                className="truncate font-medium text-foreground"
+                                                className="text-foreground truncate font-medium"
                                                 title={m.proxy_group_name}
                                             >
                                                 {m.proxy_group_name}
@@ -636,7 +636,7 @@ export function DashboardClient({
                                         </>
                                     ) : (
                                         <>
-                                            <Zap className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                            <Zap className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                                             <span className="font-medium text-amber-600 dark:text-amber-400">
                                                 Server Proxies
                                             </span>
@@ -645,13 +645,13 @@ export function DashboardClient({
                                     {m.status === "active" &&
                                         hasProxyWarning(healthMap[m.id]) && (
                                             <span className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:border-red-500/20 dark:bg-red-500/12 dark:text-red-400">
-                                                <AlertTriangle className="w-3 h-3" />
+                                                <AlertTriangle className="h-3 w-3" />
                                                 Proxy Warning
                                             </span>
                                         )}
                                 </div>
 
-                                <div className="flex items-center gap-2 border-t border-border/70 pt-3">
+                                <div className="border-border/70 flex items-center gap-2 border-t pt-3">
                                     <Button
                                         variant="ghost"
                                         size="sm"
@@ -666,12 +666,12 @@ export function DashboardClient({
                                     >
                                         {m.status === "active" ? (
                                             <>
-                                                <PauseCircle className="w-3.5 h-3.5 mr-1" />{" "}
+                                                <PauseCircle className="mr-1 h-3.5 w-3.5" />{" "}
                                                 Pause
                                             </>
                                         ) : (
                                             <>
-                                                <PlayCircle className="w-3.5 h-3.5 mr-1" />{" "}
+                                                <PlayCircle className="mr-1 h-3.5 w-3.5" />{" "}
                                                 Resume
                                             </>
                                         )}
@@ -681,10 +681,10 @@ export function DashboardClient({
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            className="h-8 gap-1 px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+                                            className="text-muted-foreground hover:text-foreground h-8 gap-1 px-3 text-xs font-medium"
                                         >
                                             View{" "}
-                                            <ArrowRight className="w-3 h-3" />
+                                            <ArrowRight className="h-3 w-3" />
                                         </Button>
                                     </Link>
                                 </div>
@@ -728,24 +728,24 @@ export function DashboardClient({
                                     variant="outline"
                                     onClick={handleTestWebhook}
                                     disabled={isTestingWebhook || !webhookInput}
-                                    className="gap-2 shrink-0"
+                                    className="shrink-0 gap-2"
                                 >
-                                    <Send className="w-4 h-4" />
+                                    <Send className="h-4 w-4" />
                                     {isTestingWebhook ? "Testing..." : "Test"}
                                 </Button>
                             </div>
                         </div>
 
                         {webhookInput.length > 0 && (
-                            <div className="flex items-center justify-between space-x-2 rounded-lg border border-border/80 bg-muted/45 p-3">
+                            <div className="border-border/80 bg-muted/45 flex items-center justify-between space-x-2 rounded-lg border p-3">
                                 <div className="flex flex-col space-y-0.5">
                                     <Label
                                         htmlFor="active-mode"
-                                        className="font-medium cursor-pointer text-sm"
+                                        className="cursor-pointer text-sm font-medium"
                                     >
                                         Enable Notifications
                                     </Label>
-                                    <span className="text-[12px] text-muted-foreground">
+                                    <span className="text-muted-foreground text-[12px]">
                                         Pause notifications without deleting the
                                         URL.
                                     </span>
@@ -786,19 +786,19 @@ export function DashboardClient({
                             </div>
                         )}
 
-                        <div className="grid gap-3 rounded-lg border border-border/80 bg-muted/25 p-3">
+                        <div className="border-border/80 bg-muted/25 grid gap-3 rounded-lg border p-3">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="space-y-1">
                                     <Label className="text-sm">Telegram</Label>
                                     {telegramConnection?.connected ? (
-                                        <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                                        <p className="text-muted-foreground flex items-center gap-1.5 text-[12px]">
                                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
                                             Connected to{" "}
                                             {telegramConnection.connection
                                                 ?.chat_title || "Telegram"}
                                         </p>
                                     ) : (
-                                        <p className="text-[12px] text-muted-foreground">
+                                        <p className="text-muted-foreground text-[12px]">
                                             Connect your Telegram once, then
                                             enable it per monitor.
                                         </p>
@@ -810,9 +810,9 @@ export function DashboardClient({
                                         variant="outline"
                                         onClick={handleTestTelegram}
                                         disabled={isTestingTelegram}
-                                        className="gap-2 shrink-0"
+                                        className="shrink-0 gap-2"
                                     >
-                                        <MessageCircle className="w-4 h-4" />
+                                        <MessageCircle className="h-4 w-4" />
                                         {isTestingTelegram
                                             ? "Testing..."
                                             : "Test"}
@@ -823,9 +823,9 @@ export function DashboardClient({
                                         variant="outline"
                                         onClick={handleCreateTelegramCode}
                                         disabled={isCreatingTelegramCode}
-                                        className="gap-2 shrink-0"
+                                        className="shrink-0 gap-2"
                                     >
-                                        <MessageCircle className="w-4 h-4" />
+                                        <MessageCircle className="h-4 w-4" />
                                         {isCreatingTelegramCode
                                             ? "Creating..."
                                             : "Connect Telegram"}
@@ -835,8 +835,8 @@ export function DashboardClient({
 
                             {!telegramConnection?.connected &&
                                 telegramConnectCode && (
-                                    <div className="rounded-md border border-border/80 bg-background p-3 text-[12px]">
-                                        <p className="font-medium text-foreground">
+                                    <div className="border-border/80 bg-background rounded-md border p-3 text-[12px]">
+                                        <p className="text-foreground font-medium">
                                             Send this command to{" "}
                                             {telegramConnectCode.botUsername ? (
                                                 <span>
@@ -851,7 +851,7 @@ export function DashboardClient({
                                             :
                                         </p>
                                         <div className="mt-2 flex items-center gap-2">
-                                            <code className="flex-1 rounded-md bg-muted px-2 py-1.5 text-foreground">
+                                            <code className="bg-muted text-foreground flex-1 rounded-md px-2 py-1.5">
                                                 /connect{" "}
                                                 {telegramConnectCode.code}
                                             </code>
@@ -872,14 +872,14 @@ export function DashboardClient({
                                                     }
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                    className="border-input bg-background text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
                                                     title="Open Telegram"
                                                 >
                                                     <ExternalLink className="h-3.5 w-3.5" />
                                                 </a>
                                             )}
                                         </div>
-                                        <p className="mt-2 text-muted-foreground">
+                                        <p className="text-muted-foreground mt-2">
                                             Use the open button to jump directly
                                             to the bot. The dashboard will
                                             detect the connection automatically
@@ -890,15 +890,15 @@ export function DashboardClient({
                         </div>
 
                         {telegramConnection?.connected && (
-                            <div className="flex items-center justify-between space-x-2 rounded-lg border border-border/80 bg-muted/45 p-3">
+                            <div className="border-border/80 bg-muted/45 flex items-center justify-between space-x-2 rounded-lg border p-3">
                                 <div className="flex flex-col space-y-0.5">
                                     <Label
                                         htmlFor="telegram-active-mode"
-                                        className="font-medium cursor-pointer text-sm"
+                                        className="cursor-pointer text-sm font-medium"
                                     >
                                         Enable Telegram
                                     </Label>
-                                    <span className="text-[12px] text-muted-foreground">
+                                    <span className="text-muted-foreground text-[12px]">
                                         Send new item and monitor status
                                         notifications to Telegram.
                                     </span>

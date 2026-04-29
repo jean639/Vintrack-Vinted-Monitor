@@ -4,36 +4,37 @@ import { redirect } from "next/navigation";
 import { ProxiesClient } from "./client";
 
 export default async function ProxiesPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/login");
+    const session = await auth();
+    if (!session?.user?.id) redirect("/login");
 
-  const proxyGroups = await db.proxy_groups.findMany({
-    where: { userId: session.user.id },
-    orderBy: { created_at: "desc" },
-    include: {
-      _count: { select: { monitors: true } },
-    },
-  });
+    const proxyGroups = await db.proxy_groups.findMany({
+        where: { userId: session.user.id },
+        orderBy: { created_at: "desc" },
+        include: {
+            _count: { select: { monitors: true } },
+        },
+    });
 
-  const user = await db.user.findUnique({
-    where: { id: session.user.id },
-    select: { role: true },
-  });
+    const user = await db.user.findUnique({
+        where: { id: session.user.id },
+        select: { role: true },
+    });
 
-  return (
-    <ProxiesClient
-      initialGroups={proxyGroups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        proxies: g.proxies,
-        monitorCount: g._count.monitors,
-        bandwidthRxBytes: g.bandwidth_rx_bytes.toString(),
-        bandwidthTxBytes: g.bandwidth_tx_bytes.toString(),
-        bandwidthLimitBytes: g.bandwidth_limit_bytes?.toString() ?? null,
-        bandwidthResetAt: g.bandwidth_reset_at?.toISOString() ?? null,
-        created_at: g.created_at?.toISOString() ?? "",
-      }))}
-      userRole={user?.role ?? "free"}
-    />
-  );
+    return (
+        <ProxiesClient
+            initialGroups={proxyGroups.map((g) => ({
+                id: g.id,
+                name: g.name,
+                proxies: g.proxies,
+                monitorCount: g._count.monitors,
+                bandwidthRxBytes: g.bandwidth_rx_bytes.toString(),
+                bandwidthTxBytes: g.bandwidth_tx_bytes.toString(),
+                bandwidthLimitBytes:
+                    g.bandwidth_limit_bytes?.toString() ?? null,
+                bandwidthResetAt: g.bandwidth_reset_at?.toISOString() ?? null,
+                created_at: g.created_at?.toISOString() ?? "",
+            }))}
+            userRole={user?.role ?? "free"}
+        />
+    );
 }
