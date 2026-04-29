@@ -5,10 +5,10 @@ import { AccountClient } from "./client";
 import { getAccountStatus } from "@/actions/account";
 
 export default async function AccountPage() {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
+    const session = await auth();
+    if (!session?.user) redirect("/login");
 
-  const status: AccountStatus = await getAccountStatus();
+    const status: AccountStatus = await getAccountStatus();
 
-  return <AccountClient initialStatus={status} />;
+    return <AccountClient initialStatus={status} />;
 }

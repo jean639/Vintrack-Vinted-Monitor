@@ -3,9 +3,9 @@
  * Format: https://discord.com/api/webhooks/ID/TOKEN
  */
 export function isValidDiscordWebhook(url: string): boolean {
-  const discordWebhookRegex =
-    /^https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]+$/;
-  return discordWebhookRegex.test(url);
+    const discordWebhookRegex =
+        /^https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]+$/;
+    return discordWebhookRegex.test(url);
 }
 
 /**
@@ -13,5 +13,5 @@ export function isValidDiscordWebhook(url: string): boolean {
  * User and group IDs are numeric; group/channel IDs can be negative.
  */
 export function isValidTelegramChatId(chatId: string): boolean {
-  return /^-?\d+$/.test(chatId.trim());
+    return /^-?\d+$/.test(chatId.trim());
 }

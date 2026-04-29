@@ -77,10 +77,10 @@ export async function getAccountStatus(): Promise<VintedAccountStatus> {
 }
 
 export async function linkVintedAccount(
-  accessToken: string,
-  domain: string,
-  refreshToken?: string,
-  phoneNumber?: string,
+    accessToken: string,
+    domain: string,
+    refreshToken?: string,
+    phoneNumber?: string,
 ) {
     return apiFetch<{
         linked: boolean;

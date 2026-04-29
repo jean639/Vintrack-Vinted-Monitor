@@ -492,12 +492,12 @@ export function AccountClient({
             : "not synced yet";
 
     return (
-        <div className="space-y-6 mx-auto max-w-4xl">
+        <div className="mx-auto max-w-4xl space-y-6">
             <div>
                 <h1 className="text-2xl font-bold tracking-tight">
                     Vinted Account
                 </h1>
-                <p className="text-sm text-muted-foreground mt-0.5">
+                <p className="text-muted-foreground mt-0.5 text-sm">
                     Link your Vinted account to like items and more, directly
                     from the dashboard.
                 </p>
@@ -536,16 +536,16 @@ export function AccountClient({
                 </CardHeader>
                 <CardContent className="space-y-5 pt-3">
                     <div className="grid gap-3 md:grid-cols-3">
-                        <div className="rounded-md border border-border/80 bg-background/60 p-3">
-                            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        <div className="border-border/80 bg-background/60 rounded-md border p-3">
+                            <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Browser
                             </p>
                             <p className="mt-1 text-sm font-medium">
                                 {extensionInstalled ? "Detected" : "Missing"}
                             </p>
                         </div>
-                        <div className="rounded-md border border-border/80 bg-background/60 p-3">
-                            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        <div className="border-border/80 bg-background/60 rounded-md border p-3">
+                            <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Connection
                             </p>
                             <p className="mt-1 text-sm font-medium">
@@ -554,8 +554,8 @@ export function AccountClient({
                                     : "Not connected"}
                             </p>
                         </div>
-                        <div className="rounded-md border border-border/80 bg-background/60 p-3">
-                            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        <div className="border-border/80 bg-background/60 rounded-md border p-3">
+                            <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Last browser sync
                             </p>
                             <p className="mt-1 text-sm font-medium">
@@ -564,13 +564,13 @@ export function AccountClient({
                         </div>
                     </div>
 
-                    <div className="rounded-md border border-border/80 bg-muted/30 p-4">
+                    <div className="border-border/80 bg-muted/30 rounded-md border p-4">
                         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div>
                                 <p className="text-sm font-medium">
                                     {extensionStatusCopy}
                                 </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
+                                <p className="text-muted-foreground mt-1 text-xs">
                                     Sign in to Vinted in this same browser. The
                                     extension syncs only session tokens and the
                                     selected Vinted domain.
@@ -582,11 +582,11 @@ export function AccountClient({
                                 className="gap-2 md:shrink-0"
                             >
                                 {isBrowserSyncStarting ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
                                 ) : extensionConfigured ? (
-                                    <RefreshCw className="w-4 h-4" />
+                                    <RefreshCw className="h-4 w-4" />
                                 ) : (
-                                    <Bot className="w-4 h-4" />
+                                    <Bot className="h-4 w-4" />
                                 )}
                                 {extensionConfigured
                                     ? "Reconnect"
@@ -632,7 +632,7 @@ export function AccountClient({
                     </div>
 
                     {browserSync?.syncedDomains?.length ? (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-muted-foreground text-xs">
                             Synced domains:{" "}
                             {browserSync.syncedDomains.join(", ")}
                         </p>
@@ -645,8 +645,8 @@ export function AccountClient({
                     <CardHeader>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center">
-                                    <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
+                                    <ShieldCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                                 </div>
                                 <div>
                                     <CardTitle className="text-lg">
@@ -673,23 +673,23 @@ export function AccountClient({
                     <CardContent className="space-y-4">
                         {status.requires_browser_reauth ||
                         status.status === "degraded" ? (
-                            <div className="rounded-md border border-border/80 bg-muted/40 p-3 text-sm">
+                            <div className="border-border/80 bg-muted/40 rounded-md border p-3 text-sm">
                                 <p className="font-medium">
                                     {status.requires_browser_reauth
                                         ? "Open Vinted in the connected browser and sync the extension."
                                         : "Vintrack is retrying session validation automatically."}
                                 </p>
                                 {status.invalid_reason ? (
-                                    <p className="mt-1 text-xs text-muted-foreground">
+                                    <p className="text-muted-foreground mt-1 text-xs">
                                         Reason: {status.invalid_reason}
                                     </p>
                                 ) : null}
                             </div>
                         ) : null}
-                        <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                        <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-2 text-sm">
                             <span>
                                 Last browser sync:{" "}
-                                <strong className="font-medium text-foreground">
+                                <strong className="text-foreground font-medium">
                                     {formatSessionTimestamp(
                                         status.last_browser_sync,
                                     )}
@@ -697,7 +697,7 @@ export function AccountClient({
                             </span>
                             <span>
                                 Last valid:{" "}
-                                <strong className="font-medium text-foreground">
+                                <strong className="text-foreground font-medium">
                                     {formatSessionTimestamp(
                                         status.last_valid_at ||
                                             status.last_check,
@@ -706,7 +706,7 @@ export function AccountClient({
                             </span>
                             <span>
                                 Last refresh:{" "}
-                                <strong className="font-medium text-foreground">
+                                <strong className="text-foreground font-medium">
                                     {formatSessionTimestamp(
                                         status.last_refresh_at,
                                     )}
@@ -714,7 +714,7 @@ export function AccountClient({
                             </span>
                             <span>
                                 Refresh token:{" "}
-                                <strong className="font-medium text-foreground">
+                                <strong className="text-foreground font-medium">
                                     {status.has_refresh_token
                                         ? "saved"
                                         : "missing"}
@@ -722,7 +722,7 @@ export function AccountClient({
                             </span>
                             <span>
                                 Phone:{" "}
-                                <strong className="font-medium text-foreground">
+                                <strong className="text-foreground font-medium">
                                     {status.has_phone_number
                                         ? "saved"
                                         : "not set"}
@@ -731,7 +731,7 @@ export function AccountClient({
                             {status.vinted_id ? (
                                 <span className="inline-flex items-center gap-1">
                                     ID:{" "}
-                                    <strong className="font-medium text-foreground">
+                                    <strong className="text-foreground font-medium">
                                         {isVintedIdVisible
                                             ? status.vinted_id
                                             : "hidden"}
@@ -742,24 +742,24 @@ export function AccountClient({
                                                 (prev) => !prev,
                                             )
                                         }
-                                        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                                        className="text-muted-foreground hover:text-foreground rounded p-0.5"
                                         type="button"
                                     >
                                         {isVintedIdVisible ? (
-                                            <EyeOff className="w-3.5 h-3.5" />
+                                            <EyeOff className="h-3.5 w-3.5" />
                                         ) : (
-                                            <Eye className="w-3.5 h-3.5" />
+                                            <Eye className="h-3.5 w-3.5" />
                                         )}
                                     </button>
                                 </span>
                             ) : null}
                         </div>
 
-                        <div className="rounded-md border border-border/80 bg-background/60 p-3 text-sm">
-                            <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">
+                        <div className="border-border/80 bg-background/60 rounded-md border p-3 text-sm">
+                            <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Primary Region
                             </span>
-                            <p className="mt-1 text-xs text-muted-foreground">
+                            <p className="text-muted-foreground mt-1 text-xs">
                                 Checkout starts here first. Other synced regions
                                 no longer overwrite this setting.
                             </p>
@@ -790,7 +790,7 @@ export function AccountClient({
                                 })}
                             </div>
                             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-muted-foreground text-xs">
                                     Current: {status.domain || "—"} · Selected:{" "}
                                     {targetDomain}
                                 </p>
@@ -809,8 +809,8 @@ export function AccountClient({
                             </div>
                         </div>
 
-                        <div className="rounded-md border border-border/80 bg-background/60 p-3 text-sm">
-                            <span className="text-muted-foreground text-xs uppercase tracking-wider font-medium">
+                        <div className="border-border/80 bg-background/60 rounded-md border p-3 text-sm">
+                            <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Shipping Contact
                             </span>
                             <p className="mt-1 font-medium">
@@ -842,17 +842,17 @@ export function AccountClient({
                                 </Button>
                             </div>
                         </div>
-                        <div className="flex flex-col xs:flex-row gap-2">
+                        <div className="xs:flex-row flex flex-col gap-2">
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={handleRefresh}
                                 disabled={isPending}
-                                className="flex-1 sm:flex-none gap-1.5"
+                                className="flex-1 gap-1.5 sm:flex-none"
                             >
                                 <RefreshCw
                                     className={cn(
-                                        "w-3.5 h-3.5",
+                                        "h-3.5 w-3.5",
                                         isPending && "animate-spin",
                                     )}
                                 />
@@ -863,9 +863,9 @@ export function AccountClient({
                                 size="sm"
                                 onClick={() => setIsUnlinkDialogOpen(true)}
                                 disabled={isPending}
-                                className="flex-1 sm:flex-none gap-1.5 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20 hover:bg-red-50 dark:hover:bg-red-500/10 dark:bg-transparent"
+                                className="flex-1 gap-1.5 border-red-200 text-red-600 hover:bg-red-50 sm:flex-none dark:border-red-500/20 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-500/10"
                             >
-                                <Unlink className="w-3.5 h-3.5" />
+                                <Unlink className="h-3.5 w-3.5" />
                                 Unlink Account
                             </Button>
                         </div>
@@ -878,12 +878,12 @@ export function AccountClient({
                     <details className="group">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-6 py-4 text-sm font-medium">
                             Manual repair
-                            <span className="text-xs font-normal text-muted-foreground group-open:hidden">
+                            <span className="text-muted-foreground text-xs font-normal group-open:hidden">
                                 Optional
                             </span>
                         </summary>
                         <CardContent className="space-y-4 pb-6">
-                            <p className="text-sm text-muted-foreground">
+                            <p className="text-muted-foreground text-sm">
                                 Use this only if the extension cannot sync the
                                 current browser session.
                             </p>
@@ -926,9 +926,9 @@ export function AccountClient({
                                 className="gap-2"
                             >
                                 {isPending ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
                                 ) : (
-                                    <LinkIcon className="w-4 h-4" />
+                                    <LinkIcon className="h-4 w-4" />
                                 )}
                                 Update Session
                             </Button>
@@ -940,12 +940,12 @@ export function AccountClient({
                     <details className="group">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-6 py-4 text-sm font-medium">
                             Manual token link
-                            <span className="text-xs font-normal text-muted-foreground group-open:hidden">
+                            <span className="text-muted-foreground text-xs font-normal group-open:hidden">
                                 Fallback
                             </span>
                         </summary>
                         <CardContent className="space-y-5 pb-6">
-                            <p className="text-sm text-muted-foreground">
+                            <p className="text-muted-foreground text-sm">
                                 Prefer the extension above. Use tokens only if
                                 the extension is unavailable.
                             </p>
@@ -974,7 +974,7 @@ export function AccountClient({
                                                         : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                                                 )}
                                             >
-                                                <span className="text-sm shrink-0">
+                                                <span className="shrink-0 text-sm">
                                                     {region.flag}
                                                 </span>
                                                 <span className="truncate">
@@ -1042,9 +1042,9 @@ export function AccountClient({
                                 className="gap-2"
                             >
                                 {isPending ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
                                 ) : (
-                                    <LinkIcon className="w-4 h-4" />
+                                    <LinkIcon className="h-4 w-4" />
                                 )}
                                 Link Account
                             </Button>

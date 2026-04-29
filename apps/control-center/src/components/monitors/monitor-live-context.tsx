@@ -1,47 +1,55 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useMemo,
+    useState,
+} from "react";
 
 type MonitorLiveContextValue = {
-  itemCount: number;
-  incrementItemCount: () => void;
+    itemCount: number;
+    incrementItemCount: () => void;
 };
 
 const MonitorLiveContext = createContext<MonitorLiveContextValue | null>(null);
 
 export function MonitorLiveProvider({
-  children,
-  initialItemCount,
+    children,
+    initialItemCount,
 }: {
-  children: React.ReactNode;
-  initialItemCount: number;
+    children: React.ReactNode;
+    initialItemCount: number;
 }) {
-  const [itemCount, setItemCount] = useState(initialItemCount);
-  const incrementItemCount = useCallback(() => {
-    setItemCount((count) => count + 1);
-  }, []);
+    const [itemCount, setItemCount] = useState(initialItemCount);
+    const incrementItemCount = useCallback(() => {
+        setItemCount((count) => count + 1);
+    }, []);
 
-  const value = useMemo(
-    () => ({
-      itemCount,
-      incrementItemCount,
-    }),
-    [incrementItemCount, itemCount]
-  );
+    const value = useMemo(
+        () => ({
+            itemCount,
+            incrementItemCount,
+        }),
+        [incrementItemCount, itemCount],
+    );
 
-  return (
-    <MonitorLiveContext.Provider value={value}>
-      {children}
-    </MonitorLiveContext.Provider>
-  );
+    return (
+        <MonitorLiveContext.Provider value={value}>
+            {children}
+        </MonitorLiveContext.Provider>
+    );
 }
 
 export function useMonitorLiveContext() {
-  const context = useContext(MonitorLiveContext);
+    const context = useContext(MonitorLiveContext);
 
-  if (!context) {
-    throw new Error("useMonitorLiveContext must be used within MonitorLiveProvider");
-  }
+    if (!context) {
+        throw new Error(
+            "useMonitorLiveContext must be used within MonitorLiveProvider",
+        );
+    }
 
-  return context;
+    return context;
 }

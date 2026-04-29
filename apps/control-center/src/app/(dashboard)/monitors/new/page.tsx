@@ -154,18 +154,18 @@ export default function NewMonitorPage() {
     });
 
     return (
-        <div className="space-y-6 mx-auto max-w-4xl">
+        <div className="mx-auto max-w-4xl space-y-6">
             <div className="flex items-center gap-3">
                 <Link href="/dashboard">
                     <Button variant="outline" size="icon" className="h-8 w-8">
-                        <ArrowLeft className="w-4 h-4" />
+                        <ArrowLeft className="h-4 w-4" />
                     </Button>
                 </Link>
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">
                         Create Monitor
                     </h1>
-                    <p className="text-sm text-muted-foreground mt-0.5">
+                    <p className="text-muted-foreground mt-0.5 text-sm">
                         Set up a new Vinted scraper.
                     </p>
                 </div>
@@ -184,7 +184,7 @@ export default function NewMonitorPage() {
                                 placeholder="e.g. Nike Jackets DE"
                                 required
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Internal name for this monitor in the dashboard
                                 and notifications.
                             </p>
@@ -206,7 +206,7 @@ export default function NewMonitorPage() {
                                     setQuery(event.target.value)
                                 }
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Optional Vinted text search. Leave empty if you
                                 only want to filter by category, brand, price,
                                 size, etc.
@@ -232,7 +232,7 @@ export default function NewMonitorPage() {
                                 onBlur={handleQueryDelayBlur}
                                 required
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Time between Vinted catalog checks in
                                 milliseconds. Between Min. {MIN_QUERY_DELAY_MS}{" "}
                                 ms. - Max. {MAX_QUERY_DELAY_MS} ms.
@@ -252,7 +252,7 @@ export default function NewMonitorPage() {
                                 name="region"
                                 value={selectedRegion}
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Select which Vinted country to monitor. Default
                                 is Germany (vinted.de).
                             </p>
@@ -274,7 +274,7 @@ export default function NewMonitorPage() {
                                 name="allowed_countries"
                                 value={selectedAllowedCountries.join(",")}
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Only items located in these countries will be
                                 sent/saved. Leave empty to allow all countries.
                             </p>
@@ -300,12 +300,12 @@ export default function NewMonitorPage() {
                                 name="catalog_ids"
                                 value={selectedCategories.join(",")}
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Limit results to specific Vinted categories.
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="space-y-2">
                                 <Label
                                     htmlFor="price_min"
@@ -314,7 +314,7 @@ export default function NewMonitorPage() {
                                     Min Price
                                 </Label>
                                 <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                                    <span className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2 text-sm">
                                         €
                                     </span>
                                     <Input
@@ -337,7 +337,7 @@ export default function NewMonitorPage() {
                                     Max Price
                                 </Label>
                                 <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                                    <span className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2 text-sm">
                                         €
                                     </span>
                                     <Input
@@ -371,7 +371,7 @@ export default function NewMonitorPage() {
                                 name="brand_ids"
                                 value={selectedBrands.join(",")}
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Limit results to specific brands.
                             </p>
                         </div>
@@ -392,7 +392,7 @@ export default function NewMonitorPage() {
                                 name="color_ids"
                                 value={selectedColors.join(",")}
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Limit results to specific colors.
                             </p>
                         </div>
@@ -417,7 +417,7 @@ export default function NewMonitorPage() {
                                 name="status_ids"
                                 value={selectedStatuses.join(",")}
                             />
-                            <p className="text-[12px] text-muted-foreground">
+                            <p className="text-muted-foreground text-[12px]">
                                 Pick one or more item conditions. Leave empty to
                                 allow all conditions.
                             </p>
@@ -467,9 +467,9 @@ export default function NewMonitorPage() {
                                     variant="outline"
                                     onClick={handleTestWebhook}
                                     disabled={isTestingWebhook || !webhookUrl}
-                                    className="gap-2 shrink-0"
+                                    className="shrink-0 gap-2"
                                 >
-                                    <Send className="w-4 h-4" />
+                                    <Send className="h-4 w-4" />
                                     {isTestingWebhook ? "Testing..." : "Test"}
                                 </Button>
                             </div>
@@ -481,12 +481,12 @@ export default function NewMonitorPage() {
                                 name="telegram_active"
                                 value={telegramEnabled ? "true" : "false"}
                             />
-                            <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/30 p-3">
+                            <div className="border-border/80 bg-muted/30 flex items-center justify-between rounded-lg border p-3">
                                 <div className="space-y-0.5">
                                     <Label className="text-[13px]">
                                         Telegram Notifications
                                     </Label>
-                                    <p className="text-[12px] text-muted-foreground">
+                                    <p className="text-muted-foreground text-[12px]">
                                         {hasTelegramConnection
                                             ? "Send alerts for this monitor to your connected Telegram chat."
                                             : "Connect Telegram from the dashboard notification settings first."}
@@ -503,7 +503,7 @@ export default function NewMonitorPage() {
                         <div className="space-y-2">
                             <Label className="text-[13px]">Proxy Group</Label>
                             {loading ? (
-                                <div className="h-10 bg-muted rounded-md animate-pulse" />
+                                <div className="bg-muted h-10 animate-pulse rounded-md" />
                             ) : (
                                 <>
                                     <select
@@ -514,7 +514,7 @@ export default function NewMonitorPage() {
                                                 e.target.value,
                                             )
                                         }
-                                        className="w-full h-10 rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-1"
+                                        className="border-input bg-background text-foreground h-10 w-full rounded-md border px-3 text-[13px] focus:ring-2 focus:ring-slate-900 focus:ring-offset-1 focus:outline-none"
                                         required={userRole === "free"}
                                     >
                                         {(userRole === "premium" ||
@@ -546,7 +546,7 @@ export default function NewMonitorPage() {
                                                 You need to{" "}
                                                 <Link
                                                     href="/proxies"
-                                                    className="underline font-medium"
+                                                    className="font-medium underline"
                                                 >
                                                     create a proxy group
                                                 </Link>{" "}
@@ -554,14 +554,14 @@ export default function NewMonitorPage() {
                                             </p>
                                         )}
                                     {userRole === "free" && (
-                                        <p className="text-[12px] text-muted-foreground">
+                                        <p className="text-muted-foreground text-[12px]">
                                             Select your proxy group to use for
                                             scraping.
                                         </p>
                                     )}
                                     {(userRole === "premium" ||
                                         userRole === "admin") && (
-                                        <p className="text-[12px] text-muted-foreground">
+                                        <p className="text-muted-foreground text-[12px]">
                                             Use server proxies or select your
                                             own group.
                                         </p>
@@ -574,9 +574,9 @@ export default function NewMonitorPage() {
                             <Label className="text-[13px]">
                                 Monitor URL Preview
                             </Label>
-                            <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                            <div className="border-border/70 bg-muted/20 rounded-xl border p-3">
                                 <div className="flex items-center justify-between gap-3">
-                                    <p className="text-[12px] text-muted-foreground">
+                                    <p className="text-muted-foreground text-[12px]">
                                         This is the exact Vinted catalog URL for
                                         the current filter setup.
                                     </p>
@@ -584,22 +584,22 @@ export default function NewMonitorPage() {
                                         href={previewUrl}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted"
+                                        className="border-input bg-background text-foreground hover:bg-muted inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors"
                                     >
                                         Test URL
                                         <ExternalLink className="h-3.5 w-3.5" />
                                     </a>
                                 </div>
                                 <div className="relative mt-3">
-                                    <div className="overflow-x-auto rounded-lg border border-border/70 bg-background px-3 py-3 pr-12">
-                                        <code className="block whitespace-pre-wrap break-all text-[11px] text-foreground/90">
+                                    <div className="border-border/70 bg-background overflow-x-auto rounded-lg border px-3 py-3 pr-12">
+                                        <code className="text-foreground/90 block text-[11px] break-all whitespace-pre-wrap">
                                             {previewUrl}
                                         </code>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={handleCopyPreviewUrl}
-                                        className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                        className="border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground absolute top-1/2 right-2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border transition-colors"
                                         aria-label="Copy preview URL"
                                         title="Copy URL"
                                     >
@@ -611,7 +611,7 @@ export default function NewMonitorPage() {
                                         {selectedCategoryLabels.map((label) => (
                                             <span
                                                 key={label}
-                                                className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                                                className="border-border/70 bg-background text-muted-foreground inline-flex items-center rounded-full border px-2 py-1 text-[11px]"
                                             >
                                                 {label}
                                             </span>
@@ -630,7 +630,7 @@ export default function NewMonitorPage() {
                                     proxyGroups.length === 0
                                 }
                             >
-                                <Plus className="w-4 h-4" /> Create Monitor
+                                <Plus className="h-4 w-4" /> Create Monitor
                             </Button>
                         </div>
                     </form>

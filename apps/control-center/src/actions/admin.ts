@@ -7,188 +7,208 @@ import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 
 async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+    const session = await auth();
+    if (!session?.user?.id) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { id: session.user.id },
-    select: { role: true },
-  });
+    const user = await db.user.findUnique({
+        where: { id: session.user.id },
+        select: { role: true },
+    });
 
-  if (user?.role !== "admin") throw new Error("Forbidden");
-  return session.user.id;
+    if (user?.role !== "admin") throw new Error("Forbidden");
+    return session.user.id;
 }
 
 export async function getUsers() {
-  await requireAdmin();
+    await requireAdmin();
 
-  const users = await db.user.findMany({
-    orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      image: true,
-      role: true,
-      _count: {
+    const users = await db.user.findMany({
+        orderBy: { name: "asc" },
         select: {
-          monitors: true,
-          proxy_groups: true,
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            role: true,
+            _count: {
+                select: {
+                    monitors: true,
+                    proxy_groups: true,
+                },
+            },
         },
-      },
-    },
-  });
-
-  return users;
-}
-
-async function sendPausedWebhook(name: string, monitorId: number, webhookUrl: string) {
-  try {
-    const payload = {
-      username: "Vintrack Monitor",
-      avatar_url: "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
-      embeds: [
-        {
-          title: "⏸️ Monitor Paused",
-          description: `The monitor **${name}** has been paused via User Management.`,
-          color: 16753920,
-          footer: {
-            text: "Vintrack • Status Update",
-            icon_url: "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
-          },
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    };
-
-    await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
     });
-  } catch (error) {
-    console.error("Failed to send admin pause webhook for", monitorId, error);
-  }
+
+    return users;
 }
 
-async function sendPausedTelegram(name: string, monitorId: number, userId: string) {
-  const connection = await getTelegramConnection(userId);
-  if (!connection) return;
+async function sendPausedWebhook(
+    name: string,
+    monitorId: number,
+    webhookUrl: string,
+) {
+    try {
+        const payload = {
+            username: "Vintrack Monitor",
+            avatar_url:
+                "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+            embeds: [
+                {
+                    title: "⏸️ Monitor Paused",
+                    description: `The monitor **${name}** has been paused via User Management.`,
+                    color: 16753920,
+                    footer: {
+                        text: "Vintrack • Status Update",
+                        icon_url:
+                            "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+                    },
+                    timestamp: new Date().toISOString(),
+                },
+            ],
+        };
 
-  const result = await sendTelegramMessage(
-    connection.chat_id,
-    monitorStatusTelegramText(name, "paused")
-  );
-  if ("error" in result) {
-    console.error("Failed to send admin pause Telegram message for", monitorId, result.error);
-  }
+        await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+    } catch (error) {
+        console.error(
+            "Failed to send admin pause webhook for",
+            monitorId,
+            error,
+        );
+    }
+}
+
+async function sendPausedTelegram(
+    name: string,
+    monitorId: number,
+    userId: string,
+) {
+    const connection = await getTelegramConnection(userId);
+    if (!connection) return;
+
+    const result = await sendTelegramMessage(
+        connection.chat_id,
+        monitorStatusTelegramText(name, "paused"),
+    );
+    if ("error" in result) {
+        console.error(
+            "Failed to send admin pause Telegram message for",
+            monitorId,
+            result.error,
+        );
+    }
 }
 
 export async function setUserRole(userId: string, role: string) {
-  await requireAdmin();
+    await requireAdmin();
 
-  const validRoles = ["free", "premium", "admin"];
-  if (!validRoles.includes(role)) throw new Error("Invalid role");
+    const validRoles = ["free", "premium", "admin"];
+    if (!validRoles.includes(role)) throw new Error("Invalid role");
 
-  await db.user.update({
-    where: { id: userId },
-    data: { role },
-  });
+    await db.user.update({
+        where: { id: userId },
+        data: { role },
+    });
 
-  revalidatePath("/admin");
+    revalidatePath("/admin");
 }
 
 export async function stopUserActiveMonitors(userId: string) {
-  await requireAdmin();
+    await requireAdmin();
 
-  const monitorsToStop = await db.monitors.findMany({
-    where: { userId, status: "active" },
-    select: {
-      id: true,
-      name: true,
-      userId: true,
-      discord_webhook: true,
-      webhook_active: true,
-      telegram_active: true,
-    },
-  });
+    const monitorsToStop = await db.monitors.findMany({
+        where: { userId, status: "active" },
+        select: {
+            id: true,
+            name: true,
+            userId: true,
+            discord_webhook: true,
+            webhook_active: true,
+            telegram_active: true,
+        },
+    });
 
-  if (monitorsToStop.length === 0) {
-    return { success: true, stoppedCount: 0 };
-  }
+    if (monitorsToStop.length === 0) {
+        return { success: true, stoppedCount: 0 };
+    }
 
-  await db.monitors.updateMany({
-    where: { userId, status: "active" },
-    data: { status: "paused" },
-  });
+    await db.monitors.updateMany({
+        where: { userId, status: "active" },
+        data: { status: "paused" },
+    });
 
-  Promise.all(
-    monitorsToStop.map(async (monitor) => {
-      if (monitor.discord_webhook && monitor.webhook_active) {
-        await sendPausedWebhook(
-          monitor.name,
-          monitor.id,
-          monitor.discord_webhook
-        );
-      }
-      if (monitor.telegram_active) {
-        await sendPausedTelegram(
-          monitor.name,
-          monitor.id,
-          monitor.userId
-        );
-      }
-    })
-  ).catch(console.error);
+    Promise.all(
+        monitorsToStop.map(async (monitor) => {
+            if (monitor.discord_webhook && monitor.webhook_active) {
+                await sendPausedWebhook(
+                    monitor.name,
+                    monitor.id,
+                    monitor.discord_webhook,
+                );
+            }
+            if (monitor.telegram_active) {
+                await sendPausedTelegram(
+                    monitor.name,
+                    monitor.id,
+                    monitor.userId,
+                );
+            }
+        }),
+    ).catch(console.error);
 
-  revalidatePath("/admin");
+    revalidatePath("/admin");
 
-  return {
-    success: true,
-    stoppedCount: monitorsToStop.length,
-  };
+    return {
+        success: true,
+        stoppedCount: monitorsToStop.length,
+    };
 }
 
 export async function stopSingleUserMonitor(userId: string, monitorId: number) {
-  await requireAdmin();
+    await requireAdmin();
 
-  const monitor = await db.monitors.findFirst({
-    where: {
-      id: monitorId,
-      userId,
-      status: "active",
-    },
-    select: {
-      id: true,
-      name: true,
-      userId: true,
-      discord_webhook: true,
-      webhook_active: true,
-      telegram_active: true,
-    },
-  });
+    const monitor = await db.monitors.findFirst({
+        where: {
+            id: monitorId,
+            userId,
+            status: "active",
+        },
+        select: {
+            id: true,
+            name: true,
+            userId: true,
+            discord_webhook: true,
+            webhook_active: true,
+            telegram_active: true,
+        },
+    });
 
-  if (!monitor) {
-    return { success: true, stopped: false };
-  }
+    if (!monitor) {
+        return { success: true, stopped: false };
+    }
 
-  await db.monitors.update({
-    where: { id: monitorId, userId },
-    data: { status: "paused" },
-  });
+    await db.monitors.update({
+        where: { id: monitorId, userId },
+        data: { status: "paused" },
+    });
 
-  if (monitor.discord_webhook && monitor.webhook_active) {
-    sendPausedWebhook(monitor.name, monitor.id, monitor.discord_webhook).catch(
-      console.error
-    );
-  }
-  if (monitor.telegram_active) {
-    sendPausedTelegram(monitor.name, monitor.id, monitor.userId).catch(
-      console.error
-    );
-  }
+    if (monitor.discord_webhook && monitor.webhook_active) {
+        sendPausedWebhook(
+            monitor.name,
+            monitor.id,
+            monitor.discord_webhook,
+        ).catch(console.error);
+    }
+    if (monitor.telegram_active) {
+        sendPausedTelegram(monitor.name, monitor.id, monitor.userId).catch(
+            console.error,
+        );
+    }
 
-  revalidatePath("/admin");
+    revalidatePath("/admin");
 
-  return { success: true, stopped: true };
+    return { success: true, stopped: true };
 }
