@@ -457,7 +457,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
           {item.size && (
             <Badge
               variant="secondary"
-              className="h-5 rounded-md border border-blue-500/20 bg-blue-500/10 px-1.5 text-[10px] font-medium text-blue-300"
+              className="h-5 rounded-md border border-blue-200 bg-blue-50 px-1.5 text-[10px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
             >
               {item.size}
             </Badge>
