@@ -8,6 +8,7 @@ import (
 // Monitor represents a user-configured search monitor.
 type Monitor struct {
 	ID                   int
+	UserID               string
 	Name                 string
 	Query                string
 	QueryDelayMs         int
@@ -25,6 +26,7 @@ type Monitor struct {
 	WebhookActive        bool
 	TelegramChatID       sql.NullString
 	TelegramActive       bool
+	DedupeMonitorAlerts  bool
 	ProxyGroupID         *int
 	ProxyGroupName       sql.NullString
 	ProxyGroupLimitBytes *int64

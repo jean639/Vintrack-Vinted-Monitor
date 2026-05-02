@@ -126,6 +126,20 @@ func (r *RedisCache) BatchMarkAsSeen(monitorID int, itemIDs []int64) error {
 	})
 }
 
+func (r *RedisCache) ClaimUserItemAlert(userID string, itemID int64) (bool, error) {
+	key := fmt.Sprintf("item:alerted:%s:%d", userID, itemID)
+	var claimed bool
+	err := r.writeWithRetry(func() error {
+		ok, err := r.client.SetNX(r.ctx, key, "1", 30*24*time.Hour).Result()
+		claimed = ok
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return claimed, nil
+}
+
 func (r *RedisCache) GetUserRegion(userID int64) (string, bool) {
 	val, err := r.client.Get(r.ctx, fmt.Sprintf("user:region:%d", userID)).Result()
 	if err != nil {

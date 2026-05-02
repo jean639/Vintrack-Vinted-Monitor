@@ -399,7 +399,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			e.db.MarkItemsSeen(m.ID, seedIDs)
 
 			seedBuiltItems := e.buildItems(m, seedItems)
-			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
+			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
 
 			initialized = true
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
@@ -442,7 +442,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		e.db.MarkItemsSeen(m.ID, newIDs)
 		initialized = true
 
-		go e.processItems(ctx, builtItems, processItems, m.ID, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
+		go e.processItems(ctx, builtItems, processItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -539,7 +539,7 @@ func resolveRedirectURL(currentURL string, location string) (string, error) {
 	return base.ResolveReference(next).String(), nil
 }
 
-func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, webhook string, webhookActive bool, telegramChatID string, telegramActive bool, monitorName string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
+func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, userID string, dedupeAlerts bool, webhook string, webhookActive bool, telegramChatID string, telegramActive bool, monitorName string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
 	if e.enrichSeller && enricher != nil {
 		sem := make(chan struct{}, 10)
 		var wg sync.WaitGroup
@@ -613,6 +613,12 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 	for i := range items {
 		if err := e.db.PublishItem(items[i]); err != nil {
 			log.Printf("[%d] publish error: %v", monitorID, err)
+		}
+
+		hasActiveAlert := (webhook != "" && webhookActive) || (telegramChatID != "" && telegramActive)
+		if hasActiveAlert && dedupeAlerts && !e.db.ClaimUserItemAlert(userID, items[i].ID) {
+			log.Printf("[%d] alert skipped for item %d: already sent for user", monitorID, items[i].ID)
+			continue
 		}
 
 		if webhook != "" && webhookActive {
