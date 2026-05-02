@@ -155,7 +155,7 @@ export async function createMonitor(formData: FormData) {
     await sendTelegramStatusIfConfigured(monitor, "created");
 
     revalidatePath("/dashboard");
-    redirect(`/monitors/${monitor.id}`);
+    return { redirectTo: `/monitors/${monitor.id}` };
 }
 
 export async function updateMonitor(id: number, formData: FormData) {

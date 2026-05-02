@@ -22,6 +22,7 @@ import {
 import { buildVintedMonitorUrl } from "@/lib/vinted-url";
 import { ArrowLeft, Copy, ExternalLink, Plus, Send } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
     useState,
     useEffect,
@@ -38,6 +39,7 @@ type ProxyGroupOption = {
 };
 
 export default function NewMonitorPage() {
+    const router = useRouter();
     const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
     const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
     const [selectedCategoryLabels, setSelectedCategoryLabels] = useState<
@@ -108,6 +110,27 @@ export default function NewMonitorPage() {
         }
     };
 
+    const handleCreate = async (formData: FormData) => {
+        const createPromise = createMonitor(formData);
+
+        try {
+            await toast.promise(createPromise, {
+                loading: "Creating monitor...",
+                success: "Monitor created",
+                error: (error) =>
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to create monitor",
+            });
+
+            const result = await createPromise;
+            router.push(result.redirectTo);
+            router.refresh();
+        } catch {
+            // Expected validation errors are shown by the toast.
+        }
+    };
+
     const handleCategorySelectionMetaChange = useCallback(
         ({ selectedLabels }: { selectedLabels: string[] }) => {
             setSelectedCategoryLabels((current) => {
@@ -132,8 +155,16 @@ export default function NewMonitorPage() {
             fetch("/api/telegram/connection").then((res) => res.json()),
         ])
             .then(([proxyData, telegramData]) => {
-                setProxyGroups(proxyData.groups || []);
-                setUserRole(proxyData.role || "free");
+                const groups = proxyData.groups || [];
+                const role = proxyData.role || "free";
+
+                setProxyGroups(groups);
+                setUserRole(role);
+                setSelectedProxyGroup((current) => {
+                    if (current) return current;
+                    if (role === "premium" || role === "admin") return "server";
+                    return groups[0]?.id ? String(groups[0].id) : "";
+                });
                 setHasTelegramConnection(Boolean(telegramData.connected));
                 setTelegramEnabled(Boolean(telegramData.connected));
                 setLoading(false);
@@ -173,7 +204,7 @@ export default function NewMonitorPage() {
 
             <Card className="border-input/60">
                 <CardContent className="p-6">
-                    <form action={createMonitor} className="space-y-6">
+                    <form action={handleCreate} className="space-y-6">
                         <div className="space-y-2">
                             <Label htmlFor="name" className="text-[13px]">
                                 Monitor Name
@@ -517,6 +548,11 @@ export default function NewMonitorPage() {
                                         className="border-input bg-background text-foreground h-10 w-full rounded-md border px-3 text-[13px] focus:ring-2 focus:ring-slate-900 focus:ring-offset-1 focus:outline-none"
                                         required={userRole === "free"}
                                     >
+                                        {userRole === "free" && (
+                                            <option value="" disabled>
+                                                Select a proxy group
+                                            </option>
+                                        )}
                                         {(userRole === "premium" ||
                                             userRole === "admin") && (
                                             <option value="server">
@@ -627,7 +663,8 @@ export default function NewMonitorPage() {
                                 className="w-full gap-1.5"
                                 disabled={
                                     userRole === "free" &&
-                                    proxyGroups.length === 0
+                                    (!selectedProxyGroup ||
+                                        proxyGroups.length === 0)
                                 }
                             >
                                 <Plus className="h-4 w-4" /> Create Monitor
