@@ -102,9 +102,23 @@ export function ProxiesClient({
 
     const handleDelete = async (id: number) => {
         try {
-            await deleteProxyGroup(id);
+            const result = await deleteProxyGroup(id);
             setGroups((prev) => prev.filter((g) => g.id !== id));
-            toast.success("Proxy group deleted");
+            if (result.pausedMonitorCount > 0) {
+                toast.success(
+                    `Proxy group deleted. ${result.pausedMonitorCount} monitor${
+                        result.pausedMonitorCount === 1 ? "" : "s"
+                    } paused until a new proxy group is selected.`,
+                );
+            } else if (result.affectedMonitorCount > 0) {
+                toast.success(
+                    `Proxy group deleted. ${result.affectedMonitorCount} monitor${
+                        result.affectedMonitorCount === 1 ? "" : "s"
+                    } switched to server proxies.`,
+                );
+            } else {
+                toast.success("Proxy group deleted");
+            }
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to delete proxy group"));
         }

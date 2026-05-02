@@ -126,22 +126,48 @@ export async function createProxyGroup(formData: FormData) {
 export async function deleteProxyGroup(id: number) {
     const session = await auth();
     if (!session?.user?.id) throw new Error("Unauthorized");
+    const userId = session.user.id;
 
-    const group = await db.proxy_groups.findFirst({
-        where: { id, userId: session.user.id },
-        include: { _count: { select: { monitors: true } } },
-    });
+    const [group, user] = await Promise.all([
+        db.proxy_groups.findFirst({
+            where: { id, userId },
+            include: { _count: { select: { monitors: true } } },
+        }),
+        db.user.findUnique({
+            where: { id: userId },
+            select: { role: true },
+        }),
+    ]);
 
     if (!group) throw new Error("Not found");
-    if (group._count.monitors > 0) {
-        throw new Error("Cannot delete proxy group that is in use by monitors");
-    }
 
-    await db.proxy_groups.delete({
-        where: { id },
+    const canUseServerProxies =
+        user?.role === "premium" || user?.role === "admin";
+    const affectedMonitorCount = group._count.monitors;
+
+    await db.$transaction(async (tx) => {
+        if (affectedMonitorCount > 0) {
+            await tx.monitors.updateMany({
+                where: { userId, proxy_group_id: id },
+                data: {
+                    proxy_group_id: null,
+                    ...(canUseServerProxies ? {} : { status: "paused" }),
+                },
+            });
+        }
+
+        await tx.proxy_groups.delete({
+            where: { id },
+        });
     });
 
     revalidatePath("/proxies");
+    revalidatePath("/monitors");
+
+    return {
+        affectedMonitorCount,
+        pausedMonitorCount: canUseServerProxies ? 0 : affectedMonitorCount,
+    };
 }
 
 export async function updateProxyGroup(id: number, formData: FormData) {
