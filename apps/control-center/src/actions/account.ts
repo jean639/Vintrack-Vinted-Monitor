@@ -1,6 +1,8 @@
 "use server";
 
 import { auth } from "@/auth";
+import { db } from "@/lib/db";
+import { revalidatePath } from "next/cache";
 
 const API_URL = process.env.VINTED_SERVICE_URL || "http://localhost:4000";
 
@@ -24,6 +26,7 @@ type VintedAccountStatus = {
     browser_linked?: boolean;
     last_browser_sync?: string;
     has_phone_number?: boolean;
+    dedupe_monitor_alerts: boolean;
 };
 
 async function apiFetch<T extends object = Record<string, unknown>>(
@@ -71,9 +74,44 @@ async function apiFetch<T extends object = Record<string, unknown>>(
 }
 
 export async function getAccountStatus(): Promise<VintedAccountStatus> {
+    const session = await auth();
+    if (!session?.user?.id) {
+        return { linked: false, dedupe_monitor_alerts: false };
+    }
+
+    const settings = await db.$queryRaw<{ dedupe_monitor_alerts: boolean }[]>`
+        SELECT dedupe_monitor_alerts
+        FROM "User"
+        WHERE id = ${session.user.id}
+        LIMIT 1
+    `;
     const data = await apiFetch<VintedAccountStatus>("/api/account/status");
-    if ("error" in data) return { linked: false };
-    return data;
+    const dedupeMonitorAlerts = settings[0]?.dedupe_monitor_alerts ?? false;
+    if ("error" in data) {
+        return {
+            linked: false,
+            dedupe_monitor_alerts: dedupeMonitorAlerts,
+        };
+    }
+    return {
+        ...data,
+        dedupe_monitor_alerts: dedupeMonitorAlerts,
+    };
+}
+
+export async function updateMonitorAlertDedupe(enabled: boolean) {
+    const session = await auth();
+    if (!session?.user?.id) {
+        return { error: "Not authenticated" };
+    }
+
+    await db.$executeRaw`
+        UPDATE "User"
+        SET dedupe_monitor_alerts = ${enabled}
+        WHERE id = ${session.user.id}
+    `;
+    revalidatePath("/account");
+    return { success: true, dedupe_monitor_alerts: enabled };
 }
 
 export async function linkVintedAccount(
