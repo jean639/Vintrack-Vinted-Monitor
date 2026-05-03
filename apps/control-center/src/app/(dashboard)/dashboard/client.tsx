@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -22,6 +22,7 @@ import {
     Pencil,
     Send,
     Timer,
+    Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +46,7 @@ import {
     toggleTelegramStatus,
 } from "@/actions/dashboard-actions";
 import { testDiscordWebhook } from "@/actions/monitor";
+import { updateMonitorAlertDedupe } from "@/actions/account";
 import { getBrandLabels } from "@/lib/brands";
 import { getColorLabels } from "@/lib/colors";
 import { getSizeLabels } from "@/lib/sizes";
@@ -124,9 +126,11 @@ function hasProxyWarning(h?: MonitorHealth): boolean {
 export function DashboardClient({
     initialMonitors,
     userName,
+    initialDedupeMonitorAlerts,
 }: {
     initialMonitors: Monitor[];
     userName: string;
+    initialDedupeMonitorAlerts: boolean;
 }) {
     const [selectedMonitor, setSelectedMonitor] = useState<Monitor | null>(
         null,
@@ -138,14 +142,19 @@ export function DashboardClient({
     const [isTestingWebhook, setIsTestingWebhook] = useState(false);
     const [isTestingTelegram, setIsTestingTelegram] = useState(false);
     const [isCreatingTelegramCode, setIsCreatingTelegramCode] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [telegramConnection, setTelegramConnection] =
         useState<TelegramConnectionState | null>(null);
     const [telegramConnectCode, setTelegramConnectCode] =
         useState<TelegramConnectCode | null>(null);
     const [monitors, setMonitors] = useState<Monitor[]>(initialMonitors);
+    const [dedupeMonitorAlerts, setDedupeMonitorAlerts] = useState(
+        initialDedupeMonitorAlerts,
+    );
     const [healthMap, setHealthMap] = useState<Record<number, MonitorHealth>>(
         {},
     );
+    const [isDedupePending, startDedupeTransition] = useTransition();
 
     const handleTestWebhook = async () => {
         if (!webhookInput) {
@@ -335,6 +344,23 @@ export function DashboardClient({
         });
     };
 
+    const handleDedupeChange = (checked: boolean) => {
+        setDedupeMonitorAlerts(checked);
+        startDedupeTransition(async () => {
+            const result = await updateMonitorAlertDedupe(checked);
+            if ("error" in result) {
+                setDedupeMonitorAlerts(!checked);
+                toast.error(result.error);
+                return;
+            }
+            toast.success(
+                checked
+                    ? "Duplicate item alerts are collapsed"
+                    : "Monitor alerts are independent again",
+            );
+        });
+    };
+
     const handleSaveWebhook = async () => {
         if (!selectedMonitor) return;
         setMonitors((prev) =>
@@ -384,6 +410,16 @@ export function DashboardClient({
                             <StopCircle className="h-3.5 w-3.5" /> Stop All
                         </Button>
                     )}
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        onClick={() => setIsSettingsOpen(true)}
+                        title="Dashboard settings"
+                        aria-label="Dashboard settings"
+                    >
+                        <Settings className="h-3.5 w-3.5" />
+                    </Button>
                     <Link href="/monitors/new" className="flex-1 sm:flex-none">
                         <Button size="sm" className="w-full gap-1.5">
                             <Plus className="h-3.5 w-3.5" /> New Monitor
@@ -693,6 +729,58 @@ export function DashboardClient({
                     ))}
                 </div>
             )}
+
+            <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Dashboard settings</DialogTitle>
+                        <DialogDescription>
+                            Adjust global behavior for monitor alerts.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="py-4">
+                        <div className="border-border/80 bg-muted/30 flex items-center justify-between gap-4 rounded-lg border p-3">
+                            <div className="space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                    <Label
+                                        htmlFor="dedupe-monitor-alerts"
+                                        className="text-sm font-medium"
+                                    >
+                                        Dedupe monitor alerts
+                                    </Label>
+                                    <Badge
+                                        variant="outline"
+                                        className="bg-background text-[10px]"
+                                    >
+                                        {dedupeMonitorAlerts ? "On" : "Off"}
+                                    </Badge>
+                                </div>
+                                <p className="text-muted-foreground text-[12px]">
+                                    Send one Discord or Telegram alert when
+                                    multiple monitors find the same item.
+                                </p>
+                            </div>
+                            <Switch
+                                id="dedupe-monitor-alerts"
+                                aria-label="Toggle duplicate monitor alerts"
+                                checked={dedupeMonitorAlerts}
+                                disabled={isDedupePending}
+                                onCheckedChange={handleDedupeChange}
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsSettingsOpen(false)}
+                        >
+                            Close
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={isWebhookOpen} onOpenChange={setIsWebhookOpen}>
                 <DialogContent>
