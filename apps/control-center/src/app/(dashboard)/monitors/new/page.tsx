@@ -12,6 +12,7 @@ import { RegionPicker } from "@/components/monitors/region-picker";
 import { CountryFilterPicker } from "@/components/monitors/country-filter-picker";
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
+import { AntiKeywordInput } from "@/components/monitors/anti-keyword-input";
 import { Switch } from "@/components/ui/switch";
 import { getStatusLocaleForRegionCodes } from "@/lib/regions";
 import {
@@ -241,6 +242,23 @@ export default function NewMonitorPage() {
                                 Optional Vinted text search. Leave empty if you
                                 only want to filter by category, brand, price,
                                 size, etc.
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label
+                                htmlFor="anti_keywords"
+                                className="text-[13px]"
+                            >
+                                Anti Keywords{" "}
+                                <span className="text-muted-foreground font-normal">
+                                    (optional)
+                                </span>
+                            </Label>
+                            <AntiKeywordInput name="anti_keywords" />
+                            <p className="text-muted-foreground text-[12px]">
+                                New items matching any anti keyword in title or
+                                description will be skipped.
                             </p>
                         </div>
 
