@@ -248,6 +248,41 @@ func TestSplitIncomingItems_AfterInitializationOnlyNewItems(t *testing.T) {
 	}
 }
 
+func TestFilterAntiKeywordItems_TitleAndDescription(t *testing.T) {
+	raw := "fake, damaged\nreplica"
+	items := []model.VintedItem{
+		{ID: 1, Title: "Nike Air Max"},
+		{ID: 2, Title: "Nike Air Max fake"},
+		{ID: 3, Title: "Adidas Samba", Description: "Small DAMAGED spot"},
+		{ID: 4, Title: "New Balance", Description: "Looks great"},
+	}
+
+	filtered, blocked := filterAntiKeywordItems(items, &raw)
+
+	if blocked != 2 {
+		t.Fatalf("blocked = %d, want 2", blocked)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("filtered = %d, want 2", len(filtered))
+	}
+	if filtered[0].ID != 1 || filtered[1].ID != 4 {
+		t.Fatalf("filtered IDs = [%d, %d], want [1, 4]", filtered[0].ID, filtered[1].ID)
+	}
+}
+
+func TestFilterAntiKeywordItems_NoKeywordsReturnsOriginal(t *testing.T) {
+	items := []model.VintedItem{{ID: 1, Title: "Nike"}}
+
+	filtered, blocked := filterAntiKeywordItems(items, nil)
+
+	if blocked != 0 {
+		t.Fatalf("blocked = %d, want 0", blocked)
+	}
+	if len(filtered) != 1 || filtered[0].ID != 1 {
+		t.Fatalf("filtered = %#v, want original item", filtered)
+	}
+}
+
 func TestResolveQueryDelayMs(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -16,10 +16,12 @@ func TestMonitorConfigFingerprintIncludesRuntimeFilters(t *testing.T) {
 	colorIDs := "50,60"
 	statusIDs := "1,4"
 	allowedCountries := "de,fr"
+	antiKeywords := "fake,replica"
 
 	base := model.Monitor{
 		ID:               7,
 		Query:            "nike",
+		AntiKeywords:     &antiKeywords,
 		QueryDelayMs:     1500,
 		PriceMin:         &min,
 		PriceMax:         &max,
@@ -41,6 +43,7 @@ func TestMonitorConfigFingerprintIncludesRuntimeFilters(t *testing.T) {
 		mutate func(*model.Monitor)
 	}{
 		{name: "query", mutate: func(m *model.Monitor) { m.Query = "adidas" }},
+		{name: "anti keywords", mutate: func(m *model.Monitor) { v := "damaged"; m.AntiKeywords = &v }},
 		{name: "query delay", mutate: func(m *model.Monitor) { m.QueryDelayMs = 2000 }},
 		{name: "price min", mutate: func(m *model.Monitor) { v := 11; m.PriceMin = &v }},
 		{name: "price max", mutate: func(m *model.Monitor) { v := 51; m.PriceMax = &v }},

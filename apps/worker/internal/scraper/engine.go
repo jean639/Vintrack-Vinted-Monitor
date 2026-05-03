@@ -398,8 +398,14 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			}
 			e.db.MarkItemsSeen(m.ID, seedIDs)
 
-			seedBuiltItems := e.buildItems(m, seedItems)
-			go e.processItems(ctx, seedBuiltItems, seedItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
+			filteredSeedItems, blockedSeedCount := filterAntiKeywordItems(seedItems, m.AntiKeywords)
+			if blockedSeedCount > 0 {
+				log.Printf("[%d] initial scan skipped %d items due to anti keywords", m.ID, blockedSeedCount)
+			}
+			if len(filteredSeedItems) > 0 {
+				seedBuiltItems := e.buildItems(m, filteredSeedItems)
+				go e.processItems(ctx, seedBuiltItems, filteredSeedItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
+			}
 
 			initialized = true
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
@@ -418,12 +424,31 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			continue
 		}
 
-		log.Printf("[%d] #%d | %d items | %d new | %dms", m.ID, checks, len(items), len(processItems), time.Since(cycleStart).Milliseconds())
+		alertItems, blockedCount := filterAntiKeywordItems(processItems, m.AntiKeywords)
+		if blockedCount > 0 {
+			log.Printf("[%d] skipped %d new items due to anti keywords", m.ID, blockedCount)
+		}
 
-		builtItems := e.buildItems(m, processItems)
+		newIDs := make([]int64, len(processItems))
+		for i, item := range processItems {
+			newIDs[i] = item.ID
+		}
+		e.db.MarkItemsSeen(m.ID, newIDs)
+		initialized = true
+
+		if len(alertItems) == 0 {
+			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
+				time.Sleep(remaining)
+			}
+			continue
+		}
+
+		log.Printf("[%d] #%d | %d items | %d new | %dms", m.ID, checks, len(items), len(alertItems), time.Since(cycleStart).Milliseconds())
+
+		builtItems := e.buildItems(m, alertItems)
 
 		if e.enrichSeller {
-			for i, vItem := range processItems {
+			for i, vItem := range alertItems {
 				if info, ok := LookupCachedSellerInfo(e.db, vItem.User.ID); ok {
 					builtItems[i].Location = info.Region
 					builtItems[i].Rating = info.Rating
@@ -435,14 +460,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
 		}
 
-		newIDs := make([]int64, len(processItems))
-		for i, item := range processItems {
-			newIDs[i] = item.ID
-		}
-		e.db.MarkItemsSeen(m.ID, newIDs)
-		initialized = true
-
-		go e.processItems(ctx, builtItems, processItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
+		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -653,6 +671,55 @@ func splitIncomingItems(items []model.VintedItem, newMap map[int64]bool, initial
 	}
 
 	return newItems, nil
+}
+
+func filterAntiKeywordItems(items []model.VintedItem, rawKeywords *string) ([]model.VintedItem, int) {
+	keywords := parseAntiKeywords(rawKeywords)
+	if len(keywords) == 0 || len(items) == 0 {
+		return items, 0
+	}
+
+	filtered := make([]model.VintedItem, 0, len(items))
+	blocked := 0
+	for _, item := range items {
+		haystack := strings.ToLower(item.Title + "\n" + item.Description)
+		matched := false
+		for _, keyword := range keywords {
+			if strings.Contains(haystack, keyword) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			blocked++
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	return filtered, blocked
+}
+
+func parseAntiKeywords(rawKeywords *string) []string {
+	if rawKeywords == nil || strings.TrimSpace(*rawKeywords) == "" {
+		return nil
+	}
+
+	split := strings.FieldsFunc(*rawKeywords, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r'
+	})
+
+	keywords := make([]string, 0, len(split))
+	seen := make(map[string]bool, len(split))
+	for _, part := range split {
+		keyword := strings.ToLower(strings.TrimSpace(part))
+		if keyword == "" || seen[keyword] {
+			continue
+		}
+		seen[keyword] = true
+		keywords = append(keywords, keyword)
+	}
+	return keywords
 }
 
 func (e *Engine) buildItems(m model.Monitor, vItems []model.VintedItem) []model.Item {

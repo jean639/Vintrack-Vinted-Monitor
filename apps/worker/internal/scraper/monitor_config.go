@@ -9,8 +9,9 @@ import (
 
 func monitorConfigFingerprint(mon model.Monitor) string {
 	return fmt.Sprintf(
-		"query=%s|queryDelayMs=%d|priceMin=%s|priceMax=%s|size=%s|catalog=%s|brand=%s|color=%s|status=%s|region=%s|allowed=%s|proxies=%s",
+		"query=%s|anti=%s|queryDelayMs=%d|priceMin=%s|priceMax=%s|size=%s|catalog=%s|brand=%s|color=%s|status=%s|region=%s|allowed=%s|proxies=%s",
 		mon.Query,
+		nullableString(mon.AntiKeywords),
 		mon.QueryDelayMs,
 		nullableInt(mon.PriceMin),
 		nullableInt(mon.PriceMax),

@@ -11,6 +11,7 @@ type Monitor struct {
 	UserID               string
 	Name                 string
 	Query                string
+	AntiKeywords         *string
 	QueryDelayMs         int
 	PriceMin             *int
 	PriceMax             *int
@@ -109,6 +110,7 @@ type VintedResponse struct {
 type VintedItem struct {
 	ID             int64         `json:"id"`
 	Title          string        `json:"title"`
+	Description    string        `json:"description,omitempty"`
 	Price          VintedPrice   `json:"price"`
 	TotalItemPrice *VintedPrice  `json:"total_item_price,omitempty"`
 	Url            string        `json:"url"`
