@@ -9,6 +9,12 @@ import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 import { normalizeQueryDelayMs } from "@/lib/monitor-delay";
 
+function normalizeAntiKeywords(value: FormDataEntryValue | null) {
+    const normalized = String(value ?? "").trim();
+    if (normalized.length > 1000) throw new Error("Anti keywords are too long");
+    return normalized || null;
+}
+
 async function sendTelegramStatusIfConfigured(
     monitor: { name: string; userId: string; telegram_active: boolean },
     status: "created" | "started" | "paused",
@@ -34,6 +40,7 @@ export async function createMonitor(formData: FormData) {
 
     const name = formData.get("name") as string;
     const query = formData.get("query") as string;
+    const antiKeywords = normalizeAntiKeywords(formData.get("anti_keywords"));
     const queryDelayMs = normalizeQueryDelayMs(formData.get("query_delay_ms"));
     const priceMin = formData.get("price_min")
         ? Number(formData.get("price_min"))
@@ -103,6 +110,7 @@ export async function createMonitor(formData: FormData) {
             userId: session.user.id,
             name: normalizedName,
             query: normalizedQuery,
+            anti_keywords: antiKeywords,
             query_delay_ms: queryDelayMs,
             price_min: priceMin,
             price_max: priceMax,
@@ -164,6 +172,7 @@ export async function updateMonitor(id: number, formData: FormData) {
 
     const name = formData.get("name") as string;
     const query = formData.get("query") as string;
+    const antiKeywords = normalizeAntiKeywords(formData.get("anti_keywords"));
     const queryDelayMs = normalizeQueryDelayMs(formData.get("query_delay_ms"));
     const priceMin = formData.get("price_min")
         ? Number(formData.get("price_min"))
@@ -232,6 +241,7 @@ export async function updateMonitor(id: number, formData: FormData) {
         data: {
             name: normalizedName,
             query: normalizedQuery,
+            anti_keywords: antiKeywords,
             query_delay_ms: queryDelayMs,
             price_min: priceMin,
             price_max: priceMax,
@@ -266,6 +276,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
 
     const name = formData.get("name") as string;
     const query = formData.get("query") as string;
+    const antiKeywords = normalizeAntiKeywords(formData.get("anti_keywords"));
     const queryDelayMs = normalizeQueryDelayMs(formData.get("query_delay_ms"));
     const priceMin = formData.get("price_min")
         ? Number(formData.get("price_min"))
@@ -333,6 +344,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
         data: {
             name: normalizedName,
             query: normalizedQuery,
+            anti_keywords: antiKeywords,
             query_delay_ms: queryDelayMs,
             price_min: priceMin,
             price_max: priceMax,

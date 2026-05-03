@@ -70,6 +70,7 @@ model monitors {
 
   name       String    @db.VarChar(255)
   query      String    @db.VarChar(255)
+  anti_keywords String? @db.VarChar(1000)
   query_delay_ms Int    @default(1500)
   price_min  Int?
   price_max  Int?

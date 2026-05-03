@@ -18,6 +18,10 @@ export default async function DashboardPage() {
             proxy_group: { select: { name: true } },
         },
     });
+    const userSettings = await db.user.findUnique({
+        where: { id: session.user.id },
+        select: { dedupe_monitor_alerts: true },
+    });
 
     const monitors: Monitor[] = await Promise.all(
         rawMonitors.map(async (m) => ({
@@ -53,6 +57,9 @@ export default async function DashboardPage() {
         <DashboardClient
             initialMonitors={monitors}
             userName={session.user.name || "User"}
+            initialDedupeMonitorAlerts={
+                userSettings?.dedupe_monitor_alerts ?? false
+            }
         />
     );
 }

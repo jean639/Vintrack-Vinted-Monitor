@@ -111,6 +111,7 @@ export async function updateMonitorAlertDedupe(enabled: boolean) {
         WHERE id = ${session.user.id}
     `;
     revalidatePath("/account");
+    revalidatePath("/dashboard");
     return { success: true, dedupe_monitor_alerts: enabled };
 }
 

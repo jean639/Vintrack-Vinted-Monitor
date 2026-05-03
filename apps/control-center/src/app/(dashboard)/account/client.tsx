@@ -20,7 +20,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import {
     LinkIcon,
     Unlink,
@@ -34,7 +33,6 @@ import {
     AlertCircle,
     Cable,
     ExternalLink,
-    BellOff,
 } from "lucide-react";
 import { REGIONS } from "@/lib/regions";
 import { cn } from "@/lib/utils";
@@ -45,7 +43,6 @@ import {
     refreshVintedSession,
     updateVintedPhoneNumber,
     updateVintedDomain,
-    updateMonitorAlertDedupe,
 } from "@/actions/account";
 import { toast } from "sonner";
 
@@ -142,9 +139,6 @@ export function AccountClient({
     initialStatus: AccountStatus;
 }) {
     const [status, setStatus] = useState<AccountStatus>(initialStatus);
-    const [dedupeMonitorAlerts, setDedupeMonitorAlerts] = useState(
-        initialStatus.dedupe_monitor_alerts ?? false,
-    );
     const [accessToken, setAccessToken] = useState("");
     const [refreshToken, setRefreshToken] = useState("");
     const [phoneNumber, setPhoneNumber] = useState("");
@@ -480,27 +474,6 @@ export function AccountClient({
         );
     };
 
-    const handleDedupeChange = (checked: boolean) => {
-        setDedupeMonitorAlerts(checked);
-        startTransition(async () => {
-            const result = await updateMonitorAlertDedupe(checked);
-            if ("error" in result) {
-                setDedupeMonitorAlerts(!checked);
-                toast.error(result.error);
-                return;
-            }
-            setStatus((current) => ({
-                ...current,
-                dedupe_monitor_alerts: checked,
-            }));
-            toast.success(
-                checked
-                    ? "Duplicate monitor alerts disabled"
-                    : "Monitor alerts are independent again",
-            );
-        });
-    };
-
     const extensionReady = extensionInstalled && extensionConfigured;
     const extensionStatusTitle = !extensionInstalled
         ? "Extension not detected"
@@ -530,27 +503,6 @@ export function AccountClient({
                     from the dashboard.
                 </p>
             </div>
-
-            <Card>
-                <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                        <CardTitle className="flex items-center gap-2 text-base">
-                            <BellOff className="h-4 w-4" />
-                            Notification dedupe
-                        </CardTitle>
-                        <CardDescription>
-                            Send only one Discord or Telegram alert when several
-                            of your monitors find the same item.
-                        </CardDescription>
-                    </div>
-                    <Switch
-                        aria-label="Toggle duplicate monitor alerts"
-                        checked={dedupeMonitorAlerts}
-                        disabled={isPending}
-                        onCheckedChange={handleDedupeChange}
-                    />
-                </CardHeader>
-            </Card>
 
             <Card>
                 <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
