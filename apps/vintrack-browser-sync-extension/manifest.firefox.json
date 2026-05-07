@@ -1,49 +1,49 @@
 {
-  "manifest_version": 3,
-  "name": "Vintrack Browser Sync",
-  "version": "0.1.0",
-  "description": "Keeps Vintrack Vinted tokens synced automatically.",
-  "permissions": ["alarms", "cookies", "storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
-  "background": {
-    "scripts": ["background.js"]
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "browser-sync@vintrack.app",
-      "strict_min_version": "109.0",
-      "data_collection_permissions": {
-        "required": ["authenticationInfo", "websiteActivity"]
-      }
+    "manifest_version": 3,
+    "name": "Vintrack Browser Sync",
+    "version": "0.1.1",
+    "description": "Keeps the Vintrack Vinted session synced automatically.",
+    "permissions": ["alarms", "cookies", "storage", "tabs"],
+    "host_permissions": ["<all_urls>"],
+    "background": {
+        "scripts": ["background.js"]
+    },
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "browser-sync@vintrack.app",
+            "strict_min_version": "109.0",
+            "data_collection_permissions": {
+                "required": ["authenticationInfo", "websiteActivity"]
+            }
+        }
+    },
+    "icons": {
+        "16": "icons/vintrack-16.png",
+        "32": "icons/vintrack-32.png",
+        "48": "icons/vintrack-48.png",
+        "128": "icons/vintrack-128.png"
+    },
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["content-script.js"],
+            "run_at": "document_start"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["page-bridge.js"],
+            "matches": ["<all_urls>"]
+        }
+    ],
+    "action": {
+        "default_title": "Vintrack Browser Sync",
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/vintrack-16.png",
+            "32": "icons/vintrack-32.png",
+            "48": "icons/vintrack-48.png",
+            "128": "icons/vintrack-128.png"
+        }
     }
-  },
-  "icons": {
-    "16": "icons/vintrack-16.png",
-    "32": "icons/vintrack-32.png",
-    "48": "icons/vintrack-48.png",
-    "128": "icons/vintrack-128.png"
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content-script.js"],
-      "run_at": "document_start"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["page-bridge.js"],
-      "matches": ["<all_urls>"]
-    }
-  ],
-  "action": {
-    "default_title": "Vintrack Browser Sync",
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "icons/vintrack-16.png",
-      "32": "icons/vintrack-32.png",
-      "48": "icons/vintrack-48.png",
-      "128": "icons/vintrack-128.png"
-    }
-  }
 }

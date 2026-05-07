@@ -150,6 +150,44 @@
     });
   }
 
+  function requestPageSessionRefresh(payload = {}) {
+    return new Promise((resolve) => {
+      const requestId = payload?.requestId || crypto.randomUUID();
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", handleResponse);
+        resolve({
+          ok: false,
+          code: "page_bridge_timeout",
+          error: "Vinted page bridge did not answer in time",
+          requestId,
+        });
+      }, 30000);
+
+      function handleResponse(event) {
+        if (
+          event.source !== window ||
+          event.data?.type !== "VINTRACK_PAGE_SESSION_REFRESH_RESPONSE" ||
+          event.data.payload?.requestId !== requestId
+        ) {
+          return;
+        }
+
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", handleResponse);
+        resolve(event.data.payload);
+      }
+
+      window.addEventListener("message", handleResponse);
+      window.postMessage(
+        {
+          type: "VINTRACK_PAGE_SESSION_REFRESH_REQUEST",
+          payload: { ...payload, requestId },
+        },
+        window.location.origin
+      );
+    });
+  }
+
   ensurePageBridge();
   watchVintrackTheme();
 
@@ -225,6 +263,22 @@
       ensurePageBridge();
       waitForPageBridgeReady()
         .then(() => requestPageBuy(message.payload))
+        .then((response) => sendResponse(response))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            code: "page_bridge_error",
+            error: error instanceof Error ? error.message : "Unknown page bridge error",
+            requestId: message.payload?.requestId,
+          })
+        );
+      return true;
+    }
+
+    if (message?.type === "VINTRACK_REFRESH_BROWSER_SESSION") {
+      ensurePageBridge();
+      waitForPageBridgeReady()
+        .then(() => requestPageSessionRefresh(message.payload))
         .then((response) => sendResponse(response))
         .catch((error) =>
           sendResponse({

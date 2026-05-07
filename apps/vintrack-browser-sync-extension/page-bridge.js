@@ -127,6 +127,27 @@
     );
   }
 
+  async function refreshBrowserSession() {
+    const csrfToken = extractCsrfToken();
+    const response = await fetch(`${window.location.origin}/web/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        ...(csrfToken ? { "X-Csrf-Token": csrfToken } : {}),
+      },
+    });
+
+    const body = await response.text().catch(() => "");
+    return {
+      ok: response.ok,
+      status: response.status,
+      domain: window.location.hostname,
+      hasAccessCookie: Boolean(readCookie("access_token_web")),
+      error: response.ok ? "" : truncate(body, 200),
+    };
+  }
+
   function waitForDocumentReady(timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
       if (document.readyState === "complete") {
@@ -571,11 +592,40 @@
   }
 
   window.addEventListener("message", (event) => {
-    if (
-      event.source !== window ||
-      event.data?.type !== "VINTRACK_PAGE_BUY_REQUEST" ||
-      !event.data.payload?.requestId
-    ) {
+    if (event.source !== window || !event.data?.type) {
+      return;
+    }
+
+    if (event.data.type === "VINTRACK_PAGE_SESSION_REFRESH_REQUEST") {
+      const requestId = event.data.payload?.requestId || crypto.randomUUID();
+      refreshBrowserSession()
+        .then((result) => {
+          window.postMessage(
+            {
+              type: "VINTRACK_PAGE_SESSION_REFRESH_RESPONSE",
+              payload: { ...result, requestId },
+            },
+            window.location.origin
+          );
+        })
+        .catch((error) => {
+          window.postMessage(
+            {
+              type: "VINTRACK_PAGE_SESSION_REFRESH_RESPONSE",
+              payload: {
+                ok: false,
+                requestId,
+                code: "page_session_refresh_exception",
+                error: error instanceof Error ? error.message : "Unknown browser session refresh failure",
+              },
+            },
+            window.location.origin
+          );
+        });
+      return;
+    }
+
+    if (event.data.type !== "VINTRACK_PAGE_BUY_REQUEST" || !event.data.payload?.requestId) {
       return;
     }
 
