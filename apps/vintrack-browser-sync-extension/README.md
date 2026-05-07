@@ -48,9 +48,8 @@ For users, distribute the signed `vintrack-browser-sync-extension-firefox.xpi` f
 Only these values are synced to Vintrack:
 
 - `access_token_web`
-- `refresh_token_web`
 - current Vinted domain
 - browser user agent
 - Vintrack light/dark theme preference
 
-It does not send the full cookie jar.
+It does not send the full cookie jar or the browser refresh token.

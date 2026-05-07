@@ -54,7 +54,7 @@ function renderState(response) {
     );
     setBadge(
         autoBadgeEl,
-        lastSyncStatus === "ok" ? "Auto-sync healthy" : "Watching for tokens",
+        lastSyncStatus === "ok" ? "Auto-sync healthy" : "Watching session",
         lastSyncStatus === "ok" ? "ok" : "muted",
     );
     domainCountEl.textContent = String(domains.length);
@@ -78,7 +78,7 @@ function renderState(response) {
                 : "Connected and waiting for an active Vinted session.",
         );
         hintEl.textContent =
-            "Only the current Vinted session tokens are synced.";
+            "Only the current Vinted session token is synced.";
         return;
     }
 

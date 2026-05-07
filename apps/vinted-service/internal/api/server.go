@@ -279,6 +279,20 @@ func accessTokenExpiry(token string) (time.Time, bool) {
 	return time.Unix(int64(exp), 0), true
 }
 
+func serverSideTokenRefreshAllowed(sess *session.VintedSession) bool {
+	return sess != nil && !sess.BrowserLinked && strings.TrimSpace(sess.RefreshToken) != ""
+}
+
+func sessionForServerSideClient(sess *session.VintedSession) *session.VintedSession {
+	if sess == nil || !sess.BrowserLinked || strings.TrimSpace(sess.RefreshToken) == "" {
+		return sess
+	}
+
+	clientSession := *sess
+	clientSession.RefreshToken = ""
+	return &clientSession
+}
+
 func (s *Server) canonicalizeSessionDomain(sess *session.VintedSession) {
 	if sess == nil {
 		return
@@ -298,6 +312,9 @@ func (s *Server) canonicalizeSessionDomain(sess *session.VintedSession) {
 func (s *Server) refreshSessionWithLock(userID string, sess *session.VintedSession) (*session.VintedSession, *vinted.Client, error) {
 	if sess == nil {
 		return nil, nil, errors.New("no linked Vinted account")
+	}
+	if sess.BrowserLinked {
+		return nil, nil, errors.New("browser-linked sessions are refreshed by the browser extension")
 	}
 	if strings.TrimSpace(sess.RefreshToken) == "" {
 		sess.Status = "missing_refresh_token"
@@ -387,7 +404,7 @@ func accountInfoWithRefresh(client *vinted.Client) (*vinted.AccountInfo, error) 
 	}
 
 	sess := client.GetSession()
-	if sess == nil || strings.TrimSpace(sess.RefreshToken) == "" {
+	if !serverSideTokenRefreshAllowed(sess) {
 		return nil, err
 	}
 
@@ -421,7 +438,7 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 
 	s.canonicalizeSessionDomain(sess)
 
-	if sess.RefreshToken != "" && accessTokenExpiresWithin(sess.AccessToken, proactiveRefreshWindow) {
+	if serverSideTokenRefreshAllowed(sess) && accessTokenExpiresWithin(sess.AccessToken, proactiveRefreshWindow) {
 		refreshed, refreshedClient, err := s.refreshSessionWithLock(userID, sess)
 		if err != nil {
 			log.Printf("[session] proactive token refresh failed for user %s: %v", userID, err)
@@ -440,7 +457,7 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 		}
 	}
 
-	client, err := vinted.NewClient(sess)
+	client, err := vinted.NewClient(sessionForServerSideClient(sess))
 	if err != nil {
 		writeError(w, "failed to create Vinted client", 500)
 		return nil, nil, false
@@ -455,7 +472,7 @@ func (s *Server) getSessionAndClient(r *http.Request, w http.ResponseWriter) (*s
 	if sess.Status != "active" {
 		log.Printf("[session] session for user %s is %s, attempting recovery...", userID, sess.Status)
 
-		if sess.RefreshToken != "" {
+		if serverSideTokenRefreshAllowed(sess) {
 			log.Printf("[session] attempting token refresh for user %s...", userID)
 			updated, updatedClient, err := s.refreshSessionWithLock(userID, sess)
 			if err != nil {
@@ -1766,6 +1783,10 @@ func (s *Server) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 	if sess == nil {
 		writeError(w, "no linked Vinted account", 404)
+		return
+	}
+	if sess.BrowserLinked {
+		writeError(w, "browser-linked Vinted sessions are refreshed by the browser extension", 400)
 		return
 	}
 	if sess.RefreshToken == "" {

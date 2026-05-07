@@ -162,11 +162,92 @@ function ensurePeriodicSyncAlarm() {
   });
 }
 
+async function getOpenVintedTabs(preferredDomain = "") {
+  const normalizedPreferredDomain = sanitizeDomain(preferredDomain);
+  const tabs = await extensionApi.tabs.query({});
+  return tabs.filter((tab) => {
+    const domain = domainFromUrl(tab?.url || "");
+    if (!domain || !isVintedDomain(domain)) {
+      return false;
+    }
+    return (
+      !normalizedPreferredDomain ||
+      domain === normalizedPreferredDomain ||
+      cookieDomainMatches(domain, normalizedPreferredDomain)
+    );
+  });
+}
+
+async function refreshOpenVintedBrowserSessions(preferredDomain = "") {
+  const tabs = await getOpenVintedTabs(preferredDomain);
+  if (tabs.length === 0) {
+    return [
+      {
+        ok: false,
+        reason: "no-open-vinted-tab",
+        error: "Open a logged-in Vinted tab, then sync again.",
+      },
+    ];
+  }
+
+  const results = [];
+
+  for (const tab of tabs) {
+    if (typeof tab.id !== "number") {
+      continue;
+    }
+
+    try {
+      try {
+        await waitForTabBridge(tab.id, 5000);
+      } catch {
+        await extensionApi.tabs.reload(tab.id);
+        await waitForTabLoad(tab.id);
+        await waitForTabBridge(tab.id, 10000);
+      }
+      const result = await extensionApi.tabs.sendMessage(tab.id, {
+        type: "VINTRACK_REFRESH_BROWSER_SESSION",
+        payload: { requestId: crypto.randomUUID() },
+      });
+      results.push({
+        ok: Boolean(result?.ok),
+        domain: sanitizeDomain(result?.domain || domainFromUrl(tab.url || "")),
+        tabId: tab.id,
+        status: result?.status,
+        error: result?.error || "",
+      });
+    } catch (error) {
+      results.push({
+        ok: false,
+        domain: domainFromUrl(tab.url || ""),
+        tabId: tab.id,
+        error: error instanceof Error ? error.message : "unknown-error",
+      });
+    }
+  }
+
+  if (results.some((result) => result.ok)) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  return results;
+}
+
 async function persistSyncState(results) {
+  const normalizedResults =
+    results.length > 0
+      ? results
+      : [
+          {
+            ok: false,
+            reason: "missing-browser-token",
+            error: "Open or reload a logged-in Vinted tab, then sync again.",
+          },
+        ];
   const successfulDomains = results
     .filter((result) => result.ok && result.domain && (!result.status || result.status === "completed" || result.status === "refreshed"))
     .map((result) => result.domain);
-  const failedResult = results.find((result) => !result.ok);
+  const failedResult = normalizedResults.find((result) => !result.ok);
 
   await extensionApi.storage.local.set({
     [STORAGE_KEYS.lastSyncAt]: new Date().toISOString(),
@@ -222,11 +303,8 @@ async function syncDomain(domain, options = {}) {
   const accessCookie = await extensionApi.cookies.get(
     cookieLookupDetails(normalizedDomain, "access_token_web", storeId)
   );
-  const refreshCookie = await extensionApi.cookies.get(
-    cookieLookupDetails(normalizedDomain, "refresh_token_web", storeId)
-  );
 
-  if (!accessCookie?.value && !refreshCookie?.value) {
+  if (!accessCookie?.value) {
     return { ok: false, reason: "missing-browser-token" };
   }
 
@@ -240,7 +318,6 @@ async function syncDomain(domain, options = {}) {
       body: JSON.stringify({
         link_token: browserLinkToken,
         access_token: accessCookie?.value || "",
-        refresh_token: refreshCookie?.value || "",
         domain: normalizedDomain,
         user_agent: navigator.userAgent,
       }),
@@ -265,10 +342,9 @@ async function syncDomain(domain, options = {}) {
 
 async function syncAllVintedDomains() {
   const accessCookies = await extensionApi.cookies.getAll({ name: "access_token_web" });
-  const refreshCookies = await extensionApi.cookies.getAll({ name: "refresh_token_web" });
   const candidates = new Map();
 
-  for (const cookie of [...accessCookies, ...refreshCookies]) {
+  for (const cookie of accessCookies) {
     const domain = sanitizeDomain(cookie.domain);
     if (!isVintedDomain(domain)) {
       continue;
@@ -301,13 +377,9 @@ async function syncPreferredOrAllDomains(preferredDomain) {
     const cookies = (await extensionApi.cookies.getAll({ name: "access_token_web" })).filter((cookie) =>
       cookieDomainMatches(cookie.domain, normalizedPreferredDomain)
     );
-    const refreshCookies = (await extensionApi.cookies.getAll({ name: "refresh_token_web" })).filter((cookie) =>
-      cookieDomainMatches(cookie.domain, normalizedPreferredDomain)
-    );
     const storeIds = [
       ...new Set(
-        [...cookies, ...refreshCookies]
-          .map((cookie) => (typeof cookie.storeId === "string" ? cookie.storeId : ""))
+        cookies.map((cookie) => (typeof cookie.storeId === "string" ? cookie.storeId : ""))
       ),
     ];
     const targets = storeIds.length > 0 ? storeIds : [""];
@@ -347,13 +419,47 @@ async function syncPreferredOrAllDomains(preferredDomain) {
 }
 
 async function syncAndPersistPreferredOrAllDomains(preferredDomain) {
-  const results = await syncPreferredOrAllDomains(preferredDomain);
+  let results = await syncPreferredOrAllDomains(preferredDomain);
+  if (!results.some((result) => result.ok)) {
+    const refreshResults = await refreshOpenVintedBrowserSessions(preferredDomain);
+    if (refreshResults.some((result) => result.ok)) {
+      results = await syncPreferredOrAllDomains(preferredDomain);
+      if (results.length === 0) {
+        results = [
+          {
+            ok: false,
+            reason: "missing-browser-token",
+            error: "Vinted did not expose a fresh browser access token after refresh.",
+          },
+        ];
+      }
+    } else if (results.length === 0) {
+      results = refreshResults;
+    }
+  }
   await persistSyncState(results);
   return results;
 }
 
 async function syncAndPersistAllDomains() {
-  const results = await syncAllVintedDomains();
+  let results = await syncAllVintedDomains();
+  if (!results.some((result) => result.ok)) {
+    const refreshResults = await refreshOpenVintedBrowserSessions();
+    if (refreshResults.some((result) => result.ok)) {
+      results = await syncAllVintedDomains();
+      if (results.length === 0) {
+        results = [
+          {
+            ok: false,
+            reason: "missing-browser-token",
+            error: "Vinted did not expose a fresh browser access token after refresh.",
+          },
+        ];
+      }
+    } else if (results.length === 0) {
+      results = refreshResults;
+    }
+  }
   await persistSyncState(results);
   return results;
 }
@@ -648,7 +754,7 @@ async function scheduleSyncForTab(tab) {
 }
 
 extensionApi.cookies.onChanged.addListener(({ cookie }) => {
-  if (!cookie || !["access_token_web", "refresh_token_web"].includes(cookie.name)) {
+  if (!cookie || cookie.name !== "access_token_web") {
     return;
   }
   scheduleSync(cookie.domain, { storeId: typeof cookie.storeId === "string" ? cookie.storeId : "" });
@@ -725,7 +831,16 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const preferredDomain = String(message?.payload?.preferredDomain || "").trim();
       const results = await syncAndPersistPreferredOrAllDomains(preferredDomain);
       const config = await getConfig();
-      sendResponse({ ok: true, ...formatRuntimeState(config), results });
+      const successful = results.some((result) => result.ok);
+      const failedResult = results.find((result) => !result.ok);
+      sendResponse({
+        ok: successful,
+        ...formatRuntimeState(config),
+        error: successful
+          ? ""
+          : failedResult?.error || failedResult?.reason || "Open a logged-in Vinted tab, then sync again.",
+        results,
+      });
       return;
     }
 
