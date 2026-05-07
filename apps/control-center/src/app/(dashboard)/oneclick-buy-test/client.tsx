@@ -713,13 +713,10 @@ export function OneClickBuyTestClient() {
                                 {isInvalidAuthResult(result) && (
                                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
                                         Vinted rejected the stored access token
-                                        before checkout. Relink the account with
-                                        fresh access_token_web and
-                                        refresh_token_web values from the
-                                        currently logged-in browser session, not
-                                        from the request sample files. The
-                                        experimental buy flow cannot recover if
-                                        no valid refresh token is stored.
+                                        before checkout. Sync the browser
+                                        extension again with the currently
+                                        logged-in browser session, not with
+                                        values from the request sample files.
                                     </div>
                                 )}
                                 {isPaymentURLMissingResult(result) && (

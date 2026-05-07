@@ -573,7 +573,7 @@ export function AccountClient({
                                 </p>
                                 <p className="text-muted-foreground mt-1 text-xs">
                                     Sign in to Vinted in this same browser. The
-                                    extension syncs only session tokens and the
+                                    extension syncs only the session token and the
                                     selected Vinted domain.
                                 </p>
                             </div>
@@ -714,11 +714,13 @@ export function AccountClient({
                                 </strong>
                             </span>
                             <span>
-                                Refresh token:{" "}
+                                Browser refresh:{" "}
                                 <strong className="text-foreground font-medium">
-                                    {status.has_refresh_token
-                                        ? "saved"
-                                        : "missing"}
+                                    {status.browser_linked
+                                        ? "not copied"
+                                        : status.has_refresh_token
+                                          ? "saved"
+                                          : "missing"}
                                 </strong>
                             </span>
                             <span>
