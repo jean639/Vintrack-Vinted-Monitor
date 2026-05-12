@@ -21,18 +21,21 @@ func withTelegramServer(t *testing.T, handler http.HandlerFunc) {
 
 	oldBaseURL := apiBaseURL
 	oldClient := httpClient
+	oldRetryBackoff := retryBackoff
 	oldToken, hadToken := os.LookupEnv("TELEGRAM_BOT_TOKEN")
 	oldDashboardURL, hadDashboardURL := os.LookupEnv("DASHBOARD_URL")
 
 	apiBaseURL = server.URL
 	httpClient = server.Client()
 	httpClient.Timeout = 2 * time.Second
+	retryBackoff = 0
 	os.Setenv("TELEGRAM_BOT_TOKEN", "test-token")
 	os.Unsetenv("DASHBOARD_URL")
 
 	t.Cleanup(func() {
 		apiBaseURL = oldBaseURL
 		httpClient = oldClient
+		retryBackoff = oldRetryBackoff
 		if hadToken {
 			os.Setenv("TELEGRAM_BOT_TOKEN", oldToken)
 		} else {
@@ -111,6 +114,36 @@ func TestSendItemFallsBackToMessageWhenPhotoFails(t *testing.T) {
 
 	if len(calls) != 2 {
 		t.Fatalf("expected photo plus fallback message, got %v", calls)
+	}
+}
+
+func TestSendItemRetriesPhotoTimeout(t *testing.T) {
+	var calls int32
+	var paths []string
+	withTelegramServer(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path != "/bottest-token/sendPhoto" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if atomic.AddInt32(&calls, 1) == 1 {
+			time.Sleep(50 * time.Millisecond)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	})
+	httpClient.Timeout = 10 * time.Millisecond
+
+	SendItem("-1001", model.Item{
+		MonitorID: 7,
+		Title:     "Item",
+		Price:     "12 EUR",
+		URL:       "https://example.test/item",
+		ImageURL:  "https://example.test/image.jpg",
+	}, "monitor", "server")
+
+	if calls != 2 {
+		t.Fatalf("expected timeout retry, got %d calls: %v", calls, paths)
 	}
 }
 

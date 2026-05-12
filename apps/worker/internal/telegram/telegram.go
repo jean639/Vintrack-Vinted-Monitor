@@ -2,11 +2,14 @@ package telegram
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,8 +19,9 @@ import (
 	"vintrack-worker/internal/model"
 )
 
-var httpClient = &http.Client{Timeout: 5 * time.Second}
+var httpClient = &http.Client{Timeout: 20 * time.Second}
 var apiBaseURL = "https://api.telegram.org"
+var retryBackoff = 750 * time.Millisecond
 
 type retryResponse struct {
 	Parameters struct {
@@ -107,7 +111,15 @@ func send(method string, payload map[string]interface{}) error {
 func postWithRetry(endpoint string, body []byte) error {
 	retryAfter, err := post(endpoint, body)
 	if err != nil {
-		return err
+		if !isTransientPostError(err) {
+			return err
+		}
+
+		time.Sleep(retryBackoff)
+		retryAfter, err = post(endpoint, body)
+		if err != nil {
+			return err
+		}
 	}
 	if retryAfter == nil {
 		return nil
@@ -127,6 +139,15 @@ func postWithRetry(endpoint string, body []byte) error {
 		return fmt.Errorf("telegram API rate limited after retry")
 	}
 	return nil
+}
+
+func isTransientPostError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func post(endpoint string, body []byte) (*int, error) {
