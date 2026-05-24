@@ -8,6 +8,12 @@ import {
     type ItemData,
 } from "@/components/monitors/item-card";
 import { useMonitorLiveContext } from "@/components/monitors/monitor-live-context";
+import {
+    capFeedItems,
+    DEFAULT_LIVE_FEED_ITEM_CAP,
+} from "@/lib/live-feed";
+
+const MONITOR_LIVE_FEED_ITEM_CAP = DEFAULT_LIVE_FEED_ITEM_CAP;
 
 export function LiveFeed({ monitorId }: { monitorId: number }) {
     const [items, setItems] = useState<ItemData[]>([]);
@@ -21,10 +27,14 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
                 const res = await fetch(`/api/monitors/${monitorId}/items`);
                 if (res.ok) {
                     const data: ItemData[] = await res.json();
-                    seenItemIds.current = new Set(
-                        data.map((item) => String(item.id)),
+                    const cappedItems = capFeedItems(
+                        data.map((i) => ({ ...i, isLive: false })),
+                        MONITOR_LIVE_FEED_ITEM_CAP,
                     );
-                    setItems(data.map((i) => ({ ...i, isLive: false })));
+                    seenItemIds.current = new Set(
+                        cappedItems.map((item) => String(item.id)),
+                    );
+                    setItems(cappedItems);
                 }
             } catch (err) {
                 console.error("Fetch error", err);
@@ -78,7 +88,14 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
                             updated[existingIdx] = merged;
                             return updated;
                         }
-                        return [liveItem, ...prev];
+                        const nextItems = capFeedItems(
+                            [liveItem, ...prev],
+                            MONITOR_LIVE_FEED_ITEM_CAP,
+                        );
+                        seenItemIds.current = new Set(
+                            nextItems.map((item) => String(item.id)),
+                        );
+                        return nextItems;
                     });
 
                     setTimeout(() => {
