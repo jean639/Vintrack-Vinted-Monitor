@@ -1,22 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Settings2 } from "lucide-react";
 import {
     ItemCard,
     ItemCardSkeleton,
     type ItemData,
 } from "@/components/monitors/item-card";
+import {
+    capFeedItems,
+    DEFAULT_LIVE_FEED_ITEM_CAP,
+    LIVE_FEED_ITEM_CAP_OPTIONS,
+    normalizeLiveFeedItemCap,
+} from "@/lib/live-feed";
 
 type FeedSummary = {
     activeMonitors: number;
     totalMonitors: number;
 };
 
+const LIVE_FEED_CAP_STORAGE_KEY = "vintrack.liveFeed.itemCap";
+
 export default function FeedPage() {
     const [items, setItems] = useState<ItemData[]>([]);
     const [loading, setLoading] = useState(true);
     const [summary, setSummary] = useState<FeedSummary | null>(null);
+    const [itemCap, setItemCap] = useState(() =>
+        typeof window === "undefined"
+            ? DEFAULT_LIVE_FEED_ITEM_CAP
+            : normalizeLiveFeedItemCap(
+                  window.localStorage.getItem(LIVE_FEED_CAP_STORAGE_KEY),
+              ),
+    );
 
     useEffect(() => {
         const fetchFeed = async () => {
@@ -28,7 +43,12 @@ export default function FeedPage() {
 
                 if (feedRes.ok) {
                     const data: ItemData[] = await feedRes.json();
-                    setItems(data.map((i) => ({ ...i, isLive: false })));
+                    setItems(
+                        capFeedItems(
+                            data.map((i) => ({ ...i, isLive: false })),
+                            itemCap,
+                        ),
+                    );
                 }
 
                 if (summaryRes.ok) {
@@ -42,7 +62,7 @@ export default function FeedPage() {
             }
         };
         fetchFeed();
-    }, []);
+    }, [itemCap]);
 
     useEffect(() => {
         const eventSource = new EventSource("/api/stream");
@@ -77,7 +97,10 @@ export default function FeedPage() {
                         updated[existingIdx] = merged;
                         return updated;
                     }
-                    return [{ ...liveItem, id: newId }, ...prev];
+                    return capFeedItems(
+                        [{ ...liveItem, id: newId }, ...prev],
+                        itemCap,
+                    );
                 });
 
                 setTimeout(() => {
@@ -95,7 +118,14 @@ export default function FeedPage() {
         };
 
         return () => eventSource.close();
-    }, []);
+    }, [itemCap]);
+
+    const handleItemCapChange = (value: string) => {
+        const nextCap = normalizeLiveFeedItemCap(value);
+        setItemCap(nextCap);
+        window.localStorage.setItem(LIVE_FEED_CAP_STORAGE_KEY, String(nextCap));
+        setItems((current) => capFeedItems(current, nextCap));
+    };
 
     const activeMonitorCount = summary?.activeMonitors ?? 0;
     const hasActiveMonitors = activeMonitorCount > 0;
@@ -114,20 +144,40 @@ export default function FeedPage() {
                         Real-time stream across all your monitors.
                     </p>
                 </div>
-                <div
-                    className={`flex items-center gap-1.5 self-start rounded-full border px-3 py-1.5 text-[11px] font-medium sm:self-auto ${liveBadgeClassName}`}
-                >
-                    {hasActiveMonitors ? (
-                        <span className="relative flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                        </span>
-                    ) : (
-                        <span className="h-2 w-2 rounded-full bg-amber-500/80" />
-                    )}
-                    {hasActiveMonitors
-                        ? `Live · ${activeMonitorCount} monitor${activeMonitorCount === 1 ? "" : "s"}`
-                        : "No monitor active"}
+                <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+                    <label className="border-input bg-background text-muted-foreground inline-flex h-8 items-center gap-2 rounded-full border px-2.5 text-xs shadow-xs">
+                        <Settings2 className="h-3.5 w-3.5" />
+                        <span className="sr-only">Live feed item limit</span>
+                        <select
+                            aria-label="Live feed item limit"
+                            value={itemCap}
+                            onChange={(event) =>
+                                handleItemCapChange(event.target.value)
+                            }
+                            className="text-foreground h-6 cursor-pointer rounded-md bg-transparent pr-1 text-xs font-medium outline-none"
+                        >
+                            {LIVE_FEED_ITEM_CAP_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                    {option} items
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <div
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium ${liveBadgeClassName}`}
+                    >
+                        {hasActiveMonitors ? (
+                            <span className="relative flex h-2 w-2">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                            </span>
+                        ) : (
+                            <span className="h-2 w-2 rounded-full bg-amber-500/80" />
+                        )}
+                        {hasActiveMonitors
+                            ? `Live · ${activeMonitorCount} monitor${activeMonitorCount === 1 ? "" : "s"}`
+                            : "No monitor active"}
+                    </div>
                 </div>
             </div>
 
