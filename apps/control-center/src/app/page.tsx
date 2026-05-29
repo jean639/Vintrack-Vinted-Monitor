@@ -40,6 +40,8 @@ export const metadata: Metadata = {
 };
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION;
+const sneakerDevReviewUrl =
+    "https://www.sneakerdev.com/services/e9c9ec35-71a2-43b0-b93b-2c1e8bf2f84d-vintrack";
 
 const navItems: Array<{ label: string; icon: LucideIcon }> = [
     { label: "Dashboard", icon: LayoutDashboard },
@@ -1107,6 +1109,15 @@ export default async function Home() {
                     </Link>
                     <div className="flex flex-wrap items-center gap-4">
                         <span>Built for fast Vinted monitoring.</span>
+                        <a
+                            href={sneakerDevReviewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hover:text-foreground inline-flex items-center gap-1.5 transition-colors"
+                        >
+                            <Star className="size-4 text-emerald-500" />
+                            Review on SneakerDev
+                        </a>
                         <span className="inline-flex items-center gap-1.5">
                             <CheckCircle2 className="size-4 text-emerald-500" />
                             MIT licensed

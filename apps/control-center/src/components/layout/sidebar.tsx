@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const ACCOUNT_SEEN_KEY = "vintrack:account-tab-seen";
+const SNEAKERDEV_REVIEW_URL =
+    "https://www.sneakerdev.com/services/e9c9ec35-71a2-43b0-b93b-2c1e8bf2f84d-vintrack";
 
 const navItems = [
     { href: "/dashboard", label: "Monitors", icon: LayoutDashboard },
@@ -213,6 +215,16 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
                         <span className="rounded-full bg-blue-500 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white uppercase">
                             New
                         </span>
+                        <ExternalLink className="ml-auto h-3.5 w-3.5 opacity-70" />
+                    </a>
+                    <a
+                        href={SNEAKERDEV_REVIEW_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mb-1 flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-500 dark:hover:bg-emerald-500/12 dark:hover:text-emerald-400"
+                    >
+                        <Star className="h-4 w-4" />
+                        Review us
                         <ExternalLink className="ml-auto h-3.5 w-3.5 opacity-70" />
                     </a>
                     <a
