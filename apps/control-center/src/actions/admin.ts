@@ -5,6 +5,13 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
+import {
+    GLOBAL_MONITOR_LIMIT_SCOPE,
+    normalizeMonitorLimitInput,
+    roleLimitScope,
+    setMonitorLimit,
+    userLimitScope,
+} from "@/lib/monitor-limits";
 
 async function requireAdmin() {
     const session = await auth();
@@ -112,6 +119,45 @@ export async function setUserRole(userId: string, role: string) {
         where: { id: userId },
         data: { role },
     });
+
+    revalidatePath("/admin");
+}
+
+export async function setGlobalActiveMonitorLimit(value: string) {
+    await requireAdmin();
+
+    await setMonitorLimit(
+        GLOBAL_MONITOR_LIMIT_SCOPE,
+        normalizeMonitorLimitInput(value),
+    );
+
+    revalidatePath("/admin");
+}
+
+export async function setRoleActiveMonitorLimit(role: string, value: string) {
+    await requireAdmin();
+
+    const validRoles = ["free", "premium"];
+    if (!validRoles.includes(role)) throw new Error("Invalid role");
+
+    await setMonitorLimit(roleLimitScope(role), normalizeMonitorLimitInput(value));
+
+    revalidatePath("/admin");
+}
+
+export async function setUserActiveMonitorLimit(userId: string, value: string) {
+    await requireAdmin();
+
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true },
+    });
+    if (!user) throw new Error("User not found");
+    if (user.role === "admin") {
+        throw new Error("Admins are always unlimited");
+    }
+
+    await setMonitorLimit(userLimitScope(userId), normalizeMonitorLimitInput(value));
 
     revalidatePath("/admin");
 }

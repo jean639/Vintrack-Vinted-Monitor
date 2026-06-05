@@ -27,6 +27,7 @@ import {
 } from "@/lib/regions";
 import { getStatusLabels } from "@/lib/statuses";
 import { formatQueryDelay } from "@/lib/monitor-delay";
+import { getMonitorActivationState } from "@/lib/monitor-limits";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
@@ -56,6 +57,11 @@ export default async function MonitorPage({
         monitor.id,
         monitor.status || "active",
     );
+    const resumeState =
+        monitor.status === "active"
+            ? null
+            : await getMonitorActivationState(monitor.userId);
+    const resumeBlocked = resumeState ? !resumeState.canActivate : false;
     const deleteAction = deleteMonitor.bind(null, monitor.id);
     const categoryLabels = await getCategoryLabelsForRegion(
         monitor.catalog_ids,
@@ -254,6 +260,12 @@ export default async function MonitorPage({
                             <Button
                                 variant="outline"
                                 size="sm"
+                                disabled={resumeBlocked}
+                                title={
+                                    resumeBlocked && resumeState
+                                        ? `Active monitor limit reached (${resumeState.activeCount}/${resumeState.activeLimit})`
+                                        : undefined
+                                }
                                 className={`h-8 text-xs font-medium ${
                                     monitor.status === "active"
                                         ? "border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-500/20 dark:text-amber-500 dark:hover:bg-amber-500/10"

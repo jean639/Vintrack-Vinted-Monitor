@@ -15,10 +15,12 @@ import {
     Boxes,
     Webhook,
     ChevronRight,
+    Gauge,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
     Card,
     CardContent,
@@ -36,7 +38,10 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import {
+    setGlobalActiveMonitorLimit,
+    setRoleActiveMonitorLimit,
     setUserRole,
+    setUserActiveMonitorLimit,
     stopSingleUserMonitor,
     stopUserActiveMonitors,
 } from "@/actions/admin";
@@ -67,6 +72,12 @@ type UserRow = {
     monitors: UserMonitor[];
 };
 
+type MonitorLimits = {
+    global: number | null;
+    roles: Record<string, number | null>;
+    users: Record<string, number | null>;
+};
+
 const ROLES = [
     {
         value: "free",
@@ -87,6 +98,8 @@ const ROLES = [
         color: "bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400",
     },
 ] as const;
+
+const LIMIT_ROLES = ROLES.filter((role) => role.value !== "admin");
 
 function getRoleBadge(role: string) {
     const r = ROLES.find((r) => r.value === role) ?? ROLES[0];
@@ -109,12 +122,22 @@ function formatCreatedAt(value: Date | null) {
     }).format(new Date(value));
 }
 
+function limitInputValue(value: number | null | undefined) {
+    return value === null || value === undefined ? "" : String(value);
+}
+
+function formatLimit(value: number | null) {
+    return value === null ? "Unlimited" : `${value} active`;
+}
+
 export function AdminClient({
     users: initialUsers,
     currentUserId,
+    monitorLimits: initialMonitorLimits,
 }: {
     users: UserRow[];
     currentUserId: string;
+    monitorLimits: MonitorLimits;
 }) {
     const [users, setUsers] = useState<UserRow[]>(initialUsers);
     const [selected, setSelected] = useState<UserRow | null>(null);
@@ -126,6 +149,23 @@ export function AdminClient({
     const [stoppingMonitorId, setStoppingMonitorId] = useState<number | null>(
         null,
     );
+    const [monitorLimits, setMonitorLimits] = useState<MonitorLimits>(
+        initialMonitorLimits,
+    );
+    const [globalLimitInput, setGlobalLimitInput] = useState(
+        limitInputValue(initialMonitorLimits.global),
+    );
+    const [roleLimitInputs, setRoleLimitInputs] = useState<
+        Record<string, string>
+    >(
+        Object.fromEntries(
+            LIMIT_ROLES.map((role) => [
+                role.value,
+                limitInputValue(initialMonitorLimits.roles[role.value]),
+            ]),
+        ),
+    );
+    const [userLimitInput, setUserLimitInput] = useState("");
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const filteredUsers = users.filter((user) => {
@@ -142,9 +182,32 @@ export function AdminClient({
     const premiumUsers = users.filter((u) => u.role === "premium").length;
     const adminUsers = users.filter((u) => u.role === "admin").length;
 
+    const getEffectiveLimit = (user: UserRow) => {
+        if (user.role === "admin") {
+            return { value: null, source: "Admin" };
+        }
+
+        const userLimit = monitorLimits.users[user.id];
+        if (userLimit !== null && userLimit !== undefined) {
+            return { value: userLimit, source: "User" };
+        }
+
+        const roleLimit = monitorLimits.roles[user.role];
+        if (roleLimit !== null && roleLimit !== undefined) {
+            return { value: roleLimit, source: "Role" };
+        }
+
+        if (monitorLimits.global !== null) {
+            return { value: monitorLimits.global, source: "Global" };
+        }
+
+        return { value: null, source: "Unlimited" };
+    };
+
     const openUserDetails = (user: UserRow) => {
         setSelected(user);
         setPendingRole(user.role);
+        setUserLimitInput(limitInputValue(monitorLimits.users[user.id]));
         setIsDetailsOpen(true);
     };
 
@@ -188,6 +251,83 @@ export function AdminClient({
                 return "Failed to update role";
             },
         });
+    };
+
+    const handleSaveGlobalLimit = async () => {
+        const previous = monitorLimits.global;
+        const next = globalLimitInput.trim()
+            ? Number(globalLimitInput.trim())
+            : null;
+
+        setMonitorLimits((prev) => ({ ...prev, global: next }));
+        try {
+            await setGlobalActiveMonitorLimit(globalLimitInput);
+            toast.success("Global monitor limit saved");
+        } catch (error) {
+            setMonitorLimits((prev) => ({ ...prev, global: previous }));
+            setGlobalLimitInput(limitInputValue(previous));
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to save global monitor limit",
+            );
+        }
+    };
+
+    const handleSaveRoleLimit = async (role: string) => {
+        const previous = monitorLimits.roles[role] ?? null;
+        const input = roleLimitInputs[role] ?? "";
+        const next = input.trim() ? Number(input.trim()) : null;
+
+        setMonitorLimits((prev) => ({
+            ...prev,
+            roles: { ...prev.roles, [role]: next },
+        }));
+        try {
+            await setRoleActiveMonitorLimit(role, input);
+            toast.success(`${role} monitor limit saved`);
+        } catch (error) {
+            setMonitorLimits((prev) => ({
+                ...prev,
+                roles: { ...prev.roles, [role]: previous },
+            }));
+            setRoleLimitInputs((prev) => ({
+                ...prev,
+                [role]: limitInputValue(previous),
+            }));
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to save role monitor limit",
+            );
+        }
+    };
+
+    const handleSaveUserLimit = async () => {
+        if (!selected) return;
+
+        const previous = monitorLimits.users[selected.id] ?? null;
+        const next = userLimitInput.trim() ? Number(userLimitInput.trim()) : null;
+
+        setMonitorLimits((prev) => ({
+            ...prev,
+            users: { ...prev.users, [selected.id]: next },
+        }));
+        try {
+            await setUserActiveMonitorLimit(selected.id, userLimitInput);
+            toast.success("User monitor limit saved");
+        } catch (error) {
+            setMonitorLimits((prev) => ({
+                ...prev,
+                users: { ...prev.users, [selected.id]: previous },
+            }));
+            setUserLimitInput(limitInputValue(previous));
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to save user monitor limit",
+            );
+        }
     };
 
     const handleStopUserMonitors = async () => {
@@ -297,6 +437,9 @@ export function AdminClient({
             (sum, monitor) => sum + monitor._count.items,
             0,
         ) ?? 0;
+    const selectedEffectiveLimit = selected
+        ? getEffectiveLimit(selected)
+        : { value: null, source: "Unlimited" };
 
     return (
         <div className="space-y-8">
@@ -377,6 +520,82 @@ export function AdminClient({
                 </Card>
             </div>
 
+            <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                        <p className="text-foreground text-sm font-semibold">
+                            Active Monitor Limits
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                            Empty values mean unlimited. Existing running
+                            monitors are not paused automatically.
+                        </p>
+                    </div>
+                    <div className="bg-primary/10 text-primary rounded-lg p-2">
+                        <Gauge className="h-4 w-4" />
+                    </div>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="global-monitor-limit">
+                            Global default
+                        </Label>
+                        <div className="flex gap-2">
+                            <Input
+                                id="global-monitor-limit"
+                                type="number"
+                                min={0}
+                                value={globalLimitInput}
+                                onChange={(event) =>
+                                    setGlobalLimitInput(event.target.value)
+                                }
+                                placeholder="Unlimited"
+                            />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleSaveGlobalLimit}
+                            >
+                                Save
+                            </Button>
+                        </div>
+                    </div>
+
+                    {LIMIT_ROLES.map((role) => (
+                        <div key={role.value} className="space-y-2">
+                            <Label htmlFor={`role-monitor-limit-${role.value}`}>
+                                {role.label}
+                            </Label>
+                            <div className="flex gap-2">
+                                <Input
+                                    id={`role-monitor-limit-${role.value}`}
+                                    type="number"
+                                    min={0}
+                                    value={roleLimitInputs[role.value] ?? ""}
+                                    onChange={(event) =>
+                                        setRoleLimitInputs((prev) => ({
+                                            ...prev,
+                                            [role.value]: event.target.value,
+                                        }))
+                                    }
+                                    placeholder="Global"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() =>
+                                        handleSaveRoleLimit(role.value)
+                                    }
+                                >
+                                    Save
+                                </Button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
             <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
                 <div className="border-border/60 flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -412,6 +631,9 @@ export function AdminClient({
                                     Monitors
                                 </th>
                                 <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
+                                    Limit
+                                </th>
+                                <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
                                     Proxy Groups
                                 </th>
                                 <th className="text-muted-foreground px-5 py-3 text-right text-[11px] font-medium tracking-wider uppercase">
@@ -420,12 +642,14 @@ export function AdminClient({
                             </tr>
                         </thead>
                         <tbody className="divide-border/50 divide-y">
-                            {filteredUsers.map((user) => (
-                                <tr
-                                    key={user.id}
-                                    className="hover:bg-muted/40 cursor-pointer transition-colors"
-                                    onClick={() => openUserDetails(user)}
-                                >
+                            {filteredUsers.map((user) => {
+                                const effectiveLimit = getEffectiveLimit(user);
+                                return (
+                                    <tr
+                                        key={user.id}
+                                        className="hover:bg-muted/40 cursor-pointer transition-colors"
+                                        onClick={() => openUserDetails(user)}
+                                    >
                                     <td className="px-5 py-3.5">
                                         <div className="flex items-center gap-3">
                                             {user.image ? (
@@ -458,6 +682,18 @@ export function AdminClient({
                                             <Monitor className="text-muted-foreground h-3.5 w-3.5" />
                                             {user._count.monitors}
                                         </span>
+                                    </td>
+                                    <td className="px-5 py-3.5 text-center">
+                                        <div className="flex flex-col items-center gap-1">
+                                            <span className="text-foreground text-sm">
+                                                {formatLimit(
+                                                    effectiveLimit.value,
+                                                )}
+                                            </span>
+                                            <span className="text-muted-foreground text-[10px] uppercase">
+                                                {effectiveLimit.source}
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="px-5 py-3.5 text-center">
                                         <span className="text-foreground inline-flex items-center gap-1 text-sm">
@@ -501,12 +737,13 @@ export function AdminClient({
                                             </Button>
                                         </div>
                                     </td>
-                                </tr>
-                            ))}
+                                    </tr>
+                                );
+                            })}
                             {filteredUsers.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={5}
+                                        colSpan={6}
                                         className="px-5 py-12 text-center"
                                     >
                                         <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
@@ -665,6 +902,88 @@ export function AdminClient({
                                         <PauseCircle className="mr-1.5 h-3.5 w-3.5" />
                                         Stop Running Monitors
                                     </Button>
+                                </div>
+                            </div>
+
+                            <div className="border-border/60 bg-card rounded-xl border px-4 py-4 sm:px-5">
+                                <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] md:items-center">
+                                    <div className="min-w-0 space-y-3">
+                                        <div>
+                                            <p className="text-foreground text-sm font-semibold">
+                                                Active Monitor Limit
+                                            </p>
+                                            <p className="text-muted-foreground mt-1 text-xs">
+                                                Empty override uses the role or
+                                                global fallback.
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Badge
+                                                variant="outline"
+                                                className="rounded-md px-2 py-1 text-[11px]"
+                                            >
+                                                Effective:{" "}
+                                                {formatLimit(
+                                                    selectedEffectiveLimit.value,
+                                                )}
+                                            </Badge>
+                                            <Badge
+                                                variant="secondary"
+                                                className="rounded-md px-2 py-1 text-[11px]"
+                                            >
+                                                Source:{" "}
+                                                {selectedEffectiveLimit.source}
+                                            </Badge>
+                                            <Badge
+                                                variant="secondary"
+                                                className="rounded-md px-2 py-1 text-[11px]"
+                                            >
+                                                Running:{" "}
+                                                {
+                                                    selectedActiveMonitors.length
+                                                }
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                    {selected.role === "admin" ? (
+                                        <div className="border-border/60 bg-muted/30 text-muted-foreground rounded-lg border px-3 py-2 text-xs">
+                                            Admin accounts are always unlimited.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <Label
+                                                htmlFor="user-monitor-limit"
+                                                className="text-xs"
+                                            >
+                                                User override
+                                            </Label>
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    id="user-monitor-limit"
+                                                    type="number"
+                                                    min={0}
+                                                    className="h-10"
+                                                    value={userLimitInput}
+                                                    onChange={(event) =>
+                                                        setUserLimitInput(
+                                                            event.target.value,
+                                                        )
+                                                    }
+                                                    placeholder="Role/global"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="h-10 shrink-0 px-4"
+                                                    onClick={
+                                                        handleSaveUserLimit
+                                                    }
+                                                >
+                                                    Save
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

@@ -8,6 +8,7 @@ import { isValidDiscordWebhook } from "@/lib/validation";
 import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 import { normalizeQueryDelayMs } from "@/lib/monitor-delay";
+import { getMonitorActivationState } from "@/lib/monitor-limits";
 
 function normalizeAntiKeywords(value: FormDataEntryValue | null) {
     const normalized = String(value ?? "").trim();
@@ -105,6 +106,9 @@ export async function createMonitor(formData: FormData) {
         ? await getTelegramConnection(session.user.id)
         : null;
 
+    const activationState = await getMonitorActivationState(session.user.id);
+    const initialStatus = activationState.canActivate ? "active" : "paused";
+
     const monitor = await db.monitors.create({
         data: {
             userId: session.user.id,
@@ -124,12 +128,16 @@ export async function createMonitor(formData: FormData) {
             discord_webhook: urlToSave,
             telegram_active: Boolean(telegramConnection),
             proxy_group_id: proxyGroupId,
-            status: "active",
+            status: initialStatus,
             webhook_active: urlToSave ? true : false,
         },
     });
 
-    if (monitor.discord_webhook && monitor.webhook_active) {
+    if (
+        initialStatus === "active" &&
+        monitor.discord_webhook &&
+        monitor.webhook_active
+    ) {
         try {
             const payload = {
                 username: "Vintrack Monitor",
@@ -160,10 +168,16 @@ export async function createMonitor(formData: FormData) {
         }
     }
 
-    await sendTelegramStatusIfConfigured(monitor, "created");
+    if (initialStatus === "active") {
+        await sendTelegramStatusIfConfigured(monitor, "created");
+    }
 
     revalidatePath("/dashboard");
-    return { redirectTo: `/monitors/${monitor.id}` };
+    return {
+        redirectTo: `/monitors/${monitor.id}`,
+        started: initialStatus === "active",
+        activeLimit: activationState.activeLimit,
+    };
 }
 
 export async function updateMonitor(id: number, formData: FormData) {
@@ -377,6 +391,17 @@ export async function toggleMonitorStatus(id: number, currentStatus: string) {
     if (!session?.user?.id) throw new Error("Unauthorized");
 
     const newStatus = currentStatus === "active" ? "paused" : "active";
+
+    if (newStatus === "active") {
+        const activationState = await getMonitorActivationState(
+            session.user.id,
+        );
+        if (!activationState.canActivate) {
+            throw new Error(
+                `Active monitor limit reached (${activationState.activeCount}/${activationState.activeLimit}). Pause another monitor before resuming this one.`,
+            );
+        }
+    }
 
     const monitor = await db.monitors.update({
         where: { id, userId: session.user.id },
