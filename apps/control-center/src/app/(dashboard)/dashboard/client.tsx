@@ -333,13 +333,15 @@ export function DashboardClient({
         toast.promise(toggleMonitor(id, currentStatus), {
             loading: "Updating...",
             success: `Monitor ${actionText}`,
-            error: () => {
+            error: (error) => {
                 setMonitors((prev) =>
                     prev.map((m) =>
                         m.id === id ? { ...m, status: currentStatus } : m,
                     ),
                 );
-                return "Failed to update monitor";
+                return error instanceof Error
+                    ? error.message
+                    : "Failed to update monitor";
             },
         });
     };

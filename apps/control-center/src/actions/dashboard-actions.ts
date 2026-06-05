@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { isValidDiscordWebhook } from "@/lib/validation";
 import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
+import { getMonitorActivationState } from "@/lib/monitor-limits";
 
 async function sendTelegramStatusIfConfigured(
     monitor: { name: string; userId: string; telegram_active: boolean },
@@ -86,6 +87,17 @@ export async function toggleMonitor(id: number, currentStatus: string) {
     if (!session?.user) throw new Error("Unauthorized");
 
     const newStatus = currentStatus === "active" ? "paused" : "active";
+
+    if (newStatus === "active") {
+        const activationState = await getMonitorActivationState(
+            session.user.id,
+        );
+        if (!activationState.canActivate) {
+            throw new Error(
+                `Active monitor limit reached (${activationState.activeCount}/${activationState.activeLimit}). Pause another monitor before resuming this one.`,
+            );
+        }
+    }
 
     const monitor = await db.monitors.update({
         where: { id: id, userId: session.user.id },

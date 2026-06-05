@@ -117,7 +117,10 @@ export default function NewMonitorPage() {
         try {
             await toast.promise(createPromise, {
                 loading: "Creating monitor...",
-                success: "Monitor created",
+                success: (result) =>
+                    result.started
+                        ? "Monitor created"
+                        : "Monitor saved paused because your active monitor limit is reached",
                 error: (error) =>
                     error instanceof Error
                         ? error.message
