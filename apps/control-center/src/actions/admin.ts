@@ -13,6 +13,9 @@ import {
     userLimitScope,
 } from "@/lib/monitor-limits";
 
+const SERVER_PROXIES_SETTING_KEY = "server_proxies";
+const VALID_PROXY_SCHEMES = ["http", "https", "socks4", "socks5"];
+
 async function requireAdmin() {
     const session = await auth();
     if (!session?.user?.id) throw new Error("Unauthorized");
@@ -24,6 +27,120 @@ async function requireAdmin() {
 
     if (user?.role !== "admin") throw new Error("Forbidden");
     return session.user.id;
+}
+
+function validateProxyLine(line: string): string | null {
+    line = line.trim();
+    if (!line) return null;
+
+    if (/^(https?|socks[45]):\/\//.test(line)) {
+        try {
+            const url = new URL(line);
+            if (!VALID_PROXY_SCHEMES.includes(url.protocol.replace(":", ""))) {
+                return null;
+            }
+            if (!url.hostname || !url.port) return null;
+            return line;
+        } catch {
+            return null;
+        }
+    }
+
+    const parts = line.split(":");
+
+    if (parts.length >= 4) {
+        const pass = parts[parts.length - 1];
+        const user = parts[parts.length - 2];
+        const port = parts[parts.length - 3];
+        const host = parts.slice(0, parts.length - 3).join(":");
+        if (!host || !port || !user || !pass) return null;
+        if (!/^\d{1,5}$/.test(port)) return null;
+        return `http://${user}:${pass}@${host}:${port}`;
+    }
+
+    if (parts.length === 2 && /^\d{1,5}$/.test(parts[1])) {
+        return `http://${line}`;
+    }
+
+    return null;
+}
+
+function validateProxies(text: string) {
+    const lines = text.split("\n").filter((line) => line.trim().length > 0);
+    const valid: string[] = [];
+    const invalid: string[] = [];
+
+    for (const line of lines) {
+        const parsed = validateProxyLine(line);
+        if (parsed) {
+            valid.push(line.trim());
+        } else {
+            invalid.push(line.trim());
+        }
+    }
+
+    return { valid, invalid, total: lines.length };
+}
+
+export async function getServerProxies() {
+    await requireAdmin();
+
+    const rows = await db.$queryRaw<{ value: string }[]>`
+        SELECT value FROM app_settings WHERE key = ${SERVER_PROXIES_SETTING_KEY}
+    `;
+
+    const proxies = rows[0]?.value ?? "";
+    const proxyCount = proxies
+        .split("\n")
+        .filter((line) => line.trim().length > 0).length;
+
+    return { proxies, proxyCount };
+}
+
+export async function updateServerProxies(formData: FormData) {
+    await requireAdmin();
+
+    const proxies = (formData.get("proxies") as string | null)?.trim() ?? "";
+    const { valid, invalid, total } = validateProxies(proxies);
+
+    if (total > 0 && valid.length === 0) {
+        return {
+            success: false,
+            error: "No valid proxies found. Use format: host:port:user:pass or http://user:pass@host:port",
+        };
+    }
+
+    if (invalid.length > 0) {
+        console.warn(
+            `[admin] server proxies: ${invalid.length}/${total} invalid lines skipped`,
+        );
+    }
+
+    const value = valid.join("\n");
+
+    try {
+        await db.$executeRaw`
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (${SERVER_PROXIES_SETTING_KEY}, ${value}, NOW())
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value,
+                updated_at = NOW()
+        `;
+    } catch (error) {
+        console.error("[admin] failed to update server proxies", error);
+        return {
+            success: false,
+            error: "Failed to save server proxies. Make sure database migrations have been applied.",
+        };
+    }
+
+    revalidatePath("/admin");
+
+    return {
+        success: true,
+        proxyCount: valid.length,
+        skippedCount: invalid.length,
+    };
 }
 
 export async function getUsers() {

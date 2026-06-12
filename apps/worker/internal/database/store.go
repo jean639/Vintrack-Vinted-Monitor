@@ -126,6 +126,18 @@ func (s *Store) SetUserRegion(userID int64, region string) {
 	}
 }
 
+func (s *Store) GetSettingValue(key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = $1`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
 func (s *Store) SaveItem(item model.Item) error {
 	if item.Size == "" {
 		item.Size = "N/A"

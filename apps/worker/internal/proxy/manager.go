@@ -9,12 +9,14 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type Manager struct {
 	proxies []string
 	index   int
 	mu      sync.Mutex
+	version atomic.Uint64
 }
 
 var validProxySchemes = map[string]bool{
@@ -120,6 +122,14 @@ func Load(filepath string) (*Manager, error) {
 }
 
 func FromString(raw string) *Manager {
+	proxies, skipped := parseProxyLines(raw)
+	if skipped > 0 {
+		log.Printf("⚠ Skipped %d invalid proxy lines from user group", skipped)
+	}
+	return &Manager{proxies: proxies}
+}
+
+func parseProxyLines(raw string) ([]string, int) {
 	var proxies []string
 	var skipped int
 	for _, line := range strings.Split(raw, "\n") {
@@ -130,10 +140,31 @@ func FromString(raw string) *Manager {
 			skipped++
 		}
 	}
+	return proxies, skipped
+}
+
+func (m *Manager) ReplaceFromString(raw string) bool {
+	proxies, skipped := parseProxyLines(raw)
 	if skipped > 0 {
-		log.Printf("⚠ Skipped %d invalid proxy lines from user group", skipped)
+		log.Printf("⚠ Skipped %d invalid proxy lines from server setting", skipped)
 	}
-	return &Manager{proxies: proxies}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if strings.Join(m.proxies, "\n") == strings.Join(proxies, "\n") {
+		return false
+	}
+
+	m.proxies = proxies
+	m.index = 0
+	m.version.Add(1)
+	log.Printf("Reloaded %d valid server proxies", len(proxies))
+	return true
+}
+
+func (m *Manager) Version() uint64 {
+	return m.version.Load()
 }
 
 func (m *Manager) Count() int {

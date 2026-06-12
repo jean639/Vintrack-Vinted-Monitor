@@ -71,11 +71,21 @@ export default async function AdminPage() {
         ...users.map((user) => userLimitScope(user.id)),
     ];
     const limits = await getMonitorLimits(limitScopes);
+    let serverProxies = "";
+    try {
+        const serverProxyRows = await db.$queryRaw<{ value: string }[]>`
+            SELECT value FROM app_settings WHERE key = ${"server_proxies"}
+        `;
+        serverProxies = serverProxyRows[0]?.value ?? "";
+    } catch (error) {
+        console.error("[admin] failed to load server proxies", error);
+    }
 
     return (
         <AdminClient
             users={users}
             currentUserId={session.user.id}
+            serverProxies={serverProxies}
             monitorLimits={{
                 global: limits.get(GLOBAL_MONITOR_LIMIT_SCOPE) ?? null,
                 roles: Object.fromEntries(
