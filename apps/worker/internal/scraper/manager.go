@@ -38,6 +38,9 @@ func (m *Manager) Sync(ctx context.Context) {
 	activeIDs := make(map[int]bool, len(monitors))
 
 	for _, mon := range monitors {
+		if mon.ProxyGroupID == nil {
+			mon.ServerProxyVersion = m.engine.ServerProxyVersion()
+		}
 		activeIDs[mon.ID] = true
 		hash := monitorConfigFingerprint(mon)
 

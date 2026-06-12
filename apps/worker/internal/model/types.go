@@ -35,6 +35,7 @@ type Monitor struct {
 	ProxyGroupTxBytes    int64
 	ProxyGroupResetAt    sql.NullTime
 	Proxies              sql.NullString
+	ServerProxyVersion   uint64
 	CreatedAt            time.Time
 }
 

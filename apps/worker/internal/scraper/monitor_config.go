@@ -22,8 +22,18 @@ func monitorConfigFingerprint(mon model.Monitor) string {
 		nullableString(mon.StatusIDs),
 		mon.Region,
 		nullableString(mon.AllowedCountries),
-		nullString(mon.Proxies),
+		proxyFingerprint(mon),
 	)
+}
+
+func proxyFingerprint(mon model.Monitor) string {
+	if mon.Proxies.Valid && mon.Proxies.String != "" {
+		return nullString(mon.Proxies)
+	}
+	if mon.ProxyGroupID == nil {
+		return fmt.Sprintf("server:%d", mon.ServerProxyVersion)
+	}
+	return nullString(mon.Proxies)
 }
 
 func nullableInt(v *int) string {

@@ -53,6 +53,7 @@ func main() {
 			time.Sleep(time.Second)
 			return
 		case <-ticker.C:
+			refreshServerProxies(store, proxyManager)
 			mgr.Sync(ctx)
 		}
 	}
@@ -78,8 +79,20 @@ func initComponents() (*cache.RedisCache, *database.Store, *proxy.Manager) {
 		log.Printf("Proxies: %v (continuing without)", err)
 		proxyManager = &proxy.Manager{}
 	}
+	refreshServerProxies(store, proxyManager)
 
 	return redisCache, store, proxyManager
+}
+
+func refreshServerProxies(store *database.Store, proxyManager *proxy.Manager) {
+	value, ok, err := store.GetSettingValue("server_proxies")
+	if err != nil {
+		log.Printf("server proxy setting refresh failed: %v", err)
+		return
+	}
+	if ok {
+		proxyManager.ReplaceFromString(value)
+	}
 }
 
 func mustEnv(key string) string {

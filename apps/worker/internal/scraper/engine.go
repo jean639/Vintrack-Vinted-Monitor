@@ -54,6 +54,10 @@ func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
 	}
 }
 
+func (e *Engine) ServerProxyVersion() uint64 {
+	return e.serverProxy.Version()
+}
+
 func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxyKey string, trafficRecorder func(txBytes int64, rxBytes int64), proxyLabel string) *SellerEnricher {
 	key := fmt.Sprintf("%s:%s", domain, proxyKey)
 
@@ -223,6 +227,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				if updated.Status != "active" {
 					log.Printf("[%d] paused via dashboard", m.ID)
 					return
+				}
+				if updated.ProxyGroupID == nil {
+					updated.ServerProxyVersion = e.ServerProxyVersion()
 				}
 				if monitorConfigFingerprint(updated) != monitorConfigFingerprint(m) {
 					log.Printf("[%d] config changed, will be restarted by sync loop", m.ID)
