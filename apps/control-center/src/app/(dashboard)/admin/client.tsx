@@ -7,6 +7,7 @@ import {
     User,
     Monitor,
     Globe,
+    Server,
     Search,
     Users,
     Sparkles,
@@ -42,6 +43,7 @@ import {
     setRoleActiveMonitorLimit,
     setUserRole,
     setUserActiveMonitorLimit,
+    updateServerProxies,
     stopSingleUserMonitor,
     stopUserActiveMonitors,
 } from "@/actions/admin";
@@ -133,10 +135,12 @@ function formatLimit(value: number | null) {
 export function AdminClient({
     users: initialUsers,
     currentUserId,
+    serverProxies: initialServerProxies,
     monitorLimits: initialMonitorLimits,
 }: {
     users: UserRow[];
     currentUserId: string;
+    serverProxies: string;
     monitorLimits: MonitorLimits;
 }) {
     const [users, setUsers] = useState<UserRow[]>(initialUsers);
@@ -166,6 +170,8 @@ export function AdminClient({
         ),
     );
     const [userLimitInput, setUserLimitInput] = useState("");
+    const [serverProxies, setServerProxies] = useState(initialServerProxies);
+    const [isSavingServerProxies, setIsSavingServerProxies] = useState(false);
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const filteredUsers = users.filter((user) => {
@@ -426,6 +432,43 @@ export function AdminClient({
         }
     };
 
+    const handleSaveServerProxies = async () => {
+        const previous = serverProxies;
+        const formData = new FormData();
+        formData.set("proxies", serverProxies);
+        setIsSavingServerProxies(true);
+
+        try {
+            const result = await updateServerProxies(formData);
+            if (!result.success) {
+                toast.error(result.error);
+                return;
+            }
+            const skippedCount = result.skippedCount ?? 0;
+            toast.success(
+                `Server proxies saved (${result.proxyCount} active${
+                    skippedCount > 0 ? `, ${skippedCount} skipped` : ""
+                })`,
+            );
+            setServerProxies(
+                serverProxies
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .join("\n"),
+            );
+        } catch (error) {
+            setServerProxies(previous);
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to save server proxies",
+            );
+        } finally {
+            setIsSavingServerProxies(false);
+        }
+    };
+
     const selectedActiveMonitors =
         selected?.monitors.filter((monitor) => monitor.status === "active") ??
         [];
@@ -593,6 +636,55 @@ export function AdminClient({
                             </div>
                         </div>
                     ))}
+                </div>
+            </div>
+
+            <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p className="text-foreground text-sm font-semibold">
+                            Server Proxies
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                            Used by premium and admin monitors when they select
+                            Server Proxies. One proxy per line.
+                        </p>
+                    </div>
+                    <div className="bg-primary/10 text-primary rounded-lg p-2">
+                        <Server className="h-4 w-4" />
+                    </div>
+                </div>
+                <div className="flex flex-col gap-3">
+                    <textarea
+                        value={serverProxies}
+                        onChange={(event) =>
+                            setServerProxies(event.target.value)
+                        }
+                        spellCheck={false}
+                        placeholder="http://user:pass@host:port&#10;host:port:user:pass"
+                        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-44 w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-muted-foreground text-xs">
+                            Current input contains{" "}
+                            {
+                                serverProxies
+                                    .split("\n")
+                                    .filter((line) => line.trim().length > 0)
+                                    .length
+                            }{" "}
+                            non-empty lines. The worker refreshes this setting
+                            every sync cycle.
+                        </p>
+                        <Button
+                            type="button"
+                            onClick={handleSaveServerProxies}
+                            disabled={isSavingServerProxies}
+                            className="shrink-0"
+                        >
+                            {isSavingServerProxies ? "Saving..." : "Save Proxies"}
+                        </Button>
+                    </div>
                 </div>
             </div>
 
