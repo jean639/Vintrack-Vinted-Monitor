@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
+    startAllMonitors,
     stopAllMonitors,
     toggleMonitor,
     updateMonitorWebhook,
@@ -322,6 +323,25 @@ export function DashboardClient({
         });
     };
 
+    const handleStartAll = async () => {
+        toast.promise(startAllMonitors(), {
+            loading: "Starting monitors...",
+            success: (result) => {
+                const startedIds = new Set(result.startedMonitorIds);
+                setMonitors((prev) =>
+                    prev.map((m) =>
+                        startedIds.has(m.id) ? { ...m, status: "active" } : m,
+                    ),
+                );
+                return result.message;
+            },
+            error: (error) =>
+                error instanceof Error
+                    ? error.message
+                    : "Failed to start monitors",
+        });
+    };
+
     const handleToggle = async (id: number, currentStatus: string) => {
         const newStatus = currentStatus === "active" ? "paused" : "active";
         const actionText = newStatus === "active" ? "Resumed" : "Paused";
@@ -387,6 +407,7 @@ export function DashboardClient({
     };
 
     const activeCount = monitors.filter((m) => m.status === "active").length;
+    const pausedCount = monitors.filter((m) => m.status === "paused").length;
     const totalItems = monitors.reduce((sum, m) => sum + m._count.items, 0);
 
     return (
@@ -402,6 +423,16 @@ export function DashboardClient({
                 </div>
 
                 <div className="flex w-full items-center gap-2 sm:w-auto">
+                    {pausedCount > 0 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleStartAll}
+                            className="flex-1 gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 sm:flex-none dark:border-emerald-500/20 dark:bg-transparent dark:text-emerald-400 dark:hover:bg-emerald-500/10"
+                        >
+                            <PlayCircle className="h-3.5 w-3.5" /> Start All
+                        </Button>
+                    )}
                     {activeCount > 0 && (
                         <Button
                             variant="outline"

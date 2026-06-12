@@ -82,6 +82,122 @@ export async function stopAllMonitors() {
     return { success: true, message: "All monitors stopped successfully." };
 }
 
+export async function startAllMonitors() {
+    const session = await auth();
+    if (!session?.user) throw new Error("Unauthorized");
+
+    const activationState = await getMonitorActivationState(session.user.id);
+    const availableSlots =
+        activationState.activeLimit === null
+            ? null
+            : Math.max(
+                  activationState.activeLimit - activationState.activeCount,
+                  0,
+              );
+
+    if (availableSlots === 0) {
+        return {
+            success: true,
+            startedCount: 0,
+            skippedCount: await db.monitors.count({
+                where: { userId: session.user.id, status: "paused" },
+            }),
+            startedMonitorIds: [] as number[],
+            activeLimit: activationState.activeLimit,
+            activeCount: activationState.activeCount,
+            message: `Active monitor limit reached (${activationState.activeCount}/${activationState.activeLimit}).`,
+        };
+    }
+
+    const monitorsToStart = await db.monitors.findMany({
+        where: { userId: session.user.id, status: "paused" },
+        orderBy: { created_at: "desc" },
+        ...(availableSlots === null ? {} : { take: availableSlots }),
+    });
+
+    if (monitorsToStart.length === 0) {
+        return {
+            success: true,
+            startedCount: 0,
+            skippedCount: 0,
+            startedMonitorIds: [] as number[],
+            activeLimit: activationState.activeLimit,
+            activeCount: activationState.activeCount,
+            message: "No paused monitors to start.",
+        };
+    }
+
+    await db.monitors.updateMany({
+        where: {
+            userId: session.user.id,
+            status: "paused",
+            id: { in: monitorsToStart.map((monitor) => monitor.id) },
+        },
+        data: { status: "active" },
+    });
+
+    const skippedCount =
+        availableSlots === null
+            ? 0
+            : await db.monitors.count({
+                  where: { userId: session.user.id, status: "paused" },
+              });
+
+    Promise.all(
+        monitorsToStart.map(async (monitor) => {
+            if (monitor.discord_webhook && monitor.webhook_active) {
+                try {
+                    const payload = {
+                        username: "Vintrack Monitor",
+                        avatar_url:
+                            "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+                        embeds: [
+                            {
+                                title: "▶️ Monitor Started",
+                                description: `The monitor **${monitor.name}** has been started via Start All.`,
+                                color: 3066993,
+                                footer: {
+                                    text: "Vintrack • Status Update",
+                                    icon_url:
+                                        "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+                                },
+                                timestamp: new Date().toISOString(),
+                            },
+                        ],
+                    };
+
+                    await fetch(monitor.discord_webhook, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                } catch (error) {
+                    console.error(
+                        "Failed to send status webhook for",
+                        monitor.id,
+                        error,
+                    );
+                }
+            }
+            await sendTelegramStatusIfConfigured(monitor, "started");
+        }),
+    ).catch(console.error);
+
+    revalidatePath("/dashboard");
+    return {
+        success: true,
+        startedCount: monitorsToStart.length,
+        skippedCount,
+        startedMonitorIds: monitorsToStart.map((monitor) => monitor.id),
+        activeLimit: activationState.activeLimit,
+        activeCount: activationState.activeCount + monitorsToStart.length,
+        message:
+            skippedCount > 0
+                ? `Started ${monitorsToStart.length} monitor${monitorsToStart.length === 1 ? "" : "s"}. ${skippedCount} skipped because of the active monitor limit.`
+                : `Started ${monitorsToStart.length} monitor${monitorsToStart.length === 1 ? "" : "s"}.`,
+    };
+}
+
 export async function toggleMonitor(id: number, currentStatus: string) {
     const session = await auth();
     if (!session?.user) throw new Error("Unauthorized");
