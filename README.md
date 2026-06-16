@@ -180,7 +180,7 @@ Two-tier proxy architecture designed for scale:
 
 ### Multi-User & Roles
 
-Built-in role system with Discord OAuth:
+Built-in role system with Discord or OIDC authentication:
 | Role | Server Proxies | Own Proxies | Admin Panel |
 |------|:-:|:-:|:-:|
 | **Free** | ❌ | ✅ | ❌ |
@@ -280,7 +280,7 @@ Need help, want to exchange setups with other users, or report a bug?
 | **Vinted Service** | Go 1.25, TLS client, Redis sessions             | Account linking & item actions |
 | **Database**       | PostgreSQL 15 + Prisma ORM                      | Persistent storage             |
 | **Cache**          | Redis 7                                         | Deduplication & SSE pub/sub    |
-| **Auth**           | NextAuth.js v5 (Discord OAuth2)                 | Authentication                 |
+| **Auth**           | NextAuth.js v5 (Discord + OIDC)                 | Authentication                 |
 | **Proxy**          | tls-client with SOCKS4/5 & HTTP(S)              | Anti-detection                 |
 | **Reverse Proxy**  | Caddy 2                                         | Auto HTTPS via Let's Encrypt   |
 | **Deployment**     | Docker Compose                                  | One-command orchestration      |
@@ -296,7 +296,7 @@ Use this section if you want to run your own Vintrack instance instead of using 
 Before starting, prepare:
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2
-- [Discord Developer App](https://discord.com/developers/applications) (for OAuth2 login)
+- [Discord Developer App](https://discord.com/developers/applications) (for OAuth2 login) **or** an OIDC provider (e.g. Authentik, Google, Keycloak)
 - Proxies for Vinted monitoring (residential recommended)
 - A public HTTPS domain for production
 - Optional: a Telegram bot from [@BotFather](https://t.me/BotFather) if you want Telegram notifications
@@ -356,6 +356,25 @@ In the Discord Developer Portal:
    - Production: `https://your-domain.com/api/auth/callback/discord`
 4. Copy the client ID and client secret into `.env`.
 
+### 3b. Configure OIDC (Optional)
+
+If you want to use an OIDC-compliant identity provider (Authentik, Google, Keycloak, etc.) instead of Discord:
+
+1. Create an application in your OIDC provider.
+2. Set the callback URL:
+   - Local: `http://localhost:3000/api/auth/callback/oidc`
+   - Production: `https://your-domain.com/api/auth/callback/oidc`
+3. Add the following to your `.env` file:
+
+```env
+AUTH_OIDC_ISSUER=https://your-oidc-provider.com/application/o/your-app/
+AUTH_OIDC_CLIENT_ID=your-oidc-client-id
+AUTH_OIDC_CLIENT_SECRET=your-oidc-client-secret
+AUTH_OIDC_NAME=Authentik
+```
+
+The `AUTH_OIDC_NAME` value is the display name shown on the login button (defaults to "SSO"). When all three OIDC variables are set, OIDC replaces Discord as the login method — the Discord button is hidden and Discord env vars are ignored. Existing Discord-only installations are unaffected.
+
 ### 4. Add Proxies
 
 Add one proxy per line:
@@ -399,6 +418,13 @@ AUTH_DISCORD_SECRET=your-discord-client-secret
 # Required in production — public app URL used by auth and dashboard links
 AUTH_URL=https://your-domain.com
 DASHBOARD_URL=https://your-domain.com
+
+# Optional — OIDC authentication (replaces Discord, e.g. Authentik, Google, Keycloak)
+# Set these to use an OIDC provider instead of Discord. When set, Discord is disabled.
+AUTH_OIDC_ISSUER=https://your-oidc-provider.com/application/o/your-app/
+AUTH_OIDC_CLIENT_ID=your-oidc-client-id
+AUTH_OIDC_CLIENT_SECRET=your-oidc-client-secret
+AUTH_OIDC_NAME=Authentik
 
 # Optional — Telegram notifications
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token

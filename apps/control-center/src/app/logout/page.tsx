@@ -85,7 +85,7 @@ export default async function LogoutPage() {
                                     </span>
                                     . Logging out will close access to all
                                     protected dashboard routes until you
-                                    authenticate again with Discord.
+                                    authenticate again with your provider.
                                 </p>
                             </div>
                         </div>

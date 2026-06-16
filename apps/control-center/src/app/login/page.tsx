@@ -1,20 +1,38 @@
 import { auth, signIn } from "@/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Bell, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import {
+    ArrowRight,
+    Bell,
+    KeyRound,
+    ShieldCheck,
+    Sparkles,
+    Zap,
+} from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
     title: "Login | Vintrack",
-    description: "Sign in with Discord to access the Vintrack dashboard.",
+    description: "Sign in to access the Vintrack dashboard.",
 };
+
+const oidcConfigured =
+    !!process.env.AUTH_OIDC_ISSUER &&
+    !!process.env.AUTH_OIDC_CLIENT_ID &&
+    !!process.env.AUTH_OIDC_CLIENT_SECRET;
 
 async function signInWithDiscord() {
     "use server";
 
     await signIn("discord", { redirectTo: "/dashboard" });
+}
+
+async function signInWithOidc() {
+    "use server";
+
+    await signIn("oidc", { redirectTo: "/dashboard" });
 }
 
 const highlights = [
@@ -89,9 +107,9 @@ export default async function LoginPage() {
                             Secure access for the whole dashboard.
                         </h1>
                         <p className="text-muted-foreground max-w-xl text-base leading-8 sm:text-lg">
-                            Sign in with Discord to open monitors, feed, chats,
-                            likes, proxies and account tools from one protected
-                            workspace.
+                            {oidcConfigured
+                                ? `Sign in with ${process.env.AUTH_OIDC_NAME || "SSO"} to open monitors, feed, chats, likes, proxies and account tools from one protected workspace.`
+                                : "Sign in with Discord to open monitors, feed, chats, likes, proxies and account tools from one protected workspace."}
                         </p>
                     </div>
 
@@ -121,7 +139,9 @@ export default async function LoginPage() {
                         <div className="mb-8 flex items-start justify-between gap-4">
                             <div>
                                 <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.28em] uppercase">
-                                    Discord Access
+                                    {oidcConfigured
+                                        ? `${process.env.AUTH_OIDC_NAME || "SSO"} Access`
+                                        : "Discord Access"}
                                 </p>
                                 <h2 className="mt-2 text-3xl font-bold tracking-tight">
                                     Enter Vintrack
@@ -134,52 +154,75 @@ export default async function LoginPage() {
 
                         <div className="border-border/70 bg-background/70 space-y-4 rounded-[1.5rem] border p-5">
                             <p className="text-muted-foreground text-sm leading-7">
-                                Use your Discord account to authenticate. After
-                                login you will be redirected directly into the
-                                dashboard.
+                                {oidcConfigured
+                                    ? `Use your ${process.env.AUTH_OIDC_NAME || "SSO"} account to authenticate. After login you will be redirected directly into the dashboard.`
+                                    : "Use your Discord account to authenticate. After login you will be redirected directly into the dashboard."}
                             </p>
 
-                            <form action={signInWithDiscord}>
-                                <Button
-                                    type="submit"
-                                    size="lg"
-                                    className="h-12 w-full justify-between rounded-2xl px-5 text-sm font-semibold shadow-lg shadow-slate-950/10"
-                                >
-                                    <span className="flex items-center gap-3">
-                                        <span className="bg-background/20 flex h-8 w-8 items-center justify-center rounded-xl">
-                                            <svg
-                                                aria-hidden="true"
-                                                viewBox="0 0 24 24"
-                                                className="h-4 w-4 fill-current"
-                                            >
-                                                <path d="M20.317 4.369A19.791 19.791 0 0 0 15.558 3c-.206.375-.444.88-.608 1.275a18.27 18.27 0 0 0-5.9 0A12.6 12.6 0 0 0 8.442 3a19.736 19.736 0 0 0-4.76 1.369C.676 8.875-.142 13.27.267 17.602A19.94 19.94 0 0 0 6.13 20.67c.472-.645.892-1.327 1.255-2.043-.688-.26-1.344-.58-1.964-.95.164-.12.325-.245.48-.375 3.788 1.775 7.904 1.775 11.648 0 .158.13.32.255.48.375-.62.372-1.278.69-1.967.95.364.716.784 1.398 1.255 2.043a19.904 19.904 0 0 0 5.864-3.069c.48-5.025-.82-9.38-2.864-13.233ZM8.02 14.928c-1.14 0-2.074-1.046-2.074-2.33 0-1.285.915-2.331 2.074-2.331 1.168 0 2.093 1.055 2.074 2.33 0 1.285-.916 2.331-2.074 2.331Zm7.958 0c-1.14 0-2.073-1.046-2.073-2.33 0-1.285.915-2.331 2.073-2.331 1.169 0 2.094 1.055 2.074 2.33 0 1.285-.905 2.331-2.074 2.331Z" />
-                                            </svg>
+                            {oidcConfigured ? (
+                                <form action={signInWithOidc}>
+                                    <Button
+                                        type="submit"
+                                        size="lg"
+                                        className="h-12 w-full justify-between rounded-2xl px-5 text-sm font-semibold shadow-lg shadow-slate-950/10"
+                                    >
+                                        <span className="flex items-center gap-3">
+                                            <span className="bg-background/20 flex h-8 w-8 items-center justify-center rounded-xl">
+                                                <KeyRound className="h-4 w-4" />
+                                            </span>
+                                            Continue with{" "}
+                                            {process.env.AUTH_OIDC_NAME ||
+                                                "SSO"}
                                         </span>
-                                        Continue with Discord
-                                    </span>
-                                    <ArrowRight className="h-4 w-4" />
-                                </Button>
-                            </form>
+                                        <ArrowRight className="h-4 w-4" />
+                                    </Button>
+                                </form>
+                            ) : (
+                                <form action={signInWithDiscord}>
+                                    <Button
+                                        type="submit"
+                                        size="lg"
+                                        className="h-12 w-full justify-between rounded-2xl px-5 text-sm font-semibold shadow-lg shadow-slate-950/10"
+                                    >
+                                        <span className="flex items-center gap-3">
+                                            <span className="bg-background/20 flex h-8 w-8 items-center justify-center rounded-xl">
+                                                <svg
+                                                    aria-hidden="true"
+                                                    viewBox="0 0 24 24"
+                                                    className="h-4 w-4 fill-current"
+                                                >
+                                                    <path d="M20.317 4.369A19.791 19.791 0 0 0 15.558 3c-.206.375-.444.88-.608 1.275a18.27 18.27 0 0 0-5.9 0A12.6 12.6 0 0 0 8.442 3a19.736 19.736 0 0 0-4.76 1.369C.676 8.875-.142 13.27.267 17.602A19.94 19.94 0 0 0 6.13 20.67c.472-.645.892-1.327 1.255-2.043-.688-.26-1.344-.58-1.964-.95.164-.12.325-.245.48-.375 3.788 1.775 7.904 1.775 11.648 0 .158.13.32.255.48.375-.62.372-1.278.69-1.967.95.364.716.784 1.398 1.255 2.043a19.904 19.904 0 0 0 5.864-3.069c.48-5.025-.82-9.38-2.864-13.233ZM8.02 14.928c-1.14 0-2.074-1.046-2.074-2.33 0-1.285.915-2.331 2.074-2.331 1.168 0 2.093 1.055 2.074 2.33 0 1.285-.916 2.331-2.074 2.331Zm7.958 0c-1.14 0-2.073-1.046-2.073-2.33 0-1.285.915-2.331 2.073-2.331 1.169 0 2.094 1.055 2.074 2.33 0 1.285-.905 2.331-2.074 2.331Z" />
+                                                </svg>
+                                            </span>
+                                            Continue with Discord
+                                        </span>
+                                        <ArrowRight className="h-4 w-4" />
+                                    </Button>
+                                </form>
+                            )}
                         </div>
 
                         <div className="text-muted-foreground mt-6 grid gap-3 text-sm sm:grid-cols-2">
                             <div className="border-border/70 bg-background/55 rounded-2xl border p-4">
                                 <p className="text-foreground font-medium">
-                                    Protected routes
+                                    Single provider
                                 </p>
                                 <p className="mt-1 leading-6">
-                                    `/dashboard`, `/feed`, `/liked`, `/chats`,
-                                    `/proxies`, `/account` and subpages require
-                                    a session.
+                                    {oidcConfigured
+                                        ? `Authentication runs through ${process.env.AUTH_OIDC_NAME || "SSO"} and returns you to the app automatically.`
+                                        : "Authentication runs through Discord and returns you to the app automatically."}
                                 </p>
                             </div>
                             <div className="border-border/70 bg-background/55 rounded-2xl border p-4">
                                 <p className="text-foreground font-medium">
-                                    Single provider
+                                    {oidcConfigured
+                                        ? "Multiple providers"
+                                        : "Single provider"}
                                 </p>
                                 <p className="mt-1 leading-6">
-                                    Authentication runs through Discord and
-                                    returns you to the app automatically.
+                                    {oidcConfigured
+                                        ? "Choose Discord or your organization account to authenticate."
+                                        : "Authentication runs through Discord and returns you to the app automatically."}
                                 </p>
                             </div>
                         </div>
