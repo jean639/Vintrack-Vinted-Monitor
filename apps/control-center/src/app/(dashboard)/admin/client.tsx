@@ -15,6 +15,7 @@ import {
     Clock3,
     Boxes,
     Webhook,
+    ChevronLeft,
     ChevronRight,
     Gauge,
 } from "lucide-react";
@@ -102,6 +103,7 @@ const ROLES = [
 ] as const;
 
 const LIMIT_ROLES = ROLES.filter((role) => role.value !== "admin");
+const USER_PAGE_SIZES = [25, 50, 100] as const;
 
 function getRoleBadge(role: string) {
     const r = ROLES.find((r) => r.value === role) ?? ROLES[0];
@@ -148,7 +150,11 @@ export function AdminClient({
     const [pendingRole, setPendingRole] = useState<string>("");
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+    const [isProxyDialogOpen, setIsProxyDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const [userPage, setUserPage] = useState(1);
+    const [usersPerPage, setUsersPerPage] =
+        useState<(typeof USER_PAGE_SIZES)[number]>(25);
     const [isStoppingMonitors, setIsStoppingMonitors] = useState(false);
     const [stoppingMonitorId, setStoppingMonitorId] = useState<number | null>(
         null,
@@ -183,10 +189,29 @@ export function AdminClient({
 
         return searchable.includes(normalizedQuery);
     });
+    const totalUserPages = Math.max(
+        1,
+        Math.ceil(filteredUsers.length / usersPerPage),
+    );
+    const currentUserPage = Math.min(userPage, totalUserPages);
+    const userPageStart = (currentUserPage - 1) * usersPerPage;
+    const paginatedUsers = filteredUsers.slice(
+        userPageStart,
+        userPageStart + usersPerPage,
+    );
+    const shownUserStart =
+        filteredUsers.length === 0 ? 0 : userPageStart + 1;
+    const shownUserEnd = Math.min(
+        userPageStart + usersPerPage,
+        filteredUsers.length,
+    );
 
     const totalUsers = users.length;
     const premiumUsers = users.filter((u) => u.role === "premium").length;
     const adminUsers = users.filter((u) => u.role === "admin").length;
+    const serverProxyLineCount = serverProxies
+        .split("\n")
+        .filter((line) => line.trim().length > 0).length;
 
     const getEffectiveLimit = (user: UserRow) => {
         if (user.role === "admin") {
@@ -497,19 +522,15 @@ export function AdminClient({
                     </p>
                 </div>
 
-                <div className="w-full max-w-sm">
-                    <div className="relative">
-                        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-                        <Input
-                            value={searchQuery}
-                            onChange={(event) =>
-                                setSearchQuery(event.target.value)
-                            }
-                            placeholder="Search by name, email or role..."
-                            className="border-border/60 bg-card h-10 rounded-xl pl-9"
-                        />
-                    </div>
-                </div>
+                <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 self-start rounded-xl lg:self-auto"
+                    onClick={() => setIsProxyDialogOpen(true)}
+                >
+                    <Server className="mr-2 h-4 w-4" />
+                    Server Proxies
+                </Button>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -563,133 +584,8 @@ export function AdminClient({
                 </Card>
             </div>
 
-            <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                        <p className="text-foreground text-sm font-semibold">
-                            Active Monitor Limits
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                            Empty values mean unlimited. Existing running
-                            monitors are not paused automatically.
-                        </p>
-                    </div>
-                    <div className="bg-primary/10 text-primary rounded-lg p-2">
-                        <Gauge className="h-4 w-4" />
-                    </div>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-4">
-                    <div className="space-y-2">
-                        <Label htmlFor="global-monitor-limit">
-                            Global default
-                        </Label>
-                        <div className="flex gap-2">
-                            <Input
-                                id="global-monitor-limit"
-                                type="number"
-                                min={0}
-                                value={globalLimitInput}
-                                onChange={(event) =>
-                                    setGlobalLimitInput(event.target.value)
-                                }
-                                placeholder="Unlimited"
-                            />
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleSaveGlobalLimit}
-                            >
-                                Save
-                            </Button>
-                        </div>
-                    </div>
-
-                    {LIMIT_ROLES.map((role) => (
-                        <div key={role.value} className="space-y-2">
-                            <Label htmlFor={`role-monitor-limit-${role.value}`}>
-                                {role.label}
-                            </Label>
-                            <div className="flex gap-2">
-                                <Input
-                                    id={`role-monitor-limit-${role.value}`}
-                                    type="number"
-                                    min={0}
-                                    value={roleLimitInputs[role.value] ?? ""}
-                                    onChange={(event) =>
-                                        setRoleLimitInputs((prev) => ({
-                                            ...prev,
-                                            [role.value]: event.target.value,
-                                        }))
-                                    }
-                                    placeholder="Global"
-                                />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() =>
-                                        handleSaveRoleLimit(role.value)
-                                    }
-                                >
-                                    Save
-                                </Button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                        <p className="text-foreground text-sm font-semibold">
-                            Server Proxies
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                            Used by premium and admin monitors when they select
-                            Server Proxies. One proxy per line.
-                        </p>
-                    </div>
-                    <div className="bg-primary/10 text-primary rounded-lg p-2">
-                        <Server className="h-4 w-4" />
-                    </div>
-                </div>
-                <div className="flex flex-col gap-3">
-                    <textarea
-                        value={serverProxies}
-                        onChange={(event) =>
-                            setServerProxies(event.target.value)
-                        }
-                        spellCheck={false}
-                        placeholder="http://user:pass@host:port&#10;host:port:user:pass"
-                        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-44 w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-muted-foreground text-xs">
-                            Current input contains{" "}
-                            {
-                                serverProxies
-                                    .split("\n")
-                                    .filter((line) => line.trim().length > 0)
-                                    .length
-                            }{" "}
-                            non-empty lines. The worker refreshes this setting
-                            every sync cycle.
-                        </p>
-                        <Button
-                            type="button"
-                            onClick={handleSaveServerProxies}
-                            disabled={isSavingServerProxies}
-                            className="shrink-0"
-                        >
-                            {isSavingServerProxies ? "Saving..." : "Save Proxies"}
-                        </Button>
-                    </div>
-                </div>
-            </div>
-
             <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
-                <div className="border-border/60 flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="border-border/60 flex flex-col gap-3 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <p className="text-foreground text-sm font-semibold">
                             Team Members
@@ -698,16 +594,30 @@ export function AdminClient({
                             {filteredUsers.length} of {totalUsers} users shown
                         </p>
                     </div>
-                    {normalizedQuery ? (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 self-start px-2 text-xs sm:self-auto"
-                            onClick={() => setSearchQuery("")}
-                        >
-                            Clear search
-                        </Button>
-                    ) : null}
+                    <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+                        <div className="relative flex-1">
+                            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                            <Input
+                                value={searchQuery}
+                                onChange={(event) => {
+                                    setSearchQuery(event.target.value);
+                                    setUserPage(1);
+                                }}
+                                placeholder="Search by name, email or role..."
+                                className="h-10 pl-9"
+                            />
+                        </div>
+                        {normalizedQuery ? (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-10 self-start px-3 text-xs sm:self-auto"
+                                onClick={() => setSearchQuery("")}
+                            >
+                                Clear search
+                            </Button>
+                        ) : null}
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full">
@@ -734,7 +644,7 @@ export function AdminClient({
                             </tr>
                         </thead>
                         <tbody className="divide-border/50 divide-y">
-                            {filteredUsers.map((user) => {
+                            {paginatedUsers.map((user) => {
                                 const effectiveLimit = getEffectiveLimit(user);
                                 return (
                                     <tr
@@ -832,7 +742,7 @@ export function AdminClient({
                                     </tr>
                                 );
                             })}
-                            {filteredUsers.length === 0 ? (
+                            {paginatedUsers.length === 0 ? (
                                 <tr>
                                     <td
                                         colSpan={6}
@@ -855,6 +765,142 @@ export function AdminClient({
                             ) : null}
                         </tbody>
                     </table>
+                </div>
+                <div className="border-border/60 flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-muted-foreground text-xs">
+                        Showing {shownUserStart}-{shownUserEnd} of{" "}
+                        {filteredUsers.length} users
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+                            Rows
+                            <select
+                                value={usersPerPage}
+                                onChange={(event) => {
+                                    setUsersPerPage(
+                                        Number(
+                                            event.target.value,
+                                        ) as (typeof USER_PAGE_SIZES)[number],
+                                    );
+                                    setUserPage(1);
+                                }}
+                                className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                            >
+                                {USER_PAGE_SIZES.map((size) => (
+                                    <option key={size} value={size}>
+                                        {size}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 w-9 p-0"
+                            onClick={() =>
+                                setUserPage((page) => Math.max(1, page - 1))
+                            }
+                            disabled={currentUserPage === 1}
+                            aria-label="Previous user page"
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <span className="text-muted-foreground min-w-20 text-center text-xs">
+                            Page {currentUserPage} / {totalUserPages}
+                        </span>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 w-9 p-0"
+                            onClick={() =>
+                                setUserPage((page) =>
+                                    Math.min(totalUserPages, page + 1),
+                                )
+                            }
+                            disabled={currentUserPage === totalUserPages}
+                            aria-label="Next user page"
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                        <p className="text-foreground text-sm font-semibold">
+                            Active Monitor Limits
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                            Empty values mean unlimited. Existing running
+                            monitors are not paused automatically.
+                        </p>
+                    </div>
+                    <div className="bg-primary/10 text-primary rounded-lg p-2">
+                        <Gauge className="h-4 w-4" />
+                    </div>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="global-monitor-limit">
+                            Global default
+                        </Label>
+                        <div className="flex gap-2">
+                            <Input
+                                id="global-monitor-limit"
+                                type="number"
+                                min={0}
+                                value={globalLimitInput}
+                                onChange={(event) =>
+                                    setGlobalLimitInput(event.target.value)
+                                }
+                                placeholder="Unlimited"
+                            />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleSaveGlobalLimit}
+                            >
+                                Save
+                            </Button>
+                        </div>
+                    </div>
+
+                    {LIMIT_ROLES.map((role) => (
+                        <div key={role.value} className="space-y-2">
+                            <Label htmlFor={`role-monitor-limit-${role.value}`}>
+                                {role.label}
+                            </Label>
+                            <div className="flex gap-2">
+                                <Input
+                                    id={`role-monitor-limit-${role.value}`}
+                                    type="number"
+                                    min={0}
+                                    value={roleLimitInputs[role.value] ?? ""}
+                                    onChange={(event) =>
+                                        setRoleLimitInputs((prev) => ({
+                                            ...prev,
+                                            [role.value]: event.target.value,
+                                        }))
+                                    }
+                                    placeholder="Global"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() =>
+                                        handleSaveRoleLimit(role.value)
+                                    }
+                                >
+                                    Save
+                                </Button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
 
@@ -914,6 +960,56 @@ export function AdminClient({
                             Cancel
                         </Button>
                         <Button onClick={handleSave}>Save</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={isProxyDialogOpen}
+                onOpenChange={setIsProxyDialogOpen}
+            >
+                <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Server Proxies</DialogTitle>
+                        <DialogDescription>
+                            Used by premium and admin monitors when they select
+                            Server Proxies. One proxy per line.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <textarea
+                            value={serverProxies}
+                            onChange={(event) =>
+                                setServerProxies(event.target.value)
+                            }
+                            spellCheck={false}
+                            placeholder="http://user:pass@host:port&#10;host:port:user:pass"
+                            className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-72 w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                        <p className="text-muted-foreground text-xs">
+                            Current input contains {serverProxyLineCount}{" "}
+                            non-empty lines. The worker refreshes this setting
+                            every sync cycle.
+                        </p>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsProxyDialogOpen(false)}
+                        >
+                            Close
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleSaveServerProxies}
+                            disabled={isSavingServerProxies}
+                        >
+                            {isSavingServerProxies
+                                ? "Saving..."
+                                : "Save Proxies"}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
