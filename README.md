@@ -373,7 +373,9 @@ AUTH_OIDC_CLIENT_SECRET=your-oidc-client-secret
 AUTH_OIDC_NAME=Authentik
 ```
 
-The `AUTH_OIDC_NAME` value is the display name shown on the login button (defaults to "SSO"). When all three OIDC variables are set, OIDC replaces Discord as the login method — the Discord button is hidden and Discord env vars are ignored. Existing Discord-only installations are unaffected.
+The `AUTH_OIDC_NAME` value is the display name shown on the login button (defaults to "SSO"). When all three OIDC variables are set, OIDC replaces Discord as the login method — the Discord button is hidden and Discord env vars are ignored. Existing Discord-only installations are unaffected as long as the OIDC variables are not set.
+
+If you switch an existing installation from Discord to OIDC, existing Discord accounts are not automatically linked to OIDC accounts. Make sure at least one administrator can sign in through the new provider, or update the relevant user role in the database after the first OIDC login.
 
 ### 4. Add Proxies
 
@@ -420,11 +422,11 @@ AUTH_URL=https://your-domain.com
 DASHBOARD_URL=https://your-domain.com
 
 # Optional — OIDC authentication (replaces Discord, e.g. Authentik, Google, Keycloak)
-# Set these to use an OIDC provider instead of Discord. When set, Discord is disabled.
-AUTH_OIDC_ISSUER=https://your-oidc-provider.com/application/o/your-app/
-AUTH_OIDC_CLIENT_ID=your-oidc-client-id
-AUTH_OIDC_CLIENT_SECRET=your-oidc-client-secret
-AUTH_OIDC_NAME=Authentik
+# Uncomment and set all three required values to use OIDC instead of Discord.
+# AUTH_OIDC_ISSUER=https://your-oidc-provider.com/application/o/your-app/
+# AUTH_OIDC_CLIENT_ID=your-oidc-client-id
+# AUTH_OIDC_CLIENT_SECRET=your-oidc-client-secret
+# AUTH_OIDC_NAME=Authentik
 
 # Optional — Telegram notifications
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token

@@ -12,16 +12,12 @@ import {
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { oidcConfigured, oidcName } from "@/lib/auth-provider";
 
 export const metadata: Metadata = {
     title: "Login | Vintrack",
     description: "Sign in to access the Vintrack dashboard.",
 };
-
-const oidcConfigured =
-    !!process.env.AUTH_OIDC_ISSUER &&
-    !!process.env.AUTH_OIDC_CLIENT_ID &&
-    !!process.env.AUTH_OIDC_CLIENT_SECRET;
 
 async function signInWithDiscord() {
     "use server";
@@ -108,7 +104,7 @@ export default async function LoginPage() {
                         </h1>
                         <p className="text-muted-foreground max-w-xl text-base leading-8 sm:text-lg">
                             {oidcConfigured
-                                ? `Sign in with ${process.env.AUTH_OIDC_NAME || "SSO"} to open monitors, feed, chats, likes, proxies and account tools from one protected workspace.`
+                                ? `Sign in with ${oidcName} to open monitors, feed, chats, likes, proxies and account tools from one protected workspace.`
                                 : "Sign in with Discord to open monitors, feed, chats, likes, proxies and account tools from one protected workspace."}
                         </p>
                     </div>
@@ -140,7 +136,7 @@ export default async function LoginPage() {
                             <div>
                                 <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.28em] uppercase">
                                     {oidcConfigured
-                                        ? `${process.env.AUTH_OIDC_NAME || "SSO"} Access`
+                                        ? `${oidcName} Access`
                                         : "Discord Access"}
                                 </p>
                                 <h2 className="mt-2 text-3xl font-bold tracking-tight">
@@ -155,7 +151,7 @@ export default async function LoginPage() {
                         <div className="border-border/70 bg-background/70 space-y-4 rounded-[1.5rem] border p-5">
                             <p className="text-muted-foreground text-sm leading-7">
                                 {oidcConfigured
-                                    ? `Use your ${process.env.AUTH_OIDC_NAME || "SSO"} account to authenticate. After login you will be redirected directly into the dashboard.`
+                                    ? `Use your ${oidcName} account to authenticate. After login you will be redirected directly into the dashboard.`
                                     : "Use your Discord account to authenticate. After login you will be redirected directly into the dashboard."}
                             </p>
 
@@ -171,8 +167,7 @@ export default async function LoginPage() {
                                                 <KeyRound className="h-4 w-4" />
                                             </span>
                                             Continue with{" "}
-                                            {process.env.AUTH_OIDC_NAME ||
-                                                "SSO"}
+                                            {oidcName}
                                         </span>
                                         <ArrowRight className="h-4 w-4" />
                                     </Button>
@@ -209,19 +204,17 @@ export default async function LoginPage() {
                                 </p>
                                 <p className="mt-1 leading-6">
                                     {oidcConfigured
-                                        ? `Authentication runs through ${process.env.AUTH_OIDC_NAME || "SSO"} and returns you to the app automatically.`
+                                        ? `Authentication runs through ${oidcName} and returns you to the app automatically.`
                                         : "Authentication runs through Discord and returns you to the app automatically."}
                                 </p>
                             </div>
                             <div className="border-border/70 bg-background/55 rounded-2xl border p-4">
                                 <p className="text-foreground font-medium">
-                                    {oidcConfigured
-                                        ? "Multiple providers"
-                                        : "Single provider"}
+                                    Single provider
                                 </p>
                                 <p className="mt-1 leading-6">
                                     {oidcConfigured
-                                        ? "Choose Discord or your organization account to authenticate."
+                                        ? "Discord is disabled while OIDC is configured."
                                         : "Authentication runs through Discord and returns you to the app automatically."}
                                 </p>
                             </div>
