@@ -57,6 +57,7 @@ export function buildVintedMonitorUrl({
     }
 
     params.set("order", "newest_first");
+    params.set("per_page", String(perPage));
 
     if (normalizedPriceMin) {
         params.set("price_from", normalizedPriceMin);

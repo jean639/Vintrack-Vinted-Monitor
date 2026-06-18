@@ -518,6 +518,7 @@ export function DashboardClient({
                     {sortedMonitors.map((m) => (
                         <Card
                             key={m.id}
+                            data-testid="monitor-card"
                             className="group border-border/75 bg-card/85 hover:border-border hover:bg-card flex flex-col overflow-hidden transition-colors"
                         >
                             <CardContent className="flex flex-1 flex-col p-5">

@@ -1,0 +1,46 @@
+{
+  "items": [
+    {
+      "id": 900004,
+      "title": "Nike Dunk Low replica",
+      "description": "Budget pair",
+      "price": {
+        "amount": "30.00",
+        "currency_code": "EUR"
+      },
+      "url": "/items/900004-nike-dunk-low-replica",
+      "photo": {
+        "url": "/mock-images/vinted-1.svg"
+      },
+      "size_title": "42",
+      "size": "42",
+      "brand_title": "Nike",
+      "status": "Gut",
+      "user": {
+        "id": 70004,
+        "login": "mock_seller_four"
+      }
+    },
+    {
+      "id": 900005,
+      "title": "Nike Dunk Low Panda",
+      "description": "Original, Rechnung vorhanden",
+      "price": {
+        "amount": "75.00",
+        "currency_code": "EUR"
+      },
+      "url": "/items/900005-nike-dunk-low-panda",
+      "photo": {
+        "url": "/mock-images/vinted-2.svg"
+      },
+      "size_title": "42",
+      "size": "42",
+      "brand_title": "Nike",
+      "status": "Sehr gut",
+      "user": {
+        "id": 70005,
+        "login": "mock_seller_five"
+      }
+    }
+  ]
+}

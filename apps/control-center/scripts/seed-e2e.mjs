@@ -1,0 +1,115 @@
+import { PrismaClient } from "@prisma/client";
+
+const db = new PrismaClient();
+
+const userId = process.env.E2E_TEST_USER_ID ?? "e2e-user";
+const monitorName = "E2E Mock Feed";
+
+const items = [
+    {
+        id: BigInt(990001),
+        title: "E2E Nike Dunk Low Retro",
+        brand: "Nike",
+        price: "19.00 EUR",
+        total_price: "24.49 EUR",
+        size: "42",
+        condition: "Sehr gut",
+        location: "🇩🇪 DE",
+        rating: "⭐ 4.9 (58)",
+        seller_id: BigInt(880001),
+        url: "https://www.vinted.de/items/990001-nike-dunk-low-retro",
+        image_url: "/mock-images/vinted-1.svg",
+        extra_images: ["/mock-images/vinted-2.svg", "/mock-images/vinted-3.svg"],
+        found_at: new Date(Date.now() - 60_000),
+    },
+    {
+        id: BigInt(990002),
+        title: "E2E Carhartt Detroit Jacket",
+        brand: "Carhartt",
+        price: "18.00 EUR",
+        total_price: null,
+        size: "L",
+        condition: "Gut",
+        location: "🇫🇷 FR",
+        rating: "⭐ 5.0 (124)",
+        seller_id: BigInt(880002),
+        url: "https://www.vinted.de/items/990002-carhartt-detroit-jacket",
+        image_url: "/mock-images/vinted-4.svg",
+        extra_images: ["/mock-images/vinted-5.svg"],
+        found_at: new Date(Date.now() - 30_000),
+    },
+];
+
+async function main() {
+    await db.user.upsert({
+        where: { id: userId },
+        create: {
+            id: userId,
+            name: "E2E User",
+            email: "e2e@vintrack.test",
+            role: "admin",
+        },
+        update: {
+            name: "E2E User",
+            email: "e2e@vintrack.test",
+            role: "admin",
+        },
+    });
+
+    const monitor = await db.monitors.upsert({
+        where: { id: 990001 },
+        create: {
+            id: 990001,
+            userId,
+            name: monitorName,
+            query: "mock",
+            query_delay_ms: 1500,
+            price_min: 12,
+            price_max: 22,
+            size_id: "211,212",
+            catalog_ids: "2309,1918",
+            brand_ids: "112202",
+            region: "de",
+            status: "active",
+            webhook_active: false,
+            telegram_active: false,
+        },
+        update: {
+            userId,
+            name: monitorName,
+            query: "mock",
+            status: "active",
+            webhook_active: false,
+            telegram_active: false,
+        },
+    });
+
+    for (const item of items) {
+        await db.items.upsert({
+            where: {
+                id_monitor_id: {
+                    id: item.id,
+                    monitor_id: monitor.id,
+                },
+            },
+            create: {
+                ...item,
+                monitor_id: monitor.id,
+            },
+            update: {
+                ...item,
+                monitor_id: monitor.id,
+            },
+        });
+    }
+}
+
+main()
+    .then(async () => {
+        await db.$disconnect();
+    })
+    .catch(async (error) => {
+        console.error(error);
+        await db.$disconnect();
+        process.exit(1);
+    });

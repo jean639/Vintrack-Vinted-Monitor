@@ -1,0 +1,7 @@
+services:
+  worker:
+    environment:
+      - VINTED_FETCH_MODE=mock
+      - VINTED_MOCK_SCENARIO=${VINTED_MOCK_SCENARIO:-new-items}
+      - VINTED_MOCK_DROP_INTERVAL_MS=${VINTED_MOCK_DROP_INTERVAL_MS:-3000}
+      - ENRICH_SELLER_INFO=false

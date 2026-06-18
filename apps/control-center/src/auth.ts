@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import type { Session } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { db } from "@/lib/db";
@@ -24,7 +25,7 @@ const providers: Provider[] = oidcConfigured
       ]
     : [Discord];
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const authResult = NextAuth({
     adapter: PrismaAdapter(db),
     session: {
         strategy: "database",
@@ -50,3 +51,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         },
     },
 });
+
+export const { handlers, signIn, signOut } = authResult;
+
+export async function auth(): Promise<Session | null> {
+	if (process.env.E2E_TEST_MODE === "true") {
+		const userId = process.env.E2E_TEST_USER_ID ?? "e2e-user";
+		return {
+            user: {
+                id: userId,
+                name: "E2E User",
+                email: "e2e@vintrack.test",
+                image: null,
+                role: "admin",
+            },
+            expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+		};
+	}
+
+	return authResult.auth() as Promise<Session | null>;
+}

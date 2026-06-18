@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000">
+  <rect width="800" height="1000" fill="#e9f4f2"/>
+  <rect x="130" y="120" width="540" height="760" rx="38" fill="#fefefe"/>
+  <path d="M236 338h306c54 0 100 39 109 92l34 202c9 54-32 103-87 103H204c-55 0-96-49-87-103l34-202c9-53 55-92 85-92z" fill="#1c4f4a"/>
+  <path d="M263 392h274c33 0 61 24 67 57l22 130c6 36-22 69-58 69H231c-36 0-64-33-58-69l22-130c6-33 34-57 68-57z" fill="#f7d66d"/>
+  <text x="400" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#1c4f4a">MOCK DROP</text>
+  <text x="400" y="286" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#596765">Adidas style sneaker</text>
+</svg>

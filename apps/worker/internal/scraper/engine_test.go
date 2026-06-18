@@ -178,6 +178,42 @@ func TestBuildItems_FoundAtIsRecent(t *testing.T) {
 	}
 }
 
+func TestBuildItems_MockModeAddsSellerMetadata(t *testing.T) {
+	fetcher, err := NewMockCatalogFetcher("empty")
+	if err != nil {
+		t.Fatalf("NewMockCatalogFetcher() error = %v", err)
+	}
+
+	e := &Engine{fetcher: fetcher}
+	m := model.Monitor{ID: 1, Region: "de"}
+	vItems := []model.VintedItem{
+		{
+			ID:         123,
+			Title:      "Mock Item",
+			Price:      model.VintedPrice{Amount: "19.00", Currency: "EUR"},
+			BrandTitle: "Nike",
+			SizeTitle:  "42",
+			Condition:  "Sehr gut",
+			User:       model.VintedUser{ID: 456},
+		},
+	}
+
+	items := e.buildItems(m, vItems)
+
+	if items[0].Location == "" {
+		t.Fatal("Location should be set for mock items")
+	}
+	if items[0].Rating == "" {
+		t.Fatal("Rating should be set for mock items")
+	}
+	if items[0].Brand != "Nike" {
+		t.Fatalf("Brand = %q, want Nike", items[0].Brand)
+	}
+	if items[0].Price != "19.00 EUR" {
+		t.Fatalf("Price = %q, want 19.00 EUR", items[0].Price)
+	}
+}
+
 func TestBuildItems_MultipleItems(t *testing.T) {
 	e := &Engine{}
 	m := model.Monitor{ID: 5, Region: "nl"}

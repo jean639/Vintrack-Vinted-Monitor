@@ -20,6 +20,7 @@ AGENTS.md
 # --- Node.js / Next.js ---
 node_modules/
 .next/
+.next-e2e-*/
 out/
 build/
 dist/
@@ -58,6 +59,10 @@ redis_data/
 
 *.har
 *.zip
+playwright-report/
+test-results/
+apps/control-center/playwright-report/
+apps/control-center/test-results/
 
 edge-scanner/
 id-scanner/

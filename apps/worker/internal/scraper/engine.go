@@ -2,9 +2,7 @@ package scraper
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/url"
 	"os"
@@ -18,8 +16,6 @@ import (
 	"vintrack-worker/internal/model"
 	"vintrack-worker/internal/proxy"
 	"vintrack-worker/internal/telegram"
-
-	http "github.com/bogdanfinn/fhttp"
 )
 
 const (
@@ -32,6 +28,7 @@ const (
 type Engine struct {
 	db           *database.Store
 	serverProxy  *proxy.Manager
+	fetcher      CatalogFetcher
 	enrichSeller bool
 	poolSize     int
 	pools        map[string]*ClientPool
@@ -41,12 +38,17 @@ type Engine struct {
 }
 
 func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
+	fetcher := NewCatalogFetcherFromEnv()
 	enrich := os.Getenv("ENRICH_SELLER_INFO") != "false"
+	if !fetcher.RequiresNetwork() {
+		enrich = false
+	}
 	poolSize := getEnvInt("CLIENT_POOL_SIZE", 5)
-	log.Printf("Seller enrichment (region/rating): %v, client pool size: %d", enrich, poolSize)
+	log.Printf("Catalog fetch mode: %s, seller enrichment (region/rating): %v, client pool size: %d", fetcher.Name(), enrich, poolSize)
 	return &Engine{
 		db:           db,
 		serverProxy:  pm,
+		fetcher:      fetcher,
 		enrichSeller: enrich,
 		poolSize:     poolSize,
 		pools:        make(map[string]*ClientPool),
@@ -132,7 +134,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 	}
 
-	if pm.Count() == 0 {
+	if e.fetcher.RequiresNetwork() && pm.Count() == 0 {
 		log.Printf("[%d] ❌ ERROR: no valid proxies available (source: %s) — skipping monitor", m.ID, proxySource)
 		e.db.UpdateMonitorHealth(model.MonitorHealth{
 			MonitorID:       m.ID,
@@ -148,10 +150,21 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 		return
 	}
-	log.Printf("[%d] proxy source: %s (%d proxies)", m.ID, proxySource, pm.Count())
 
-	pool := e.GetOrCreatePool(pm, domain, proxyKey, trafficRecorder, proxySource)
-	log.Printf("[%d] using client pool: %d clients", m.ID, pool.Size())
+	var pool *ClientPool
+	if e.fetcher.RequiresNetwork() {
+		log.Printf("[%d] proxy source: %s (%d proxies)", m.ID, proxySource, pm.Count())
+		pool = e.GetOrCreatePool(pm, domain, proxyKey, trafficRecorder, proxySource)
+		log.Printf("[%d] using client pool: %d clients", m.ID, pool.Size())
+	} else {
+		proxySource = "mock"
+		log.Printf("[%d] using mock catalog fetcher: %s", m.ID, e.fetcher.Name())
+	}
+
+	allowedCountries := m.AllowedCountries
+	if !e.fetcher.RequiresNetwork() {
+		allowedCountries = nil
+	}
 
 	var enricher *SellerEnricher
 	if e.enrichSeller {
@@ -252,12 +265,17 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			client *Client
 		}
 
-		clients := pool.RaceClients(raceFetchers)
+		var clients []*Client
+		if pool != nil {
+			clients = pool.RaceClients(raceFetchers)
+		} else {
+			clients = []*Client{nil}
+		}
 		resultCh := make(chan fetchResult, len(clients))
 
 		for _, c := range clients {
 			go func(cl *Client) {
-				items, status, err := e.fetchCatalog(ctx, cl, apiURL, domain)
+				items, status, err := e.fetcher.FetchCatalog(ctx, cl, apiURL, domain)
 				resultCh <- fetchResult{items, status, err, cl}
 			}(c)
 		}
@@ -273,9 +291,11 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			case r := <-resultCh:
 				remaining--
 				if r.err != nil {
-					pool.Replace(r.client)
+					if pool != nil && r.client != nil {
+						pool.Replace(r.client)
+					}
 					if checks <= 3 || checks%5 == 0 {
-						log.Printf("[%d] fetch error for %s via %s: %v", m.ID, domain, r.client.ProxyLabel(), r.err)
+						log.Printf("[%d] fetch error for %s via %s: %v", m.ID, domain, clientProxyLabel(r.client, proxySource), r.err)
 					}
 					continue
 				}
@@ -289,7 +309,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 							for i := 0; i < n; i++ {
 								select {
 								case r := <-ch:
-									if shouldReplaceClientForStatus(r.status) {
+									if r.client != nil && shouldReplaceClientForStatus(r.status) {
 										r.client.ResetWarm(domain)
 										p.Replace(r.client)
 									}
@@ -300,11 +320,11 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 						}(resultCh, remaining, pool)
 					}
 					break collectLoop
-				} else if shouldReplaceClientForStatus(r.status) {
+				} else if pool != nil && r.client != nil && shouldReplaceClientForStatus(r.status) {
 					r.client.ResetWarm(domain)
 					pool.Replace(r.client)
 				} else if r.status != 0 && (checks <= 3 || checks%5 == 0) {
-					log.Printf("[%d] fetch status for %s via %s: %d", m.ID, domain, r.client.ProxyLabel(), r.status)
+					log.Printf("[%d] fetch status for %s via %s: %d", m.ID, domain, clientProxyLabel(r.client, proxySource), r.status)
 				}
 			case <-timeout.C:
 				if remaining > 0 {
@@ -314,7 +334,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 						for i := 0; i < n; i++ {
 							select {
 							case r := <-ch:
-								if shouldReplaceClientForStatus(r.status) {
+								if r.client != nil && shouldReplaceClientForStatus(r.status) {
 									r.client.ResetWarm(domain)
 									p.Replace(r.client)
 								}
@@ -411,7 +431,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			}
 			if len(filteredSeedItems) > 0 {
 				seedBuiltItems := e.buildItems(m, filteredSeedItems)
-				go e.processItems(ctx, seedBuiltItems, filteredSeedItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, m.AllowedCountries, false)
+				go e.processItems(ctx, seedBuiltItems, filteredSeedItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, allowedCountries, false)
 			}
 
 			initialized = true
@@ -467,73 +487,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
 		}
 
-		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, m.AllowedCountries, true)
+		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, allowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
 		}
 	}
-}
-
-func (e *Engine) fetchCatalog(ctx context.Context, client *Client, apiURL string, domain string) ([]model.VintedItem, int, error) {
-	reqURL := apiURL + "&_=" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-
-	if err := client.EnsureWarm(domain); err != nil {
-		return nil, 0, fmt.Errorf("warmup %s via %s: %w", domain, client.ProxyLabel(), err)
-	}
-
-	for redirects := 0; redirects < 3; redirects++ {
-		currentDomain := hostFromURL(reqURL, domain)
-
-		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-		if err != nil {
-			return nil, 0, err
-		}
-		req.Header = newAPIHeaders(currentDomain)
-
-		resp, err := client.HttpClient.Do(req)
-		if err != nil {
-			client.FlushTrackedTraffic()
-			return nil, 0, err
-		}
-
-		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-			location := resp.Header.Get("Location")
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			client.FlushTrackedTraffic()
-			if location == "" {
-				return nil, resp.StatusCode, nil
-			}
-
-			nextURL, err := resolveRedirectURL(reqURL, location)
-			if err != nil {
-				return nil, 0, err
-			}
-			reqURL = nextURL
-			continue
-		}
-
-		if resp.StatusCode != 200 {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			client.FlushTrackedTraffic()
-			return nil, resp.StatusCode, nil
-		}
-
-		limitedReader := io.LimitReader(resp.Body, maxAPIResponseBytes)
-		var data model.VintedResponse
-		if err := json.NewDecoder(limitedReader).Decode(&data); err != nil {
-			resp.Body.Close()
-			client.FlushTrackedTraffic()
-			return nil, 0, fmt.Errorf("json decode: %w", err)
-		}
-		resp.Body.Close()
-		client.FlushTrackedTraffic()
-		return data.Items, 200, nil
-	}
-
-	return nil, 0, nil
 }
 
 func (e *Engine) isProxyGroupBandwidthLimitReached(m model.Monitor) bool {
@@ -548,6 +507,13 @@ func (e *Engine) isProxyGroupBandwidthLimitReached(m model.Monitor) bool {
 	}
 
 	return txBytes+rxBytes >= *m.ProxyGroupLimitBytes
+}
+
+func clientProxyLabel(client *Client, fallback string) string {
+	if client == nil {
+		return fallback
+	}
+	return client.ProxyLabel()
 }
 
 func resolveRedirectURL(currentURL string, location string) (string, error) {
@@ -772,9 +738,37 @@ func (e *Engine) buildItems(m model.Monitor, vItems []model.VintedItem) []model.
 			SellerID:    vItem.User.ID,
 			FoundAt:     time.Now(),
 		}
+
+		if e != nil && e.fetcher != nil && !e.fetcher.RequiresNetwork() {
+			location, rating := mockSellerMetadata(vItem.User.ID, vItem.ID)
+			items[i].Location = location
+			items[i].Rating = rating
+		}
 	}
 
 	return items
+}
+
+func mockSellerMetadata(userID int64, itemID int64) (string, string) {
+	locations := []string{
+		"🇩🇪 DE",
+		"🇫🇷 FR",
+		"🇮🇹 IT",
+		"🇳🇱 NL",
+		"🇪🇸 ES",
+		"🇦🇹 AT",
+	}
+	ratings := []string{
+		"⭐ 5.0 (124)",
+		"⭐ 4.9 (58)",
+		"⭐ 4.8 (203)",
+		"⭐ 4.7 (31)",
+		"No rating",
+	}
+
+	location := locations[int((userID+itemID)%int64(len(locations)))]
+	rating := ratings[int((userID+itemID)%int64(len(ratings)))]
+	return location, rating
 }
 
 func getEnvInt(key string, fallback int) int {

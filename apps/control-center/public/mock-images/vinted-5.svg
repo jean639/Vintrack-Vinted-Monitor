@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000">
+  <rect width="800" height="1000" fill="#eef4ea"/>
+  <rect x="118" y="118" width="564" height="764" rx="42" fill="#ffffff"/>
+  <path d="M266 282h268l92 164-82 51-47-79v318H303V418l-47 79-82-51 92-164z" fill="#426d4f"/>
+  <path d="M344 282h112v454H344z" fill="#dfe8d9"/>
+  <text x="400" y="818" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#426d4f">JACKET</text>
+</svg>
