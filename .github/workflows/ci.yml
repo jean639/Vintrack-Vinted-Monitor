@@ -18,12 +18,31 @@ jobs:
     name: Control Center
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vintrack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vintrack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     defaults:
       run:
         working-directory: apps/control-center
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vintrack?schema=public
+      AUTH_SECRET: ci-test-secret
+      AUTH_DISCORD_ID: ci-discord-id
+      AUTH_DISCORD_SECRET: ci-discord-secret
+      PLAYWRIGHT_CHANNEL: bundled
 
     steps:
       - name: Checkout repository
@@ -42,11 +61,23 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
       - name: Run lint
         run: npm run lint
 
       - name: Build dashboard
         run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run public e2e tests
+        run: npm run test:e2e
+
+      - name: Run dashboard feed e2e tests
+        run: npm run test:e2e:dashboard
 
   go-tests:
     name: Go Tests (${{ matrix.app }})
@@ -58,6 +89,7 @@ jobs:
         app:
           - apps/worker
           - apps/vinted-service
+          - apps/id-scanner
 
     defaults:
       run:
