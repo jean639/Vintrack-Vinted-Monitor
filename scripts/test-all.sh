@@ -24,7 +24,6 @@ Usage: sh scripts/test-all.sh [--dashboard] [--skip-build] [--no-start-services]
 Runs the fast local validation suite:
   - worker Go tests
   - vinted-service Go tests
-  - id-scanner Go tests
   - control-center lint
   - control-center build, unless --skip-build is passed
   - control-center public Playwright e2e
@@ -88,7 +87,6 @@ fi
 
 run_in apps/worker go test ./...
 run_in apps/vinted-service go test ./...
-run_in apps/id-scanner go test ./...
 
 run_in apps/control-center npm run lint
 

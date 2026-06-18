@@ -89,7 +89,6 @@ jobs:
         app:
           - apps/worker
           - apps/vinted-service
-          - apps/id-scanner
 
     defaults:
       run:

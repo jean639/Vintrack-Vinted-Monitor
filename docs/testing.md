@@ -10,7 +10,6 @@ This runs:
 
 - `go test ./...` in `apps/worker`
 - `go test ./...` in `apps/vinted-service`
-- `go test ./...` in `apps/id-scanner`
 - `npm run lint` in `apps/control-center`
 - `npm run build` in `apps/control-center`
 - public Playwright e2e tests in `apps/control-center`
@@ -46,7 +45,6 @@ Worker and service tests:
 ```bash
 cd apps/worker && go test ./...
 cd apps/vinted-service && go test ./...
-cd apps/id-scanner && go test ./...
 ```
 
 Control Center checks:
@@ -88,7 +86,6 @@ GitHub Actions runs the same important checks on pull requests and pushes to `ma
 - Go apps:
   - `go test ./...` in `apps/worker`
   - `go test ./...` in `apps/vinted-service`
-  - `go test ./...` in `apps/id-scanner`
 
 CI installs bundled Playwright Chromium with:
 
@@ -104,7 +101,6 @@ Backend:
 
 - Worker scraper/model/proxy/unit coverage via `go test ./...`.
 - Vinted service API/session/client coverage via `go test ./...`.
-- ID scanner compile/package coverage via `go test ./...`.
 
 Frontend:
 
