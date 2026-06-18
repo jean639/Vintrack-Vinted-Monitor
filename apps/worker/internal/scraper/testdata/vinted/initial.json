@@ -1,0 +1,58 @@
+{
+  "items": [
+    {
+      "id": 900001,
+      "title": "Nike Air Max 90",
+      "description": "Sehr guter Zustand",
+      "price": {
+        "amount": "49.00",
+        "currency_code": "EUR"
+      },
+      "total_item_price": {
+        "amount": "53.49",
+        "currency_code": "EUR"
+      },
+      "url": "/items/900001-nike-air-max-90",
+      "photo": {
+        "url": "/mock-images/vinted-1.svg"
+      },
+      "photos": [
+        {
+          "url": "/mock-images/vinted-1.svg"
+        },
+        {
+          "url": "/mock-images/vinted-2.svg"
+        }
+      ],
+      "size_title": "42",
+      "size": "42",
+      "brand_title": "Nike",
+      "status": "Sehr gut",
+      "user": {
+        "id": 70001,
+        "login": "mock_seller_one"
+      }
+    },
+    {
+      "id": 900002,
+      "title": "Adidas Samba OG",
+      "description": "Kaum getragen",
+      "price": {
+        "amount": "65.00",
+        "currency_code": "EUR"
+      },
+      "url": "/items/900002-adidas-samba-og",
+      "photo": {
+        "url": "/mock-images/vinted-3.svg"
+      },
+      "size_title": "43",
+      "size": "43",
+      "brand_title": "Adidas",
+      "status": "Gut",
+      "user": {
+        "id": 70002,
+        "login": "mock_seller_two"
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000">
+  <rect width="800" height="1000" fill="#eef0f7"/>
+  <rect x="120" y="116" width="560" height="768" rx="42" fill="#ffffff"/>
+  <path d="M283 260h234l56 493c5 45-30 84-75 84H302c-45 0-80-39-75-84l56-493z" fill="#263b70"/>
+  <path d="M334 260h132l24 497H310l24-497z" fill="#aebde3"/>
+  <text x="400" y="184" text-anchor="middle" font-family="Arial, sans-serif" font-size="40" font-weight="700" fill="#263b70">MOCK DROP</text>
+  <text x="400" y="910" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#263b70">DENIM</text>
+</svg>

@@ -1,0 +1,61 @@
+{
+  "items": [
+    {
+      "id": 900001,
+      "title": "Nike Air Max 90",
+      "description": "Sehr guter Zustand",
+      "price": {
+        "amount": "49.00",
+        "currency_code": "EUR"
+      },
+      "url": "/items/900001-nike-air-max-90",
+      "photo": {
+        "url": "/mock-images/vinted-1.svg"
+      },
+      "size_title": "42",
+      "size": "42",
+      "brand_title": "Nike",
+      "status": "Sehr gut",
+      "user": {
+        "id": 70001,
+        "login": "mock_seller_one"
+      }
+    },
+    {
+      "id": 900003,
+      "title": "New Balance 2002R Protection Pack",
+      "description": "Neu mit Karton",
+      "price": {
+        "amount": "110.00",
+        "currency_code": "EUR"
+      },
+      "total_item_price": {
+        "amount": "116.49",
+        "currency_code": "EUR"
+      },
+      "url": "/items/900003-new-balance-2002r-protection-pack",
+      "photo": {
+        "url": "/mock-images/vinted-4.svg"
+      },
+      "photos": [
+        {
+          "url": "/mock-images/vinted-4.svg"
+        },
+        {
+          "url": "/mock-images/vinted-5.svg"
+        },
+        {
+          "url": "/mock-images/vinted-6.svg"
+        }
+      ],
+      "size_title": "44",
+      "size": "44",
+      "brand_title": "New Balance",
+      "status": "Neu mit Etikett",
+      "user": {
+        "id": 70003,
+        "login": "mock_seller_three"
+      }
+    }
+  ]
+}
