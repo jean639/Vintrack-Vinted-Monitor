@@ -1,7 +1,6 @@
 "use client";
 
 import { REGIONS } from "@/lib/regions";
-import { Badge } from "@/components/ui/badge";
 
 interface CountryFilterPickerProps {
     selected: string[];

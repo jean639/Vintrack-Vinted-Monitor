@@ -333,6 +333,7 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
 
     return (
         <div
+            data-testid="item-card"
             className={`group border-border/75 bg-card/92 hover:border-border relative flex flex-col overflow-hidden rounded-2xl border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_20px_50px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.28)] ${
                 item.isLive
                     ? "animate-in slide-in-from-top-2 fade-in shadow-md ring-2 shadow-emerald-500/10 ring-emerald-500/30 duration-500"

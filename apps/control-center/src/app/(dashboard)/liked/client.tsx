@@ -93,7 +93,7 @@ export function LikedClient() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [syncLikes]);
 
     useEffect(() => {
         if (linked) {
