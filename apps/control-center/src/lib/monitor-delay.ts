@@ -1,6 +1,6 @@
 export const DEFAULT_QUERY_DELAY_MS = 1500;
 export const MIN_QUERY_DELAY_MS = 500;
-export const MAX_QUERY_DELAY_MS = 60000;
+export const MAX_QUERY_DELAY_MS = 3600000;
 
 export function normalizeQueryDelayMs(value: unknown): number {
     const raw = typeof value === "string" ? value.trim() : "";
