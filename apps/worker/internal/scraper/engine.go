@@ -22,7 +22,7 @@ const (
 	maxAPIResponseBytes = 2 * 1024 * 1024 // 2 MB
 	defaultQueryDelayMS = 1500
 	minQueryDelayMS     = 500
-	maxQueryDelayMS     = 60000
+	maxQueryDelayMS     = 3600000
 )
 
 type Engine struct {

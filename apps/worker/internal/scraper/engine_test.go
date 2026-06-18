@@ -327,7 +327,7 @@ func TestResolveQueryDelayMs(t *testing.T) {
 	}{
 		{name: "valid monitor value", input: 1500, want: 1500},
 		{name: "clamps below minimum", input: 100, want: 500},
-		{name: "clamps above maximum", input: 120000, want: 60000},
+		{name: "clamps above maximum", input: 7200000, want: 3600000},
 	}
 
 	for _, tt := range tests {
