@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Activity } from "lucide-react";
+import { Activity, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -192,17 +192,23 @@ function Metric({
     description: string;
 }) {
     return (
-        <div
-            className="border-border/75 bg-muted/25 rounded-lg border px-4 py-3"
-            title={description}
-        >
-            <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                {label}
-            </p>
+        <div className="border-border/75 bg-muted/25 rounded-lg border px-4 py-3">
+            <div className="flex items-center gap-1.5">
+                <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                    {label}
+                </p>
+                <span
+                    className="group text-muted-foreground/70 hover:text-foreground focus-visible:text-foreground relative inline-flex h-4 w-4 items-center justify-center rounded-full transition-colors outline-none"
+                    tabIndex={0}
+                    aria-label={`${label}: ${description}`}
+                >
+                    <Info className="h-3.5 w-3.5" />
+                    <span className="bg-popover text-popover-foreground pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-56 -translate-x-1/2 rounded-md border px-2.5 py-2 text-left text-[11px] leading-snug shadow-md group-hover:block group-focus-visible:block">
+                        {description}
+                    </span>
+                </span>
+            </div>
             <p className="mt-1 text-lg font-semibold">{value}</p>
-            <p className="text-muted-foreground mt-1 text-[11px] leading-snug">
-                {description}
-            </p>
         </div>
     );
 }
