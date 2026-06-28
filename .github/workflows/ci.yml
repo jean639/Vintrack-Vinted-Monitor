@@ -14,6 +14,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  openapi:
+    name: OpenAPI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Lint OpenAPI specs
+        run: npx --yes @redocly/cli@1.25.15 lint docs/openapi/vinted-service.yaml
+
   control-center:
     name: Control Center
     runs-on: ubuntu-latest

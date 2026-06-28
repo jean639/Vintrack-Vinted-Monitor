@@ -1,0 +1,1146 @@
+openapi: 3.1.0
+info:
+  title: Vintrack Vinted Service API
+  version: 1.0.0
+  description: >
+    Internal HTTP contract for the Vintrack Vinted service. The dashboard and
+    browser extension use this service to link Vinted accounts, execute account
+    actions, and proxy selected Vinted payloads.
+servers:
+  - url: http://vinted-service:4000
+    description: Docker Compose service network
+  - url: http://localhost:4000
+    description: Local development
+tags:
+  - name: Health
+  - name: Account
+  - name: Browser Sync
+  - name: Items
+  - name: Messages
+  - name: Offers
+  - name: Catalog
+security:
+  - InternalUserHeader: []
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Check service health
+      security: []
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/account/link:
+    post:
+      tags: [Account]
+      summary: Link a Vinted account to a Vintrack user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkAccountRequest"
+      responses:
+        "200":
+          description: Account linked successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLinkedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/account/status:
+    get:
+      tags: [Account]
+      summary: Get linked Vinted account status
+      responses:
+        "200":
+          description: Account status for the authenticated Vintrack user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/account/info:
+    get:
+      tags: [Account]
+      summary: Fetch account info from Vinted
+      responses:
+        "200":
+          description: Raw Vinted account info payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VintedPassthroughResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/account/phone:
+    post:
+      tags: [Account]
+      summary: Store the phone number used for checkout helpers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePhoneNumberRequest"
+      responses:
+        "200":
+          description: Phone number preference updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/account/domain:
+    post:
+      tags: [Account]
+      summary: Update the Vinted market domain for a linked account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDomainRequest"
+      responses:
+        "200":
+          description: Domain updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/account/unlink:
+    delete:
+      tags: [Account]
+      summary: Remove the linked Vinted account and local action state
+      responses:
+        "200":
+          description: Account unlinked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/account/refresh:
+    post:
+      tags: [Account]
+      summary: Refresh a manually linked Vinted OAuth session
+      responses:
+        "200":
+          description: Session refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountRefreshResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/account/browser-sync/start:
+    post:
+      tags: [Browser Sync]
+      summary: Start a short-lived browser sync flow
+      responses:
+        "200":
+          description: Browser sync code created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserSyncRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/account/browser-sync/status:
+    get:
+      tags: [Browser Sync]
+      summary: Check a browser sync request
+      parameters:
+        - $ref: "#/components/parameters/BrowserSyncCode"
+      responses:
+        "200":
+          description: Browser sync request state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserSyncRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/account/browser-sync/complete:
+    post:
+      tags: [Browser Sync]
+      summary: Complete a short-lived browser sync flow
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrowserSyncCompleteRequest"
+      responses:
+        "200":
+          description: Browser sync completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncCompletedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/account/browser-link/create:
+    post:
+      tags: [Browser Sync]
+      summary: Create a long-lived browser extension link token
+      responses:
+        "200":
+          description: Browser link token created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/account/extension-sync/complete:
+    post:
+      tags: [Browser Sync]
+      summary: Complete browser extension token sync
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExtensionSyncCompleteRequest"
+      responses:
+        "200":
+          description: Extension sync completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncCompletedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/items/like:
+    post:
+      tags: [Items]
+      summary: Like a Vinted item
+      requestBody:
+        $ref: "#/components/requestBodies/ItemAction"
+      responses:
+        "200":
+          description: Item liked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/items/unlike:
+    post:
+      tags: [Items]
+      summary: Unlike a Vinted item
+      requestBody:
+        $ref: "#/components/requestBodies/ItemAction"
+      responses:
+        "200":
+          description: Item unliked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/items/liked:
+    get:
+      tags: [Items]
+      summary: List locally tracked liked item IDs
+      responses:
+        "200":
+          description: Locally tracked liked Vinted item IDs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikedItemsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/items/buy:
+    post:
+      tags: [Items]
+      summary: Start experimental one-click buy flow
+      description: >
+        Experimental checkout helper. The service stores generated checkout links
+        where possible, but the user still completes payment in Vinted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OneClickBuyRequest"
+      responses:
+        "200":
+          description: Buy flow created a checkout result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OneClickBuyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/items/buy/warm:
+    post:
+      tags: [Items]
+      summary: Warm the linked Vinted session before checkout
+      responses:
+        "200":
+          description: Session warmed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/items/checkout-links:
+    get:
+      tags: [Items]
+      summary: List stored checkout links
+      responses:
+        "200":
+          description: Stored checkout links for the user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutLinksResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Items]
+      summary: Store a checkout link produced by a browser-assisted flow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreCheckoutLinkRequest"
+      responses:
+        "200":
+          description: Checkout link stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/items/favorites:
+    get:
+      tags: [Items]
+      summary: Proxy the user's Vinted favorites
+      parameters:
+        - $ref: "#/components/parameters/PageString"
+      responses:
+        "200":
+          description: Raw Vinted favorites payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VintedPassthroughResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/items/wardrobe:
+    get:
+      tags: [Items]
+      summary: Proxy the user's Vinted wardrobe
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/Order"
+      responses:
+        "200":
+          description: Raw Vinted wardrobe payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VintedPassthroughResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/catalog/brands:
+    get:
+      tags: [Catalog]
+      summary: Search Vinted brands
+      parameters:
+        - name: query
+          in: query
+          description: Brand search query. `q` is accepted as an alias.
+          schema:
+            type: string
+        - name: catalog_ids
+          in: query
+          description: Optional comma-separated or repeated catalog IDs.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+      responses:
+        "200":
+          description: Brand search result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandSearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/messages/inbox:
+    get:
+      tags: [Messages]
+      summary: Proxy the user's Vinted inbox
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Raw Vinted inbox payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VintedPassthroughResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/notifications:
+    get:
+      tags: [Messages]
+      summary: Proxy Vinted notifications
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 5
+      responses:
+        "200":
+          description: Raw Vinted notifications payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VintedPassthroughResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/messages/conversations/{id}:
+    get:
+      tags: [Messages]
+      summary: Proxy Vinted conversation replies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - $ref: "#/components/parameters/Page"
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: Raw Vinted conversation payload with current_user_id added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VintedPassthroughResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/messages/send:
+    post:
+      tags: [Messages]
+      summary: Send an initial Vinted item message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: Message sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/messages/reply:
+    post:
+      tags: [Messages]
+      summary: Reply to an existing Vinted conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyToConversationRequest"
+      responses:
+        "200":
+          description: Reply sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /api/offers/send:
+    post:
+      tags: [Offers]
+      summary: Send a Vinted item offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOfferRequest"
+      responses:
+        "200":
+          description: Offer sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+components:
+  securitySchemes:
+    InternalUserHeader:
+      type: apiKey
+      in: header
+      name: X-User-ID
+      description: Internal Vintrack user ID forwarded by the dashboard.
+  parameters:
+    BrowserSyncCode:
+      name: code
+      in: query
+      required: true
+      schema:
+        type: string
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageString:
+      name: page
+      in: query
+      schema:
+        type: string
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Order:
+      name: order
+      in: query
+      schema:
+        type: string
+        default: relevance
+  requestBodies:
+    ItemAction:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ItemActionRequest"
+  responses:
+    BadRequest:
+      description: Invalid request payload or missing required field.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing user header or invalid linked Vinted session.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Requested session, link, or resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Vinted returned a checkout or challenge state that requires user action.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamError:
+      description: Vinted upstream request failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Internal service error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ErrorResponse:
+      type: object
+      required: [error]
+      additionalProperties: true
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        step:
+          type: string
+        vinted_code:
+          type: string
+        vinted_error:
+          type: string
+        captcha_url:
+          type: string
+          format: uri
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+    LinkAccountRequest:
+      type: object
+      required: [domain]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        cookie_header:
+          type: string
+        user_agent:
+          type: string
+        phone_number:
+          type: string
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+    AccountLinkedResponse:
+      type: object
+      required: [linked, vinted_name, vinted_id, domain]
+      properties:
+        linked:
+          type: boolean
+        vinted_name:
+          type: string
+        vinted_id:
+          type: integer
+          format: int64
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+        has_browser_session:
+          type: boolean
+        browser_linked:
+          type: boolean
+        last_browser_sync:
+          type: string
+        has_phone_number:
+          type: boolean
+    AccountStatusResponse:
+      oneOf:
+        - type: object
+          required: [linked]
+          properties:
+            linked:
+              type: boolean
+              const: false
+        - type: object
+          required: [linked, status, domain]
+          properties:
+            linked:
+              type: boolean
+              const: true
+            status:
+              type: string
+            vinted_name:
+              type: string
+            vinted_id:
+              type: integer
+              format: int64
+            domain:
+              $ref: "#/components/schemas/VintedDomain"
+            linked_at:
+              type: string
+              format: date-time
+            last_check:
+              type: string
+              format: date-time
+            last_refresh_at:
+              type: string
+              format: date-time
+            last_valid_at:
+              type: string
+              format: date-time
+            invalid_reason:
+              type: string
+            has_refresh_token:
+              type: boolean
+            requires_browser_reauth:
+              type: boolean
+            has_browser_session:
+              type: boolean
+            browser_linked:
+              type: boolean
+            last_browser_sync:
+              type: string
+              format: date-time
+            has_phone_number:
+              type: boolean
+    AccountRefreshResponse:
+      type: object
+      required: [status, vinted_name, vinted_id, domain]
+      properties:
+        status:
+          type: string
+          enum: [refreshed]
+        vinted_name:
+          type: string
+        vinted_id:
+          type: integer
+          format: int64
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+    BrowserSyncRequest:
+      type: object
+      required: [code, status, created_at, expires_at]
+      properties:
+        code:
+          type: string
+        user_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+        vinted_name:
+          type: string
+        vinted_id:
+          type: integer
+          format: int64
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+    BrowserSyncCompleteRequest:
+      type: object
+      required: [code, domain]
+      properties:
+        code:
+          type: string
+        cookie_header:
+          type: string
+        user_agent:
+          type: string
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+    BrowserLink:
+      type: object
+      required: [token, user_id, created_at, expires_at]
+      properties:
+        token:
+          type: string
+        user_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+    ExtensionSyncCompleteRequest:
+      type: object
+      required: [link_token, access_token, domain]
+      properties:
+        link_token:
+          type: string
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        user_agent:
+          type: string
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+    SyncCompletedResponse:
+      type: object
+      required: [status, vinted_name, vinted_id, domain]
+      properties:
+        status:
+          type: string
+          enum: [completed]
+        vinted_name:
+          type: string
+        vinted_id:
+          type: integer
+          format: int64
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+    UpdatePhoneNumberRequest:
+      type: object
+      properties:
+        phone_number:
+          type: string
+    PhoneNumberStatusResponse:
+      type: object
+      required: [has_phone_number, last_check]
+      properties:
+        has_phone_number:
+          type: boolean
+        last_check:
+          type: string
+          format: date-time
+    UpdateDomainRequest:
+      type: object
+      required: [domain]
+      properties:
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+    DomainStatusResponse:
+      type: object
+      required: [domain, last_check]
+      properties:
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+        last_check:
+          type: string
+          format: date-time
+    ItemActionRequest:
+      type: object
+      required: [item_id]
+      properties:
+        item_id:
+          type: integer
+          format: int64
+    ItemActionResponse:
+      type: object
+      required: [status, item_id]
+      properties:
+        status:
+          type: string
+        item_id:
+          type: integer
+          format: int64
+    ConversationActionResponse:
+      type: object
+      required: [status, conversation_id]
+      properties:
+        status:
+          type: string
+        conversation_id:
+          type: integer
+          format: int64
+    SendMessageRequest:
+      type: object
+      required: [item_id, seller_id, message]
+      properties:
+        item_id:
+          type: integer
+          format: int64
+        seller_id:
+          type: integer
+          format: int64
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ReplyToConversationRequest:
+      type: object
+      required: [conversation_id, message]
+      properties:
+        conversation_id:
+          type: integer
+          format: int64
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    SendOfferRequest:
+      type: object
+      required: [item_id, seller_id, price]
+      properties:
+        item_id:
+          type: integer
+          format: int64
+        seller_id:
+          type: integer
+          format: int64
+        price:
+          type: string
+          example: "12.50"
+        currency:
+          type: string
+          default: EUR
+    OfferActionResponse:
+      type: object
+      required: [status, item_id, price]
+      properties:
+        status:
+          type: string
+          enum: [sent]
+        item_id:
+          type: integer
+          format: int64
+        price:
+          type: string
+    LikedItemsResponse:
+      type: object
+      required: [item_ids]
+      properties:
+        item_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+    OneClickBuyRequest:
+      type: object
+      required: [item_id, seller_id]
+      properties:
+        item_id:
+          type: integer
+          format: int64
+        seller_id:
+          type: integer
+          format: int64
+        incognia_request_token:
+          type: string
+        pickup_type:
+          type: integer
+        browser_info:
+          type: object
+          additionalProperties: true
+        payment_method:
+          type: object
+          additionalProperties: true
+        phone_number:
+          type: string
+    OneClickBuyResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        item_id:
+          type: integer
+          format: int64
+        seller_id:
+          type: integer
+          format: int64
+        transaction_id:
+          type: integer
+          format: int64
+        purchase_id:
+          type: string
+        checkout_url:
+          type: string
+          format: uri
+        payment_url:
+          type: string
+          format: uri
+        status:
+          type: string
+    StoreCheckoutLinkRequest:
+      type: object
+      properties:
+        item_id:
+          type: integer
+          format: int64
+        seller_id:
+          type: integer
+          format: int64
+        transaction_id:
+          type: integer
+          format: int64
+        purchase_id:
+          type: string
+        checkout_url:
+          type: string
+          format: uri
+        payment_url:
+          type: string
+          format: uri
+        status:
+          type: string
+    CheckoutLinksResponse:
+      type: object
+      required: [links]
+      properties:
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckoutLink"
+    CheckoutLink:
+      type: object
+      required: [item_id, seller_id, transaction_id, status, created_at]
+      properties:
+        item_id:
+          type: integer
+          format: int64
+        seller_id:
+          type: integer
+          format: int64
+        transaction_id:
+          type: integer
+          format: int64
+        purchase_id:
+          type: string
+        checkout_url:
+          type: string
+          format: uri
+        payment_url:
+          type: string
+          format: uri
+        domain:
+          $ref: "#/components/schemas/VintedDomain"
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    BrandSearchResponse:
+      type: object
+      required: [brands]
+      properties:
+        brands:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    VintedPassthroughResponse:
+      type: object
+      additionalProperties: true
+      description: Raw or lightly enriched Vinted upstream payload. Shape may change with Vinted.
+    VintedDomain:
+      type: string
+      example: vinted.de
