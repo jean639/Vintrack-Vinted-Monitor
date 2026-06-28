@@ -53,11 +53,6 @@ function percentile(values: number[], p: number) {
     return sorted[index];
 }
 
-function formatMs(value: number | null) {
-    if (value === null) return "n/a";
-    return `${value} ms`;
-}
-
 export default async function MonitorPage({
     params,
 }: {
@@ -371,13 +366,16 @@ export default async function MonitorPage({
                             Latest Results
                         </h2>
                         <MonitorMetricsDialog
-                            recentChecks={recentRuns.length}
-                            successRate={successRate}
-                            avgDuration={formatMs(avgDuration)}
-                            p95Duration={formatMs(p95Duration)}
-                            newItems={newItemsInWindow}
-                            failedChecks={failedCount}
-                            lastError={lastError}
+                            monitorId={monitor.id}
+                            initialMetrics={{
+                                recentChecks: recentRuns.length,
+                                successRate,
+                                avgDurationMs: avgDuration,
+                                p95DurationMs: p95Duration,
+                                newItems: newItemsInWindow,
+                                failedChecks: failedCount,
+                                lastError,
+                            }}
                         />
                     </div>
                     <LiveFeed monitorId={monitor.id} />
