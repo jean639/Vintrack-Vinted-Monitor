@@ -463,6 +463,57 @@ func (s *Store) SetMonitorStatus(monitorID int, status string) {
 	}
 }
 
+func (s *Store) RecordMonitorRun(run model.MonitorRun) {
+	if run.MonitorID <= 0 || run.Status == "" {
+		return
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO monitor_runs (
+			monitor_id, status, status_code, duration_ms, item_count,
+			new_item_count, error_message, proxy_source, region
+		)
+		VALUES ($1, $2, NULLIF($3, 0), NULLIF($4, 0), $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9)`,
+		run.MonitorID,
+		run.Status,
+		run.StatusCode,
+		run.DurationMS,
+		run.ItemCount,
+		run.NewItemCount,
+		run.ErrorMessage,
+		run.ProxySource,
+		run.Region,
+	)
+	if err != nil {
+		log.Printf("record monitor run for %d: %v", run.MonitorID, err)
+	}
+}
+
+func (s *Store) RecordMonitorEvent(event model.MonitorEvent) {
+	if event.MonitorID <= 0 || event.EventType == "" || event.Message == "" {
+		return
+	}
+	metadata := event.Metadata
+	if strings.TrimSpace(metadata) == "" {
+		metadata = "{}"
+	}
+	severity := event.Severity
+	if severity == "" {
+		severity = "info"
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO monitor_events (monitor_id, event_type, severity, message, metadata)
+		VALUES ($1, $2, $3, $4, $5::jsonb)`,
+		event.MonitorID,
+		event.EventType,
+		severity,
+		event.Message,
+		metadata,
+	)
+	if err != nil {
+		log.Printf("record monitor event for %d: %v", event.MonitorID, err)
+	}
+}
+
 func (s *Store) logHealthErrorOnce(monitorID int, err error) {
 	s.healthErrLogMu.Lock()
 	defer s.healthErrLogMu.Unlock()

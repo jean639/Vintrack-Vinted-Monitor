@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { auth } from "@/auth";
 import { LiveFeed } from "@/components/monitors/live-feed";
 import { Button } from "@/components/ui/button";
 import { toggleMonitorStatus, deleteMonitor } from "@/actions/monitor";
@@ -32,18 +33,45 @@ import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
 
+type MonitorRunRow = {
+    status: string;
+    duration_ms: number | null;
+    item_count: number;
+    new_item_count: number;
+    error_message: string | null;
+    checked_at: Date;
+};
+
+function percentile(values: number[], p: number) {
+    if (values.length === 0) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.min(
+        sorted.length - 1,
+        Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
+    );
+    return sorted[index];
+}
+
+function formatMs(value: number | null) {
+    if (value === null) return "n/a";
+    return `${value} ms`;
+}
+
 export default async function MonitorPage({
     params,
 }: {
     params: Promise<{ id: string }>;
 }) {
     const resolvedParams = await params;
+    const session = await auth();
+    if (!session?.user?.id) redirect("/login");
+
     const monitorId = parseInt(resolvedParams.id);
 
     if (isNaN(monitorId)) return notFound();
 
-    const monitor = await db.monitors.findUnique({
-        where: { id: monitorId },
+    const monitor = await db.monitors.findFirst({
+        where: { id: monitorId, userId: session.user.id },
         include: {
             _count: { select: { items: true } },
             proxy_group: { select: { name: true } },
@@ -67,6 +95,40 @@ export default async function MonitorPage({
         monitor.catalog_ids,
         monitor.region,
     );
+    const recentRuns = await db.$queryRaw<MonitorRunRow[]>`
+        SELECT status, duration_ms, item_count, new_item_count, error_message, checked_at
+        FROM monitor_runs
+        WHERE monitor_id = ${monitor.id}
+        ORDER BY checked_at DESC
+        LIMIT 100
+    `;
+    const successCount = recentRuns.filter(
+        (run) => run.status === "success",
+    ).length;
+    const failedCount = recentRuns.filter(
+        (run) => run.status === "failed",
+    ).length;
+    const durations = recentRuns
+        .map((run) => run.duration_ms)
+        .filter((value): value is number => typeof value === "number");
+    const avgDuration =
+        durations.length > 0
+            ? Math.round(
+                  durations.reduce((sum, value) => sum + value, 0) /
+                      durations.length,
+              )
+            : null;
+    const p95Duration = percentile(durations, 95);
+    const successRate =
+        recentRuns.length > 0
+            ? Math.round((successCount / recentRuns.length) * 100)
+            : null;
+    const newItemsInWindow = recentRuns.reduce(
+        (sum, run) => sum + run.new_item_count,
+        0,
+    );
+    const lastError =
+        recentRuns.find((run) => run.error_message)?.error_message ?? null;
 
     return (
         <MonitorLiveProvider initialItemCount={monitor._count.items}>
@@ -300,6 +362,62 @@ export default async function MonitorPage({
 
                 {monitor.status === "active" && (
                     <ProxyHealthCard monitorId={monitor.id} />
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="border-border/75 bg-card rounded-xl border p-4">
+                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                            Recent checks
+                        </p>
+                        <p className="mt-1 text-2xl font-semibold">
+                            {recentRuns.length}
+                        </p>
+                    </div>
+                    <div className="border-border/75 bg-card rounded-xl border p-4">
+                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                            Success rate
+                        </p>
+                        <p className="mt-1 text-2xl font-semibold">
+                            {successRate === null ? "n/a" : `${successRate}%`}
+                        </p>
+                    </div>
+                    <div className="border-border/75 bg-card rounded-xl border p-4">
+                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                            Avg latency
+                        </p>
+                        <p className="mt-1 text-2xl font-semibold">
+                            {formatMs(avgDuration)}
+                        </p>
+                    </div>
+                    <div className="border-border/75 bg-card rounded-xl border p-4">
+                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                            p95 latency
+                        </p>
+                        <p className="mt-1 text-2xl font-semibold">
+                            {formatMs(p95Duration)}
+                        </p>
+                    </div>
+                    <div className="border-border/75 bg-card rounded-xl border p-4">
+                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                            New items
+                        </p>
+                        <p className="mt-1 text-2xl font-semibold">
+                            {newItemsInWindow}
+                        </p>
+                    </div>
+                </div>
+
+                {(failedCount > 0 || lastError) && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-500/20 dark:bg-amber-500/10">
+                        <p className="text-[13px] font-semibold text-amber-900 dark:text-amber-200">
+                            Recent monitor issues
+                        </p>
+                        <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">
+                            {failedCount} failed check
+                            {failedCount === 1 ? "" : "s"} in the latest 100
+                            runs{lastError ? ` · ${lastError}` : ""}.
+                        </p>
+                    </div>
                 )}
 
                 <div>
