@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { logAuditEvent } from "@/lib/audit";
 
 const API_URL = process.env.VINTED_SERVICE_URL || "http://localhost:4000";
 
@@ -11,6 +12,12 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.text();
+        const parsed = JSON.parse(body || "{}") as {
+            item_id?: unknown;
+            seller_id?: unknown;
+            price?: unknown;
+            currency?: unknown;
+        };
         const res = await fetch(`${API_URL}/api/offers/send`, {
             method: "POST",
             headers: {
@@ -29,6 +36,23 @@ export async function POST(req: NextRequest) {
         }
 
         if (!res.ok) {
+            await logAuditEvent({
+                userId: session.user.id,
+                action: "offer.send",
+                targetType: "item",
+                targetId:
+                    typeof parsed.item_id === "number" ||
+                    typeof parsed.item_id === "string"
+                        ? parsed.item_id
+                        : null,
+                status: "failed",
+                metadata: {
+                    http_status: res.status,
+                    seller_id: parsed.seller_id ?? null,
+                    price: parsed.price ?? null,
+                    currency: parsed.currency ?? null,
+                },
+            });
             return NextResponse.json(
                 {
                     error:
@@ -40,8 +64,32 @@ export async function POST(req: NextRequest) {
             );
         }
 
+        await logAuditEvent({
+            userId: session.user.id,
+            action: "offer.send",
+            targetType: "item",
+            targetId:
+                typeof parsed.item_id === "number" ||
+                typeof parsed.item_id === "string"
+                    ? parsed.item_id
+                    : null,
+            status: "success",
+            metadata: {
+                http_status: res.status,
+                seller_id: parsed.seller_id ?? null,
+                price: parsed.price ?? null,
+                currency: parsed.currency ?? null,
+            },
+        });
         return NextResponse.json(data, { status: res.status });
     } catch {
+        await logAuditEvent({
+            userId: session.user.id,
+            action: "offer.send",
+            targetType: "item",
+            status: "failed",
+            metadata: { error: "vinted_service_unreachable" },
+        });
         return NextResponse.json(
             { error: "Vinted service unreachable" },
             { status: 502 },

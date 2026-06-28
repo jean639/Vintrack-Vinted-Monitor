@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { logAuditEvent } from "@/lib/audit";
 
 const API_URL = process.env.VINTED_SERVICE_URL || "http://localhost:4000";
 
@@ -73,6 +74,24 @@ async function apiFetch<T extends object = Record<string, unknown>>(
     return data as T & { error?: never };
 }
 
+async function auditAccountAction(
+    action: string,
+    result: { error?: string },
+    metadata?: Record<string, unknown>,
+) {
+    const session = await auth();
+    await logAuditEvent({
+        userId: session?.user?.id,
+        action,
+        targetType: "vinted_session",
+        status: result.error ? "failed" : "success",
+        metadata: {
+            ...metadata,
+            error: result.error ?? null,
+        },
+    });
+}
+
 export async function getAccountStatus(): Promise<VintedAccountStatus> {
     const session = await auth();
     if (!session?.user?.id) {
@@ -121,7 +140,7 @@ export async function linkVintedAccount(
     refreshToken?: string,
     phoneNumber?: string,
 ) {
-    return apiFetch<{
+    const result = await apiFetch<{
         linked: boolean;
         vinted_name: string;
         vinted_id: number;
@@ -139,32 +158,48 @@ export async function linkVintedAccount(
             phone_number: phoneNumber || "",
         }),
     });
+    await auditAccountAction("vinted_session.link", result, {
+        domain,
+        has_refresh_token: Boolean(refreshToken),
+        has_phone_number: Boolean(phoneNumber),
+    });
+    return result;
 }
 
 export async function unlinkVintedAccount() {
-    return apiFetch("/api/account/unlink", {
+    const result = await apiFetch("/api/account/unlink", {
         method: "DELETE",
     });
+    await auditAccountAction("vinted_session.unlink", result);
+    return result;
 }
 
 export async function updateVintedPhoneNumber(phoneNumber: string) {
-    return apiFetch<{
+    const result = await apiFetch<{
         has_phone_number: boolean;
         last_check: string;
     }>("/api/account/phone", {
         method: "POST",
         body: JSON.stringify({ phone_number: phoneNumber }),
     });
+    await auditAccountAction("vinted_session.phone_update", result, {
+        has_phone_number: Boolean(phoneNumber),
+    });
+    return result;
 }
 
 export async function updateVintedDomain(domain: string) {
-    return apiFetch<{
+    const result = await apiFetch<{
         domain: string;
         last_check: string;
     }>("/api/account/domain", {
         method: "POST",
         body: JSON.stringify({ domain }),
     });
+    await auditAccountAction("vinted_session.domain_update", result, {
+        domain,
+    });
+    return result;
 }
 
 export async function getVintedAccountInfo() {
@@ -172,9 +207,11 @@ export async function getVintedAccountInfo() {
 }
 
 export async function refreshVintedSession() {
-    return apiFetch("/api/account/refresh", {
+    const result = await apiFetch("/api/account/refresh", {
         method: "POST",
     });
+    await auditAccountAction("vinted_session.refresh", result);
+    return result;
 }
 
 export async function likeItem(itemId: number) {

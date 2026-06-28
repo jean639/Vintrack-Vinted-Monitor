@@ -29,9 +29,9 @@ type retryResponse struct {
 	} `json:"parameters"`
 }
 
-func SendItem(chatID string, item model.Item, monitorName string, proxySource string) {
+func SendItem(chatID string, item model.Item, monitorName string, proxySource string) error {
 	if chatID == "" {
-		return
+		return nil
 	}
 
 	if item.ImageURL != "" {
@@ -46,7 +46,7 @@ func SendItem(chatID string, item model.Item, monitorName string, proxySource st
 		}
 
 		if err := send("sendPhoto", payload); err == nil {
-			return
+			return nil
 		} else {
 			log.Printf("telegram send photo error: %v", err)
 		}
@@ -64,7 +64,9 @@ func SendItem(chatID string, item model.Item, monitorName string, proxySource st
 
 	if err := send("sendMessage", payload); err != nil {
 		log.Printf("telegram send item error: %v", err)
+		return err
 	}
+	return nil
 }
 
 func SendStartup(chatID string, monitorName string) {

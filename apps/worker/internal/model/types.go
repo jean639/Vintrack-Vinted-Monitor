@@ -102,6 +102,36 @@ type MonitorHealth struct {
 	UpdatedAt       string `json:"updated_at"`
 }
 
+type MonitorRun struct {
+	MonitorID    int
+	Status       string
+	StatusCode   int
+	DurationMS   int
+	ItemCount    int
+	NewItemCount int
+	ErrorMessage string
+	ProxySource  string
+	Region       string
+}
+
+type MonitorEvent struct {
+	MonitorID int
+	EventType string
+	Severity  string
+	Message   string
+	Metadata  string
+}
+
+type AlertEvent struct {
+	UserID        string
+	MonitorID     int
+	ItemID        int64
+	Channel       string
+	Status        string
+	FailureReason string
+	Metadata      string
+}
+
 // --- Vinted API response types ---
 
 type VintedResponse struct {

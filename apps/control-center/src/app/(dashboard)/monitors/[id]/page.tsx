@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { auth } from "@/auth";
 import { LiveFeed } from "@/components/monitors/live-feed";
 import { Button } from "@/components/ui/button";
 import { toggleMonitorStatus, deleteMonitor } from "@/actions/monitor";
@@ -31,6 +32,25 @@ import { getMonitorActivationState } from "@/lib/monitor-limits";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
+import { MonitorMetricsDialog } from "@/components/monitors/monitor-metrics-dialog";
+
+type MonitorRunRow = {
+    status: string;
+    duration_ms: number | null;
+    item_count: number;
+    error_message: string | null;
+    checked_at: Date;
+};
+
+function percentile(values: number[], p: number) {
+    if (values.length === 0) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.min(
+        sorted.length - 1,
+        Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
+    );
+    return sorted[index];
+}
 
 export default async function MonitorPage({
     params,
@@ -38,12 +58,15 @@ export default async function MonitorPage({
     params: Promise<{ id: string }>;
 }) {
     const resolvedParams = await params;
+    const session = await auth();
+    if (!session?.user?.id) redirect("/login");
+
     const monitorId = parseInt(resolvedParams.id);
 
     if (isNaN(monitorId)) return notFound();
 
-    const monitor = await db.monitors.findUnique({
-        where: { id: monitorId },
+    const monitor = await db.monitors.findFirst({
+        where: { id: monitorId, userId: session.user.id },
         include: {
             _count: { select: { items: true } },
             proxy_group: { select: { name: true } },
@@ -67,6 +90,45 @@ export default async function MonitorPage({
         monitor.catalog_ids,
         monitor.region,
     );
+    const recentRuns = await db.$queryRaw<MonitorRunRow[]>`
+        SELECT status, duration_ms, item_count, error_message, checked_at
+        FROM monitor_runs
+        WHERE monitor_id = ${monitor.id}
+        ORDER BY checked_at DESC
+        LIMIT 100
+    `;
+    const successCount = recentRuns.filter(
+        (run) => run.status === "success",
+    ).length;
+    const failedCount = recentRuns.filter(
+        (run) => run.status === "failed",
+    ).length;
+    const durations = recentRuns
+        .map((run) => run.duration_ms)
+        .filter((value): value is number => typeof value === "number");
+    const avgDuration =
+        durations.length > 0
+            ? Math.round(
+                  durations.reduce((sum, value) => sum + value, 0) /
+                      durations.length,
+              )
+            : null;
+    const p95Duration = percentile(durations, 95);
+    const successRate =
+        recentRuns.length > 0
+            ? Math.round((successCount / recentRuns.length) * 100)
+            : null;
+    const oldestRecentRunAt = recentRuns.at(-1)?.checked_at ?? null;
+    const savedItemsInWindow = oldestRecentRunAt
+        ? await db.items.count({
+              where: {
+                  monitor_id: monitor.id,
+                  found_at: { gte: oldestRecentRunAt },
+              },
+          })
+        : 0;
+    const lastError =
+        recentRuns.find((run) => run.error_message)?.error_message ?? null;
 
     return (
         <MonitorLiveProvider initialItemCount={monitor._count.items}>
@@ -303,9 +365,23 @@ export default async function MonitorPage({
                 )}
 
                 <div>
-                    <h2 className="mb-4 text-lg font-semibold">
-                        Latest Results
-                    </h2>
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <h2 className="text-lg font-semibold">
+                            Latest Results
+                        </h2>
+                        <MonitorMetricsDialog
+                            monitorId={monitor.id}
+                            initialMetrics={{
+                                recentChecks: recentRuns.length,
+                                successRate,
+                                avgDurationMs: avgDuration,
+                                p95DurationMs: p95Duration,
+                                newItems: savedItemsInWindow,
+                                failedChecks: failedCount,
+                                lastError,
+                            }}
+                        />
+                    </div>
                     <LiveFeed monitorId={monitor.id} />
                 </div>
             </div>

@@ -51,6 +51,8 @@ model User {
   telegram_connections telegram_connections[]
   telegram_connect_codes telegram_connect_codes[]
   vinted_session vinted_sessions?
+  audit_events audit_events[]
+  alert_events alert_events[]
 }
 
 model monitor_limits {
@@ -104,6 +106,75 @@ model monitors {
 
   proxy_group_id Int?
   proxy_group    proxy_groups? @relation(fields: [proxy_group_id], references: [id], onDelete: SetNull)
+  monitor_runs   monitor_runs[]
+  monitor_events monitor_events[]
+  alert_events   alert_events[]
+}
+
+model monitor_runs {
+  id              BigInt   @id @default(autoincrement())
+  monitor_id      Int
+  monitor         monitors @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  status          String   @db.VarChar(50)
+  status_code     Int?
+  duration_ms     Int?
+  item_count      Int      @default(0)
+  new_item_count  Int      @default(0)
+  error_message   String?  @db.Text
+  proxy_source    String?  @db.VarChar(255)
+  region          String   @db.VarChar(10)
+  checked_at      DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([monitor_id, checked_at])
+  @@index([status])
+}
+
+model monitor_events {
+  id          BigInt   @id @default(autoincrement())
+  monitor_id  Int
+  monitor     monitors @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  event_type  String   @db.VarChar(100)
+  severity    String   @default("info") @db.VarChar(20)
+  message     String   @db.Text
+  metadata    Json?
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([monitor_id, created_at])
+  @@index([event_type])
+}
+
+model audit_events {
+  id          BigInt   @id @default(autoincrement())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String   @db.VarChar(100)
+  target_type String?  @db.VarChar(100)
+  target_id   String?  @db.VarChar(255)
+  status      String   @default("success") @db.VarChar(50)
+  metadata    Json?
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([userId, created_at])
+  @@index([action])
+}
+
+model alert_events {
+  id             BigInt   @id @default(autoincrement())
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  monitor_id     Int?
+  monitor        monitors? @relation(fields: [monitor_id], references: [id], onDelete: SetNull)
+  item_id        BigInt?
+  channel        String   @db.VarChar(50)
+  status         String   @db.VarChar(50)
+  failure_reason String?  @db.Text
+  metadata       Json?
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([userId, created_at])
+  @@index([monitor_id, created_at])
+  @@index([item_id])
+  @@index([channel, status])
 }
 
 model telegram_connections {

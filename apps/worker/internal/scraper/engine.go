@@ -142,6 +142,19 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			LastError:       "no valid proxies available",
 			UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
 		})
+		e.db.RecordMonitorRun(model.MonitorRun{
+			MonitorID:    m.ID,
+			Status:       "failed",
+			ErrorMessage: "no valid proxies available",
+			ProxySource:  proxySource,
+			Region:       m.Region,
+		})
+		e.db.RecordMonitorEvent(model.MonitorEvent{
+			MonitorID: m.ID,
+			EventType: "proxy_unavailable",
+			Severity:  "error",
+			Message:   "No valid proxies available for monitor",
+		})
 		if m.WebhookActive && m.DiscordWebhook.String != "" {
 			discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, -1)
 		}
@@ -231,6 +244,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				LastError:       "proxy group bandwidth limit reached",
 				UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
 			})
+			e.db.RecordMonitorEvent(model.MonitorEvent{
+				MonitorID: m.ID,
+				EventType: "bandwidth_limit_reached",
+				Severity:  "warning",
+				Message:   "Proxy group bandwidth limit reached; monitor was paused",
+			})
 			e.db.SetMonitorStatus(m.ID, "paused")
 			return
 		}
@@ -282,6 +301,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 
 		var items []model.VintedItem
 		gotSuccess := false
+		lastStatus := 0
 		remaining := len(clients)
 
 		timeout := time.NewTimer(3 * time.Second)
@@ -290,6 +310,9 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			select {
 			case r := <-resultCh:
 				remaining--
+				if r.status != 0 {
+					lastStatus = r.status
+				}
 				if r.err != nil {
 					if pool != nil && r.client != nil {
 						pool.Replace(r.client)
@@ -355,6 +378,15 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 
 		if !gotSuccess {
+			e.db.RecordMonitorRun(model.MonitorRun{
+				MonitorID:    m.ID,
+				Status:       "failed",
+				StatusCode:   lastStatus,
+				DurationMS:   int(time.Since(cycleStart).Milliseconds()),
+				ErrorMessage: "all fetchers failed",
+				ProxySource:  proxySource,
+				Region:       m.Region,
+			})
 			consecutiveErrors++
 			totalErrors++
 			if consecutiveErrors%5 == 0 {
@@ -372,6 +404,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			if consecutiveErrors >= maxConsecutiveErrors {
 				log.Printf("[%d] ❌ auto-stopping: %d consecutive errors", m.ID, consecutiveErrors)
 				e.db.SetMonitorStatus(m.ID, "error")
+				e.db.RecordMonitorEvent(model.MonitorEvent{
+					MonitorID: m.ID,
+					EventType: "auto_stopped",
+					Severity:  "error",
+					Message:   fmt.Sprintf("Monitor auto-stopped after %d consecutive fetch errors", consecutiveErrors),
+				})
 				if m.WebhookActive && m.DiscordWebhook.String != "" {
 					discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, consecutiveErrors)
 				}
@@ -394,6 +432,15 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 
 		if len(items) == 0 {
+			e.db.RecordMonitorRun(model.MonitorRun{
+				MonitorID:   m.ID,
+				Status:      "success",
+				StatusCode:  lastStatus,
+				DurationMS:  int(time.Since(cycleStart).Milliseconds()),
+				ItemCount:   0,
+				ProxySource: proxySource,
+				Region:      m.Region,
+			})
 			if !initialized {
 				initialized = true
 				log.Printf("[%d] initial scan completed with no items", m.ID)
@@ -418,6 +465,15 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 
 		if len(seedItems) > 0 {
 			log.Printf("[%d] initial scan seeded %d items without notifications", m.ID, len(seedItems))
+			e.db.RecordMonitorRun(model.MonitorRun{
+				MonitorID:   m.ID,
+				Status:      "success",
+				StatusCode:  lastStatus,
+				DurationMS:  int(time.Since(cycleStart).Milliseconds()),
+				ItemCount:   len(items),
+				ProxySource: proxySource,
+				Region:      m.Region,
+			})
 
 			seedIDs := make([]int64, len(seedItems))
 			for i, item := range seedItems {
@@ -442,6 +498,15 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 
 		if len(processItems) == 0 {
+			e.db.RecordMonitorRun(model.MonitorRun{
+				MonitorID:   m.ID,
+				Status:      "success",
+				StatusCode:  lastStatus,
+				DurationMS:  int(time.Since(cycleStart).Milliseconds()),
+				ItemCount:   len(items),
+				ProxySource: proxySource,
+				Region:      m.Region,
+			})
 			if !initialized {
 				initialized = true
 			}
@@ -464,6 +529,16 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		initialized = true
 
 		if len(alertItems) == 0 {
+			e.db.RecordMonitorRun(model.MonitorRun{
+				MonitorID:    m.ID,
+				Status:       "success",
+				StatusCode:   lastStatus,
+				DurationMS:   int(time.Since(cycleStart).Milliseconds()),
+				ItemCount:    len(items),
+				NewItemCount: len(processItems),
+				ProxySource:  proxySource,
+				Region:       m.Region,
+			})
 			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 				time.Sleep(remaining)
 			}
@@ -471,6 +546,16 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		}
 
 		log.Printf("[%d] #%d | %d items | %d new | %dms", m.ID, checks, len(items), len(alertItems), time.Since(cycleStart).Milliseconds())
+		e.db.RecordMonitorRun(model.MonitorRun{
+			MonitorID:    m.ID,
+			Status:       "success",
+			StatusCode:   lastStatus,
+			DurationMS:   int(time.Since(cycleStart).Milliseconds()),
+			ItemCount:    len(items),
+			NewItemCount: len(alertItems),
+			ProxySource:  proxySource,
+			Region:       m.Region,
+		})
 
 		builtItems := e.buildItems(m, alertItems)
 
@@ -609,6 +694,14 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 		hasActiveAlert := (webhook != "" && webhookActive) || (telegramChatID != "" && telegramActive)
 		if hasActiveAlert && dedupeAlerts && !e.db.ClaimUserItemAlert(userID, items[i].ID) {
 			log.Printf("[%d] alert skipped for item %d: already sent for user", monitorID, items[i].ID)
+			e.db.RecordAlertEvent(model.AlertEvent{
+				UserID:        userID,
+				MonitorID:     monitorID,
+				ItemID:        items[i].ID,
+				Channel:       "all",
+				Status:        "skipped",
+				FailureReason: "duplicate_user_item_alert",
+			})
 			continue
 		}
 
@@ -618,7 +711,24 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 				return
 			default:
 			}
-			discord.SendWebhook(webhook, items[i], monitorName, ps)
+			if err := discord.SendWebhook(webhook, items[i], monitorName, ps); err != nil {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:        userID,
+					MonitorID:     monitorID,
+					ItemID:        items[i].ID,
+					Channel:       "discord",
+					Status:        "failed",
+					FailureReason: err.Error(),
+				})
+			} else {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:    userID,
+					MonitorID: monitorID,
+					ItemID:    items[i].ID,
+					Channel:   "discord",
+					Status:    "sent",
+				})
+			}
 		}
 		if telegramChatID != "" && telegramActive {
 			select {
@@ -626,7 +736,24 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 				return
 			default:
 			}
-			telegram.SendItem(telegramChatID, items[i], monitorName, ps)
+			if err := telegram.SendItem(telegramChatID, items[i], monitorName, ps); err != nil {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:        userID,
+					MonitorID:     monitorID,
+					ItemID:        items[i].ID,
+					Channel:       "telegram",
+					Status:        "failed",
+					FailureReason: err.Error(),
+				})
+			} else {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:    userID,
+					MonitorID: monitorID,
+					ItemID:    items[i].ID,
+					Channel:   "telegram",
+					Status:    "sent",
+				})
+			}
 		}
 	}
 }
