@@ -38,7 +38,6 @@ type MonitorRunRow = {
     status: string;
     duration_ms: number | null;
     item_count: number;
-    new_item_count: number;
     error_message: string | null;
     checked_at: Date;
 };
@@ -92,7 +91,7 @@ export default async function MonitorPage({
         monitor.region,
     );
     const recentRuns = await db.$queryRaw<MonitorRunRow[]>`
-        SELECT status, duration_ms, item_count, new_item_count, error_message, checked_at
+        SELECT status, duration_ms, item_count, error_message, checked_at
         FROM monitor_runs
         WHERE monitor_id = ${monitor.id}
         ORDER BY checked_at DESC
@@ -119,10 +118,15 @@ export default async function MonitorPage({
         recentRuns.length > 0
             ? Math.round((successCount / recentRuns.length) * 100)
             : null;
-    const newItemsInWindow = recentRuns.reduce(
-        (sum, run) => sum + run.new_item_count,
-        0,
-    );
+    const oldestRecentRunAt = recentRuns.at(-1)?.checked_at ?? null;
+    const savedItemsInWindow = oldestRecentRunAt
+        ? await db.items.count({
+              where: {
+                  monitor_id: monitor.id,
+                  found_at: { gte: oldestRecentRunAt },
+              },
+          })
+        : 0;
     const lastError =
         recentRuns.find((run) => run.error_message)?.error_message ?? null;
 
@@ -372,7 +376,7 @@ export default async function MonitorPage({
                                 successRate,
                                 avgDurationMs: avgDuration,
                                 p95DurationMs: p95Duration,
-                                newItems: newItemsInWindow,
+                                newItems: savedItemsInWindow,
                                 failedChecks: failedCount,
                                 lastError,
                             }}

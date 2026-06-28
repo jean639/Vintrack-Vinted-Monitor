@@ -112,7 +112,7 @@ export function MonitorMetricsDialog({
             <DialogContent className="sm:max-w-xl">
                 <DialogHeader>
                     <div className="flex items-start justify-between gap-4 pr-8">
-                        <div>
+                        <div className="space-y-1.5">
                             <DialogTitle>Monitor Health</DialogTitle>
                             <DialogDescription>
                                 Latest 100 worker checks. Refreshes every 10
@@ -156,7 +156,7 @@ export function MonitorMetricsDialog({
                     <Metric
                         label="New items"
                         value={String(newItems)}
-                        description="New matching items found in the included checks."
+                        description="Items saved since the oldest check included here."
                     />
                     <Metric
                         label="Failed checks"
