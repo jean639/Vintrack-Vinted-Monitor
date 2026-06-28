@@ -10,7 +10,7 @@ type MetricsRow = {
     failed_count: bigint;
     avg_duration_ms: number | null;
     p95_duration_ms: number | null;
-    new_item_count: bigint;
+    saved_item_count: bigint;
     last_error: string | null;
 };
 
@@ -39,11 +39,15 @@ export async function GET(
 
     const rows = await db.$queryRaw<MetricsRow[]>`
         WITH recent AS (
-            SELECT status, duration_ms, new_item_count, error_message, checked_at
+            SELECT status, duration_ms, error_message, checked_at
             FROM monitor_runs
             WHERE monitor_id = ${monitorId}
             ORDER BY checked_at DESC
             LIMIT 100
+        ),
+        bounds AS (
+            SELECT MIN(checked_at) AS oldest_check_at
+            FROM recent
         )
         SELECT
             COUNT(*)::bigint AS total_checks,
@@ -51,7 +55,13 @@ export async function GET(
             COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed_count,
             AVG(duration_ms)::float AS avg_duration_ms,
             percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::float AS p95_duration_ms,
-            COALESCE(SUM(new_item_count), 0)::bigint AS new_item_count,
+            (
+                SELECT COUNT(*)::bigint
+                FROM items i, bounds b
+                WHERE i.monitor_id = ${monitorId}
+                  AND b.oldest_check_at IS NOT NULL
+                  AND i.found_at >= b.oldest_check_at
+            ) AS saved_item_count,
             (
                 SELECT error_message
                 FROM recent
@@ -82,7 +92,7 @@ export async function GET(
             row?.p95_duration_ms === null || row?.p95_duration_ms === undefined
                 ? null
                 : Math.round(row.p95_duration_ms),
-        newItemCount: Number(row?.new_item_count ?? 0),
+        newItemCount: Number(row?.saved_item_count ?? 0),
         lastError: row?.last_error ?? null,
     });
 }
