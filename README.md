@@ -37,6 +37,7 @@
   <a href="#features">Features</a> •
   <a href="#community--support">Community</a> •
   <a href="#architecture">Architecture</a> •
+  <a href="#api-contracts">API Contracts</a> •
   <a href="#screenshots">Screenshots</a> •
   <a href="#contributing">Contributing</a>
 </p>
@@ -124,6 +125,10 @@ Link your Vinted account directly in the dashboard to interact with listings wit
 - **Status monitoring** — see your linked account status, username, and domain at a glance
 
 The recommended linking flow is the browser extension. Install it once, sign in to Vinted in the same browser, then connect it from the Vintrack Account page. Manual token linking still exists as a fallback, but normal users should not need it.
+
+### API Contracts
+
+Internal service contracts live in [`docs/openapi`](./docs/openapi). The first documented contract is the Vinted Service API used by the control center and browser extension.
 
 ### Browser Extension
 
