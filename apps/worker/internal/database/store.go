@@ -514,6 +514,32 @@ func (s *Store) RecordMonitorEvent(event model.MonitorEvent) {
 	}
 }
 
+func (s *Store) RecordAlertEvent(event model.AlertEvent) {
+	if event.Channel == "" || event.Status == "" {
+		return
+	}
+	metadata := event.Metadata
+	if strings.TrimSpace(metadata) == "" {
+		metadata = "{}"
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO alert_events (
+			"userId", monitor_id, item_id, channel, status, failure_reason, metadata
+		)
+		VALUES (NULLIF($1, ''), NULLIF($2, 0), NULLIF($3, 0), $4, $5, NULLIF($6, ''), $7::jsonb)`,
+		event.UserID,
+		event.MonitorID,
+		event.ItemID,
+		event.Channel,
+		event.Status,
+		event.FailureReason,
+		metadata,
+	)
+	if err != nil {
+		log.Printf("record alert event for monitor %d item %d: %v", event.MonitorID, event.ItemID, err)
+	}
+}
+
 func (s *Store) logHealthErrorOnce(monitorID int, err error) {
 	s.healthErrLogMu.Lock()
 	defer s.healthErrLogMu.Unlock()

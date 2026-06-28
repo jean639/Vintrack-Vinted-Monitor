@@ -15,9 +15,9 @@ import (
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
-func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySource string) {
+func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySource string) error {
 	if webhookURL == "" {
-		return
+		return nil
 	}
 
 	baseURL := os.Getenv("DASHBOARD_URL")
@@ -69,15 +69,19 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("webhook marshal error: %v", err)
-		return
+		return err
 	}
 
 	resp, err := httpClient.Post(webhookURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		log.Printf("webhook error: %v", err)
-		return
+		return err
 	}
 	resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
 
 	if resp.StatusCode == 429 {
 		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
@@ -90,12 +94,18 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 				resp2, err := httpClient.Post(webhookURL, "application/json", bytes.NewReader(body))
 				if err == nil {
 					resp2.Body.Close()
+					if resp2.StatusCode >= 200 && resp2.StatusCode < 300 {
+						return nil
+					}
+					return fmt.Errorf("discord webhook returned %d after retry", resp2.StatusCode)
 				}
+				return err
 			}
 		} else {
 			time.Sleep(2 * time.Second)
 		}
 	}
+	return fmt.Errorf("discord webhook returned %d", resp.StatusCode)
 }
 
 func SendStartupWebhook(webhookURL string, monitorName string) {
