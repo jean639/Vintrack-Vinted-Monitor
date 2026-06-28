@@ -52,6 +52,7 @@ model User {
   telegram_connect_codes telegram_connect_codes[]
   vinted_session vinted_sessions?
   audit_events audit_events[]
+  alert_events alert_events[]
 }
 
 model monitor_limits {
@@ -107,6 +108,7 @@ model monitors {
   proxy_group    proxy_groups? @relation(fields: [proxy_group_id], references: [id], onDelete: SetNull)
   monitor_runs   monitor_runs[]
   monitor_events monitor_events[]
+  alert_events   alert_events[]
 }
 
 model monitor_runs {
@@ -154,6 +156,25 @@ model audit_events {
 
   @@index([userId, created_at])
   @@index([action])
+}
+
+model alert_events {
+  id             BigInt   @id @default(autoincrement())
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  monitor_id     Int?
+  monitor        monitors? @relation(fields: [monitor_id], references: [id], onDelete: SetNull)
+  item_id        BigInt?
+  channel        String   @db.VarChar(50)
+  status         String   @db.VarChar(50)
+  failure_reason String?  @db.Text
+  metadata       Json?
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([userId, created_at])
+  @@index([monitor_id, created_at])
+  @@index([item_id])
+  @@index([channel, status])
 }
 
 model telegram_connections {

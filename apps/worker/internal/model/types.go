@@ -122,6 +122,16 @@ type MonitorEvent struct {
 	Metadata  string
 }
 
+type AlertEvent struct {
+	UserID        string
+	MonitorID     int
+	ItemID        int64
+	Channel       string
+	Status        string
+	FailureReason string
+	Metadata      string
+}
+
 // --- Vinted API response types ---
 
 type VintedResponse struct {

@@ -694,6 +694,14 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 		hasActiveAlert := (webhook != "" && webhookActive) || (telegramChatID != "" && telegramActive)
 		if hasActiveAlert && dedupeAlerts && !e.db.ClaimUserItemAlert(userID, items[i].ID) {
 			log.Printf("[%d] alert skipped for item %d: already sent for user", monitorID, items[i].ID)
+			e.db.RecordAlertEvent(model.AlertEvent{
+				UserID:        userID,
+				MonitorID:     monitorID,
+				ItemID:        items[i].ID,
+				Channel:       "all",
+				Status:        "skipped",
+				FailureReason: "duplicate_user_item_alert",
+			})
 			continue
 		}
 
@@ -703,7 +711,24 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 				return
 			default:
 			}
-			discord.SendWebhook(webhook, items[i], monitorName, ps)
+			if err := discord.SendWebhook(webhook, items[i], monitorName, ps); err != nil {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:        userID,
+					MonitorID:     monitorID,
+					ItemID:        items[i].ID,
+					Channel:       "discord",
+					Status:        "failed",
+					FailureReason: err.Error(),
+				})
+			} else {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:    userID,
+					MonitorID: monitorID,
+					ItemID:    items[i].ID,
+					Channel:   "discord",
+					Status:    "sent",
+				})
+			}
 		}
 		if telegramChatID != "" && telegramActive {
 			select {
@@ -711,7 +736,24 @@ func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []
 				return
 			default:
 			}
-			telegram.SendItem(telegramChatID, items[i], monitorName, ps)
+			if err := telegram.SendItem(telegramChatID, items[i], monitorName, ps); err != nil {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:        userID,
+					MonitorID:     monitorID,
+					ItemID:        items[i].ID,
+					Channel:       "telegram",
+					Status:        "failed",
+					FailureReason: err.Error(),
+				})
+			} else {
+				e.db.RecordAlertEvent(model.AlertEvent{
+					UserID:    userID,
+					MonitorID: monitorID,
+					ItemID:    items[i].ID,
+					Channel:   "telegram",
+					Status:    "sent",
+				})
+			}
 		}
 	}
 }
