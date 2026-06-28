@@ -32,6 +32,7 @@ import { getMonitorActivationState } from "@/lib/monitor-limits";
 import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
+import { MonitorMetricsDialog } from "@/components/monitors/monitor-metrics-dialog";
 
 type MonitorRunRow = {
     status: string;
@@ -364,66 +365,21 @@ export default async function MonitorPage({
                     <ProxyHealthCard monitorId={monitor.id} />
                 )}
 
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                    <div className="border-border/75 bg-card rounded-xl border p-4">
-                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                            Recent checks
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold">
-                            {recentRuns.length}
-                        </p>
-                    </div>
-                    <div className="border-border/75 bg-card rounded-xl border p-4">
-                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                            Success rate
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold">
-                            {successRate === null ? "n/a" : `${successRate}%`}
-                        </p>
-                    </div>
-                    <div className="border-border/75 bg-card rounded-xl border p-4">
-                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                            Avg latency
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold">
-                            {formatMs(avgDuration)}
-                        </p>
-                    </div>
-                    <div className="border-border/75 bg-card rounded-xl border p-4">
-                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                            p95 latency
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold">
-                            {formatMs(p95Duration)}
-                        </p>
-                    </div>
-                    <div className="border-border/75 bg-card rounded-xl border p-4">
-                        <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                            New items
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold">
-                            {newItemsInWindow}
-                        </p>
-                    </div>
-                </div>
-
-                {(failedCount > 0 || lastError) && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-500/20 dark:bg-amber-500/10">
-                        <p className="text-[13px] font-semibold text-amber-900 dark:text-amber-200">
-                            Recent monitor issues
-                        </p>
-                        <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">
-                            {failedCount} failed check
-                            {failedCount === 1 ? "" : "s"} in the latest 100
-                            runs{lastError ? ` · ${lastError}` : ""}.
-                        </p>
-                    </div>
-                )}
-
                 <div>
-                    <h2 className="mb-4 text-lg font-semibold">
-                        Latest Results
-                    </h2>
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <h2 className="text-lg font-semibold">
+                            Latest Results
+                        </h2>
+                        <MonitorMetricsDialog
+                            recentChecks={recentRuns.length}
+                            successRate={successRate}
+                            avgDuration={formatMs(avgDuration)}
+                            p95Duration={formatMs(p95Duration)}
+                            newItems={newItemsInWindow}
+                            failedChecks={failedCount}
+                            lastError={lastError}
+                        />
+                    </div>
                     <LiveFeed monitorId={monitor.id} />
                 </div>
             </div>
