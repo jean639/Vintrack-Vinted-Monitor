@@ -526,7 +526,7 @@ func (s *Store) RecordAlertEvent(event model.AlertEvent) {
 		INSERT INTO alert_events (
 			"userId", monitor_id, item_id, channel, status, failure_reason, metadata
 		)
-		VALUES (NULLIF($1, ''), NULLIF($2, 0), NULLIF($3, 0), $4, $5, NULLIF($6, ''), $7::jsonb)`,
+		VALUES (NULLIF($1, ''), NULLIF($2, 0), NULLIF($3, 0::bigint), $4, $5, NULLIF($6, ''), $7::jsonb)`,
 		event.UserID,
 		event.MonitorID,
 		event.ItemID,
