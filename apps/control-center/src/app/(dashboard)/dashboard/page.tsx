@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getCategoryLabelsForRegion } from "@/lib/categories.server";
 import { redirect } from "next/navigation";
 import { DashboardClient, type Monitor } from "./client";
+import { getBannedSellerIds, visibleSellerWhere } from "@/lib/seller-bans";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,18 @@ export default async function DashboardPage() {
         where: { id: session.user.id },
         select: { dedupe_monitor_alerts: true },
     });
+    const bannedSellerIds = await getBannedSellerIds(session.user.id);
+    const visibleCounts = await db.items.groupBy({
+        by: ["monitor_id"],
+        where: {
+            monitor_id: { in: rawMonitors.map((monitor) => monitor.id) },
+            ...visibleSellerWhere(bannedSellerIds),
+        },
+        _count: { _all: true },
+    });
+    const visibleCountByMonitor = new Map(
+        visibleCounts.map((row) => [row.monitor_id, row._count._all]),
+    );
 
     const monitors: Monitor[] = await Promise.all(
         rawMonitors.map(async (m) => ({
@@ -46,7 +59,7 @@ export default async function DashboardPage() {
             webhook_active: m.webhook_active ?? true,
             telegram_active: m.telegram_active ?? false,
             proxy_group_name: m.proxy_group?.name ?? null,
-            _count: m._count,
+            _count: { items: visibleCountByMonitor.get(m.id) ?? 0 },
             created_at: m.created_at
                 ? m.created_at.toISOString()
                 : new Date().toISOString(),

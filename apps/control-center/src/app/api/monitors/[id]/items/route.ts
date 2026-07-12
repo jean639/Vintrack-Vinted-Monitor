@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
+import {
+    buildSellerProfileUrl,
+    getBannedSellerIds,
+    visibleSellerWhere,
+} from "@/lib/seller-bans";
 
 export async function GET(
     request: Request,
@@ -26,8 +31,12 @@ export async function GET(
     }
 
     try {
+        const bannedSellerIds = await getBannedSellerIds(session.user.id);
         const items = await db.items.findMany({
-            where: { monitor_id: monitorId },
+            where: {
+                monitor_id: monitorId,
+                ...visibleSellerWhere(bannedSellerIds),
+            },
             orderBy: { found_at: "desc" },
             take: 50,
             select: {
@@ -46,6 +55,8 @@ export async function GET(
                 location: true,
                 rating: true,
                 seller_id: true,
+                seller_login: true,
+                seller_profile_url: true,
             },
         });
 
@@ -53,6 +64,13 @@ export async function GET(
             ...item,
             id: item.id.toString(),
             seller_id: item.seller_id?.toString() || null,
+            seller_profile_url:
+                item.seller_profile_url ||
+                buildSellerProfileUrl(
+                    item.seller_id,
+                    item.seller_login,
+                    item.url,
+                ),
         }));
 
         return NextResponse.json(safeItems);

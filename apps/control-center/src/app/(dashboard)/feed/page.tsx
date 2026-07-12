@@ -90,6 +90,11 @@ export default function FeedPage() {
                             location: newItem.location || existing.location,
                             rating: newItem.rating || existing.rating,
                             seller_id: newItem.seller_id || existing.seller_id,
+                            seller_login:
+                                newItem.seller_login || existing.seller_login,
+                            seller_profile_url:
+                                newItem.seller_profile_url ||
+                                existing.seller_profile_url,
                             total_price:
                                 newItem.total_price || existing.total_price,
                         };
@@ -125,6 +130,12 @@ export default function FeedPage() {
         setItemCap(nextCap);
         window.localStorage.setItem(LIVE_FEED_CAP_STORAGE_KEY, String(nextCap));
         setItems((current) => capFeedItems(current, nextCap));
+    };
+
+    const handleSellerBanned = (sellerId: string) => {
+        setItems((current) =>
+            current.filter((item) => item.seller_id !== sellerId),
+        );
     };
 
     const activeMonitorCount = summary?.activeMonitors ?? 0;
@@ -185,7 +196,12 @@ export default function FeedPage() {
                 {loading && items.length === 0
                     ? [...Array(8)].map((_, i) => <ItemCardSkeleton key={i} />)
                     : items.map((item) => (
-                          <ItemCard key={item.id} item={item} showMonitor />
+                          <ItemCard
+                              key={item.id}
+                              item={item}
+                              showMonitor
+                              onSellerBanned={handleSellerBanned}
+                          />
                       ))}
             </div>
 
