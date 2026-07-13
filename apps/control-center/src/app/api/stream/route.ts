@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Redis from "ioredis";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
+import { buildSellerProfileUrl, getBannedSellerIds } from "@/lib/seller-bans";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ export async function GET(req: NextRequest) {
     const monitorIds = new Set(userMonitors.map((m) => m.id));
     const monitorNames = new Map(
         userMonitors.map((monitor) => [monitor.id, monitor.name]),
+    );
+    const bannedSellerIds = new Set(
+        (await getBannedSellerIds(session.user.id)).map((id) => id.toString()),
     );
 
     const encoder = new TextEncoder();
@@ -40,6 +44,14 @@ export async function GET(req: NextRequest) {
             try {
                 const parsed = JSON.parse(message);
                 const monitorId = Number(parsed.monitor_id);
+                const sellerId =
+                    parsed.seller_id === null || parsed.seller_id === undefined
+                        ? null
+                        : String(parsed.seller_id);
+
+                if (sellerId && bannedSellerIds.has(sellerId)) {
+                    return;
+                }
 
                 if (Number.isInteger(monitorId) && monitorIds.has(monitorId)) {
                     const enrichedPayload = JSON.stringify({
@@ -49,6 +61,13 @@ export async function GET(req: NextRequest) {
                             monitorNames.get(monitorId) ||
                             parsed.monitor_name ||
                             null,
+                        seller_profile_url:
+                            parsed.seller_profile_url ||
+                            buildSellerProfileUrl(
+                                sellerId,
+                                parsed.seller_login,
+                                parsed.url,
+                            ),
                     });
                     const data = `data: ${enrichedPayload}\n\n`;
                     writer.write(encoder.encode(data));

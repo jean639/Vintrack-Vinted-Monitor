@@ -11,6 +11,7 @@ import {
 type MonitorLiveContextValue = {
     itemCount: number;
     incrementItemCount: () => void;
+    decrementItemCount: (amount: number) => void;
 };
 
 const MonitorLiveContext = createContext<MonitorLiveContextValue | null>(null);
@@ -26,13 +27,17 @@ export function MonitorLiveProvider({
     const incrementItemCount = useCallback(() => {
         setItemCount((count) => count + 1);
     }, []);
+    const decrementItemCount = useCallback((amount: number) => {
+        setItemCount((count) => Math.max(0, count - amount));
+    }, []);
 
     const value = useMemo(
         () => ({
             itemCount,
             incrementItemCount,
+            decrementItemCount,
         }),
-        [incrementItemCount, itemCount],
+        [decrementItemCount, incrementItemCount, itemCount],
     );
 
     return (

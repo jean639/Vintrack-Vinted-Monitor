@@ -28,6 +28,7 @@ type Monitor struct {
 	TelegramChatID       sql.NullString
 	TelegramActive       bool
 	DedupeMonitorAlerts  bool
+	BannedSellerIDs      []int64
 	ProxyGroupID         *int
 	ProxyGroupName       sql.NullString
 	ProxyGroupLimitBytes *int64
@@ -90,6 +91,8 @@ type Item struct {
 	Location    string    `json:"location"`
 	Rating      string    `json:"rating,omitempty"`
 	SellerID    int64     `json:"seller_id,omitempty"`
+	SellerLogin string    `json:"seller_login,omitempty"`
+	SellerURL   string    `json:"seller_profile_url,omitempty"`
 	FoundAt     time.Time `json:"found_at"`
 }
 

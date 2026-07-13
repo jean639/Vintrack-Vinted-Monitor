@@ -195,8 +195,14 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	var totalErrors int64
 
 	log.Printf("[%d] started | name=%q | query=%q | delay=%dms | race=%d | url=%s", m.ID, m.Name, m.Query, interval, raceFetchers, apiURL)
-	if m.WebhookActive && m.DiscordWebhook.String != "" {
-		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Name)
+	webhookURL := m.DiscordWebhook.String
+	webhookActive := m.WebhookActive
+	if !e.fetcher.RequiresNetwork() && strings.TrimSpace(webhookURL) == "" {
+		webhookURL = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
+		webhookActive = webhookURL != ""
+	}
+	if webhookActive && webhookURL != "" {
+		discord.SendStartupWebhook(webhookURL, m.Name)
 	}
 	if m.TelegramActive && m.TelegramChatID.String != "" {
 		telegram.SendStartup(m.TelegramChatID.String, m.Name)
@@ -269,6 +275,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				}
 				m.DiscordWebhook = updated.DiscordWebhook
 				m.WebhookActive = updated.WebhookActive
+				webhookURL = m.DiscordWebhook.String
+				webhookActive = m.WebhookActive
+				if !e.fetcher.RequiresNetwork() && strings.TrimSpace(webhookURL) == "" {
+					webhookURL = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
+					webhookActive = webhookURL != ""
+				}
 				m.Status = updated.Status
 				m.ProxyGroupLimitBytes = updated.ProxyGroupLimitBytes
 				m.ProxyGroupRxBytes = updated.ProxyGroupRxBytes
@@ -481,9 +493,13 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			}
 			e.db.MarkItemsSeen(m.ID, seedIDs)
 
-			filteredSeedItems, blockedSeedCount := filterAntiKeywordItems(seedItems, m.AntiKeywords)
-			if blockedSeedCount > 0 {
-				log.Printf("[%d] initial scan skipped %d items due to anti keywords", m.ID, blockedSeedCount)
+			filteredSeedItems, antiBlockedSeedCount := filterAntiKeywordItems(seedItems, m.AntiKeywords)
+			filteredSeedItems, sellerBlockedSeedCount := filterBannedSellerItems(filteredSeedItems, m.BannedSellerIDs)
+			if antiBlockedSeedCount > 0 {
+				log.Printf("[%d] initial scan skipped %d items due to anti keywords", m.ID, antiBlockedSeedCount)
+			}
+			if sellerBlockedSeedCount > 0 {
+				log.Printf("[%d] initial scan skipped %d items due to seller bans", m.ID, sellerBlockedSeedCount)
 			}
 			if len(filteredSeedItems) > 0 {
 				seedBuiltItems := e.buildItems(m, filteredSeedItems)
@@ -516,9 +532,13 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			continue
 		}
 
-		alertItems, blockedCount := filterAntiKeywordItems(processItems, m.AntiKeywords)
-		if blockedCount > 0 {
-			log.Printf("[%d] skipped %d new items due to anti keywords", m.ID, blockedCount)
+		alertItems, antiBlockedCount := filterAntiKeywordItems(processItems, m.AntiKeywords)
+		alertItems, sellerBlockedCount := filterBannedSellerItems(alertItems, m.BannedSellerIDs)
+		if antiBlockedCount > 0 {
+			log.Printf("[%d] skipped %d new items due to anti keywords", m.ID, antiBlockedCount)
+		}
+		if sellerBlockedCount > 0 {
+			log.Printf("[%d] skipped %d new items due to seller bans", m.ID, sellerBlockedCount)
 		}
 
 		newIDs := make([]int64, len(processItems))
@@ -572,7 +592,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
 		}
 
-		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, allowedCountries, true)
+		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, webhookURL, webhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, allowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
@@ -800,6 +820,34 @@ func filterAntiKeywordItems(items []model.VintedItem, rawKeywords *string) ([]mo
 	return filtered, blocked
 }
 
+func filterBannedSellerItems(items []model.VintedItem, bannedSellerIDs []int64) ([]model.VintedItem, int) {
+	if len(items) == 0 || len(bannedSellerIDs) == 0 {
+		return items, 0
+	}
+
+	banned := make(map[int64]bool, len(bannedSellerIDs))
+	for _, sellerID := range bannedSellerIDs {
+		if sellerID != 0 {
+			banned[sellerID] = true
+		}
+	}
+	if len(banned) == 0 {
+		return items, 0
+	}
+
+	filtered := make([]model.VintedItem, 0, len(items))
+	blocked := 0
+	for _, item := range items {
+		if item.User.ID != 0 && banned[item.User.ID] {
+			blocked++
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	return filtered, blocked
+}
+
 func parseAntiKeywords(rawKeywords *string) []string {
 	if rawKeywords == nil || strings.TrimSpace(*rawKeywords) == "" {
 		return nil
@@ -863,6 +911,8 @@ func (e *Engine) buildItems(m model.Monitor, vItems []model.VintedItem) []model.
 			ImageURL:    vItem.Photo.Url,
 			ExtraImages: extraImages,
 			SellerID:    vItem.User.ID,
+			SellerLogin: vItem.User.Login,
+			SellerURL:   buildSellerProfileURL(domain, vItem.User.ID, vItem.User.Login),
 			FoundAt:     time.Now(),
 		}
 
@@ -874,6 +924,17 @@ func (e *Engine) buildItems(m model.Monitor, vItems []model.VintedItem) []model.
 	}
 
 	return items
+}
+
+func buildSellerProfileURL(domain string, sellerID int64, sellerLogin string) string {
+	if sellerID == 0 {
+		return ""
+	}
+	sellerPath := fmt.Sprintf("%d", sellerID)
+	if strings.TrimSpace(sellerLogin) != "" {
+		sellerPath = fmt.Sprintf("%d-%s", sellerID, strings.TrimSpace(sellerLogin))
+	}
+	return fmt.Sprintf("https://%s/member/%s", domain, sellerPath)
 }
 
 func mockSellerMetadata(userID int64, itemID int64) (string, string) {
