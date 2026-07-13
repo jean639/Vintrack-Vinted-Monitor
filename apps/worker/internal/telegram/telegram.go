@@ -37,7 +37,7 @@ func SendItem(chatID string, item model.Item, monitorName string, proxySource st
 	if item.ImageURL != "" {
 		payload := map[string]interface{}{
 			"chat_id":    chatID,
-			"photo":      item.ImageURL,
+			"photo":      absoluteDashboardURL(item.ImageURL),
 			"caption":    itemCaption(item, monitorName, proxySource),
 			"parse_mode": "HTML",
 		}
@@ -240,6 +240,23 @@ func dashboardItemURL(item model.Item) string {
 		baseURL = "http://localhost:3000"
 	}
 	return fmt.Sprintf("%s/monitors/%d", strings.TrimRight(baseURL, "/"), item.MonitorID)
+}
+
+func absoluteDashboardURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL
+	}
+	baseURL := os.Getenv("DASHBOARD_URL")
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = "http://localhost:3000"
+	}
+	if strings.HasPrefix(rawURL, "/") {
+		return strings.TrimRight(baseURL, "/") + rawURL
+	}
+	return strings.TrimRight(baseURL, "/") + "/" + rawURL
 }
 
 func isTelegramButtonURL(rawURL string) bool {

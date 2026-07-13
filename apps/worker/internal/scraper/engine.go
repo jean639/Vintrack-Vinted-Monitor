@@ -195,8 +195,14 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	var totalErrors int64
 
 	log.Printf("[%d] started | name=%q | query=%q | delay=%dms | race=%d | url=%s", m.ID, m.Name, m.Query, interval, raceFetchers, apiURL)
-	if m.WebhookActive && m.DiscordWebhook.String != "" {
-		discord.SendStartupWebhook(m.DiscordWebhook.String, m.Name)
+	webhookURL := m.DiscordWebhook.String
+	webhookActive := m.WebhookActive
+	if !e.fetcher.RequiresNetwork() && strings.TrimSpace(webhookURL) == "" {
+		webhookURL = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
+		webhookActive = webhookURL != ""
+	}
+	if webhookActive && webhookURL != "" {
+		discord.SendStartupWebhook(webhookURL, m.Name)
 	}
 	if m.TelegramActive && m.TelegramChatID.String != "" {
 		telegram.SendStartup(m.TelegramChatID.String, m.Name)
@@ -269,6 +275,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				}
 				m.DiscordWebhook = updated.DiscordWebhook
 				m.WebhookActive = updated.WebhookActive
+				webhookURL = m.DiscordWebhook.String
+				webhookActive = m.WebhookActive
+				if !e.fetcher.RequiresNetwork() && strings.TrimSpace(webhookURL) == "" {
+					webhookURL = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
+					webhookActive = webhookURL != ""
+				}
 				m.Status = updated.Status
 				m.ProxyGroupLimitBytes = updated.ProxyGroupLimitBytes
 				m.ProxyGroupRxBytes = updated.ProxyGroupRxBytes
@@ -580,7 +592,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
 		}
 
-		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, m.WebhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, allowedCountries, true)
+		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, webhookURL, webhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, allowedCountries, true)
 
 		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
 			time.Sleep(remaining)
