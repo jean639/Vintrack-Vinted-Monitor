@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"vintrack-worker/internal/model"
@@ -44,7 +45,7 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 			"url":         item.URL,
 			"color":       0x007782,
 			"description": description,
-			"image":       map[string]string{"url": item.ImageURL},
+			"image":       map[string]string{"url": absoluteDashboardURL(item.ImageURL)},
 			"fields":      buildFields(item),
 			"footer": map[string]string{
 				"text":     fmt.Sprintf("Vintrack • %s • %s", monitorName, proxySource),
@@ -60,7 +61,7 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 		}
 		embeds = append(embeds, map[string]interface{}{
 			"url":   item.URL,
-			"image": map[string]string{"url": imgURL},
+			"image": map[string]string{"url": absoluteDashboardURL(imgURL)},
 		})
 	}
 
@@ -110,6 +111,23 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 		}
 	}
 	return fmt.Errorf("discord webhook returned %d", resp.StatusCode)
+}
+
+func absoluteDashboardURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL
+	}
+	baseURL := os.Getenv("DASHBOARD_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:3000"
+	}
+	if strings.HasPrefix(rawURL, "/") {
+		return strings.TrimRight(baseURL, "/") + rawURL
+	}
+	return strings.TrimRight(baseURL, "/") + "/" + rawURL
 }
 
 func SendStartupWebhook(webhookURL string, monitorName string) {
