@@ -3,13 +3,14 @@ package scraper
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"vintrack-worker/internal/model"
 )
 
 func monitorConfigFingerprint(mon model.Monitor) string {
 	return fmt.Sprintf(
-		"query=%s|anti=%s|queryDelayMs=%d|priceMin=%s|priceMax=%s|size=%s|catalog=%s|brand=%s|color=%s|status=%s|region=%s|allowed=%s|proxies=%s",
+		"query=%s|anti=%s|queryDelayMs=%d|priceMin=%s|priceMax=%s|size=%s|catalog=%s|brand=%s|color=%s|status=%s|region=%s|allowed=%s|bannedSellers=%s|proxies=%s",
 		mon.Query,
 		nullableString(mon.AntiKeywords),
 		mon.QueryDelayMs,
@@ -22,6 +23,7 @@ func monitorConfigFingerprint(mon model.Monitor) string {
 		nullableString(mon.StatusIDs),
 		mon.Region,
 		nullableString(mon.AllowedCountries),
+		int64ListFingerprint(mon.BannedSellerIDs),
 		proxyFingerprint(mon),
 	)
 }
@@ -55,4 +57,15 @@ func nullString(v sql.NullString) string {
 		return "<null>"
 	}
 	return v.String
+}
+
+func int64ListFingerprint(values []int64) string {
+	if len(values) == 0 {
+		return "<none>"
+	}
+	parts := make([]string, len(values))
+	for i, value := range values {
+		parts[i] = fmt.Sprintf("%d", value)
+	}
+	return strings.Join(parts, ",")
 }

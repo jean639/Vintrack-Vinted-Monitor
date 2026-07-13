@@ -33,6 +33,7 @@ import { ProxyHealthCard } from "@/components/monitors/proxy-health";
 import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context";
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
 import { MonitorMetricsDialog } from "@/components/monitors/monitor-metrics-dialog";
+import { getBannedSellerIds, visibleSellerWhere } from "@/lib/seller-bans";
 
 type MonitorRunRow = {
     status: string;
@@ -74,6 +75,15 @@ export default async function MonitorPage({
     });
 
     if (!monitor) return notFound();
+
+    const bannedSellerIds = await getBannedSellerIds(session.user.id);
+    const visibleItemWhere = {
+        monitor_id: monitor.id,
+        ...visibleSellerWhere(bannedSellerIds),
+    };
+    const visibleItemCount = await db.items.count({
+        where: visibleItemWhere,
+    });
 
     const toggleAction = toggleMonitorStatus.bind(
         null,
@@ -122,7 +132,7 @@ export default async function MonitorPage({
     const savedItemsInWindow = oldestRecentRunAt
         ? await db.items.count({
               where: {
-                  monitor_id: monitor.id,
+                  ...visibleItemWhere,
                   found_at: { gte: oldestRecentRunAt },
               },
           })
@@ -131,7 +141,7 @@ export default async function MonitorPage({
         recentRuns.find((run) => run.error_message)?.error_message ?? null;
 
     return (
-        <MonitorLiveProvider initialItemCount={monitor._count.items}>
+        <MonitorLiveProvider initialItemCount={visibleItemCount}>
             <div className="space-y-6">
                 <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
                     <div className="flex items-center gap-3">

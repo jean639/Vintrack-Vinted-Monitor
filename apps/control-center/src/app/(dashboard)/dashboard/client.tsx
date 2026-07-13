@@ -23,6 +23,8 @@ import {
     Send,
     Timer,
     Settings,
+    Trash2,
+    UserX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -109,6 +111,14 @@ type TelegramConnectCode = {
     botLink: string | null;
 };
 
+type SellerBan = {
+    id: string;
+    seller_id: string;
+    seller_login: string | null;
+    seller_profile_url: string | null;
+    created_at: string;
+};
+
 async function readApiError(res: Response, fallback: string) {
     try {
         const data = await res.json();
@@ -122,6 +132,12 @@ function hasProxyWarning(h?: MonitorHealth): boolean {
     if (!h) return false;
     if (h.consecutive_errors === -1 || h.consecutive_errors >= 3) return true;
     return false;
+}
+
+function formatTimestamp(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "not yet";
+    return date.toLocaleString();
 }
 
 export function DashboardClient({
@@ -151,6 +167,11 @@ export function DashboardClient({
     const [monitors, setMonitors] = useState<Monitor[]>(initialMonitors);
     const [dedupeMonitorAlerts, setDedupeMonitorAlerts] = useState(
         initialDedupeMonitorAlerts,
+    );
+    const [sellerBans, setSellerBans] = useState<SellerBan[]>([]);
+    const [isSellerBansLoading, setIsSellerBansLoading] = useState(true);
+    const [removingSellerId, setRemovingSellerId] = useState<string | null>(
+        null,
     );
     const [healthMap, setHealthMap] = useState<Record<number, MonitorHealth>>(
         {},
@@ -272,6 +293,31 @@ export function DashboardClient({
     }, [fetchHealth]);
 
     useEffect(() => {
+        let cancelled = false;
+        setIsSellerBansLoading(true);
+        fetch("/api/seller-bans", { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : []))
+            .then((data) => {
+                if (!cancelled && Array.isArray(data)) {
+                    setSellerBans(data);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setSellerBans([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsSellerBansLoading(false);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
         if (!isWebhookOpen) return;
         fetchTelegramConnection();
     }, [fetchTelegramConnection, isWebhookOpen]);
@@ -381,6 +427,27 @@ export function DashboardClient({
                     : "Monitor alerts are independent again",
             );
         });
+    };
+
+    const handleRemoveSellerBan = async (sellerId: string) => {
+        setRemovingSellerId(sellerId);
+        try {
+            const res = await fetch(`/api/seller-bans/${sellerId}`, {
+                method: "DELETE",
+            });
+            if (!res.ok) {
+                toast.error(await readApiError(res, "Failed to unban seller"));
+                return;
+            }
+            setSellerBans((current) =>
+                current.filter((ban) => ban.seller_id !== sellerId),
+            );
+            toast.success("Seller unbanned");
+        } catch {
+            toast.error("Network error — could not unban seller");
+        } finally {
+            setRemovingSellerId(null);
+        }
     };
 
     const handleSaveWebhook = async () => {
@@ -765,15 +832,15 @@ export function DashboardClient({
             )}
 
             <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-                <DialogContent>
+                <DialogContent className="sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Dashboard settings</DialogTitle>
                         <DialogDescription>
-                            Adjust global behavior for monitor alerts.
+                            Adjust global monitor behavior and seller filters.
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="py-4">
+                    <div className="space-y-4 py-4">
                         <div className="border-border/80 bg-muted/30 flex items-center justify-between gap-4 rounded-lg border p-3">
                             <div className="space-y-0.5">
                                 <div className="flex items-center gap-2">
@@ -802,6 +869,113 @@ export function DashboardClient({
                                 disabled={isDedupePending}
                                 onCheckedChange={handleDedupeChange}
                             />
+                        </div>
+
+                        <div className="border-border/80 rounded-lg border">
+                            <div className="border-border/80 flex items-start justify-between gap-3 border-b p-3">
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="text-sm font-medium">
+                                            Banned sellers
+                                        </h3>
+                                        <Badge
+                                            variant="outline"
+                                            className="bg-background text-[10px]"
+                                        >
+                                            {sellerBans.length}
+                                        </Badge>
+                                    </div>
+                                    <p className="text-muted-foreground mt-0.5 text-[12px]">
+                                        Hidden from all your monitor feeds and
+                                        future alerts.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="max-h-80 overflow-y-auto">
+                                {isSellerBansLoading ? (
+                                    <div className="p-3">
+                                        <div className="bg-muted h-12 animate-pulse rounded-md" />
+                                    </div>
+                                ) : sellerBans.length === 0 ? (
+                                    <div className="flex items-center gap-3 p-4 text-sm">
+                                        <UserX className="text-muted-foreground h-4 w-4" />
+                                        <span className="text-muted-foreground">
+                                            No sellers banned.
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <div className="divide-border divide-y">
+                                        {sellerBans.map((ban) => {
+                                            const label = ban.seller_login
+                                                ? `@${ban.seller_login}`
+                                                : `Seller ${ban.seller_id}`;
+                                            return (
+                                                <div
+                                                    key={ban.seller_id}
+                                                    className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
+                                                >
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="truncate text-sm font-medium">
+                                                                {label}
+                                                            </p>
+                                                            <span className="text-muted-foreground text-xs">
+                                                                #{ban.seller_id}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-muted-foreground mt-1 text-xs">
+                                                            Banned{" "}
+                                                            {formatTimestamp(
+                                                                ban.created_at,
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {ban.seller_profile_url ? (
+                                                            <Button
+                                                                asChild
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-8 gap-1.5"
+                                                            >
+                                                                <a
+                                                                    href={
+                                                                        ban.seller_profile_url
+                                                                    }
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                >
+                                                                    Profile
+                                                                    <ExternalLink className="h-3.5 w-3.5" />
+                                                                </a>
+                                                            </Button>
+                                                        ) : null}
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                handleRemoveSellerBan(
+                                                                    ban.seller_id,
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                removingSellerId ===
+                                                                ban.seller_id
+                                                            }
+                                                            className="h-8 gap-1.5 border-red-200 text-red-600 hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                            Unban
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 

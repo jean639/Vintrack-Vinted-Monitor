@@ -32,7 +32,11 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 		locationPrefix = item.Location + " "
 	}
 
-	description := fmt.Sprintf("%s\n\n**[🛒 View on Vinted](%s)** | **[📊 View on Dashboard](%s)**", item.Title, item.URL, dashLink)
+	links := fmt.Sprintf("**[🛒 View on Vinted](%s)** | **[📊 View on Dashboard](%s)**", item.URL, dashLink)
+	if item.SellerURL != "" {
+		links = fmt.Sprintf("%s | **[👤 Seller](%s)**", links, item.SellerURL)
+	}
+	description := fmt.Sprintf("%s\n\n%s", item.Title, links)
 
 	embeds := []map[string]interface{}{
 		{

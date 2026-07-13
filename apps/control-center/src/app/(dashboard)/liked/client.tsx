@@ -24,7 +24,7 @@ interface VintedFavItem {
     size_title: string;
     brand_title: string;
     status: string;
-    user: { id: number; login: string };
+    user: { id: number; login: string; profile_url?: string };
     location?: string;
     rating?: string;
 }
@@ -33,6 +33,15 @@ interface PaginationData {
     current_page: number;
     total_pages: number;
     total_entries: number;
+}
+
+function buildSellerProfileUrl(item: VintedFavItem) {
+    if (item.user.profile_url) return item.user.profile_url;
+    let host = "www.vinted.de";
+    try {
+        host = new URL(item.url).host;
+    } catch {}
+    return `https://${host}/member/${item.user.id}-${item.user.login}`;
 }
 
 export function LikedClient() {
@@ -75,6 +84,8 @@ export function LikedClient() {
                     : [],
                 found_at: new Date().toISOString(),
                 seller_id: String(item.user.id),
+                seller_login: item.user.login,
+                seller_profile_url: buildSellerProfileUrl(item),
                 location: item.location || null,
                 rating: item.rating || null,
             }));

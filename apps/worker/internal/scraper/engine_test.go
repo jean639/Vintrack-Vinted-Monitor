@@ -60,6 +60,12 @@ func TestBuildItems_BasicConstruction(t *testing.T) {
 	if item.SellerID != 99 {
 		t.Errorf("SellerID = %d, want 99", item.SellerID)
 	}
+	if item.SellerLogin != "seller1" {
+		t.Errorf("SellerLogin = %q, want seller1", item.SellerLogin)
+	}
+	if item.SellerURL != "https://www.vinted.de/member/99-seller1" {
+		t.Errorf("SellerURL = %q, want seller profile URL", item.SellerURL)
+	}
 }
 
 func TestBuildItems_URLPrefixing(t *testing.T) {
@@ -316,6 +322,48 @@ func TestFilterAntiKeywordItems_NoKeywordsReturnsOriginal(t *testing.T) {
 	}
 	if len(filtered) != 1 || filtered[0].ID != 1 {
 		t.Fatalf("filtered = %#v, want original item", filtered)
+	}
+}
+
+func TestFilterBannedSellerItems(t *testing.T) {
+	items := []model.VintedItem{
+		{ID: 1, User: model.VintedUser{ID: 101}},
+		{ID: 2, User: model.VintedUser{ID: 202}},
+		{ID: 3, User: model.VintedUser{ID: 303}},
+	}
+
+	filtered, blocked := filterBannedSellerItems(items, []int64{202, 404})
+
+	if blocked != 1 {
+		t.Fatalf("blocked = %d, want 1", blocked)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("filtered = %d, want 2", len(filtered))
+	}
+	if filtered[0].ID != 1 || filtered[1].ID != 3 {
+		t.Fatalf("filtered IDs = [%d, %d], want [1, 3]", filtered[0].ID, filtered[1].ID)
+	}
+}
+
+func TestBuildSellerProfileURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		id     int64
+		login  string
+		domain string
+		want   string
+	}{
+		{name: "with login", id: 42, login: "seller-name", domain: "www.vinted.de", want: "https://www.vinted.de/member/42-seller-name"},
+		{name: "without login", id: 42, domain: "www.vinted.fr", want: "https://www.vinted.fr/member/42"},
+		{name: "without id", id: 0, domain: "www.vinted.de", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildSellerProfileURL(tt.domain, tt.id, tt.login); got != tt.want {
+				t.Fatalf("buildSellerProfileURL() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

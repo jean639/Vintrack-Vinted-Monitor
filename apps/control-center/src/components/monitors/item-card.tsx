@@ -14,6 +14,7 @@ import {
     ChevronRight,
     Tag,
     ShoppingCart,
+    UserX,
 } from "lucide-react";
 import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
@@ -48,11 +49,14 @@ export type ItemData = {
     location: string | null;
     rating: string | null;
     seller_id: string | null;
+    seller_login?: string | null;
+    seller_profile_url?: string | null;
 };
 
 interface ItemCardProps {
     item: ItemData;
     showMonitor?: boolean;
+    onSellerBanned?: (sellerId: string) => void;
 }
 
 function getMonitorLabel(item: ItemData) {
@@ -62,7 +66,26 @@ function getMonitorLabel(item: ItemData) {
         : `Monitor #${item.monitor_id}`;
 }
 
-function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
+function buildSellerProfileUrl(item: ItemData) {
+    if (!item.seller_id) return null;
+    if (item.seller_profile_url) return item.seller_profile_url;
+    let host = "www.vinted.de";
+    if (item.url) {
+        try {
+            host = new URL(item.url).host;
+        } catch {}
+    }
+    const sellerPath = item.seller_login
+        ? `${item.seller_id}-${item.seller_login}`
+        : item.seller_id;
+    return `https://${host}/member/${sellerPath}`;
+}
+
+function ItemCardComponent({
+    item,
+    showMonitor = false,
+    onSellerBanned,
+}: ItemCardProps) {
     const {
         linked,
         domain: accountDomain,
@@ -79,6 +102,8 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
     const [offerPrice, setOfferPrice] = useState("");
     const [sendingOffer, setSendingOffer] = useState(false);
     const [buying, setBuying] = useState(false);
+    const [banningSeller, setBanningSeller] = useState(false);
+    const [banDialogOpen, setBanDialogOpen] = useState(false);
     const [buyDialogOpen, setBuyDialogOpen] = useState(false);
     const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(
         null,
@@ -89,6 +114,12 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
         : [];
     const hasDifferentTotalPrice =
         Boolean(item.total_price) && item.total_price !== item.price;
+    const sellerProfileUrl = buildSellerProfileUrl(item);
+    const sellerLabel = item.seller_login
+        ? `@${item.seller_login}`
+        : item.seller_id
+          ? `Seller ${item.seller_id}`
+          : null;
 
     const handleNextImage = (e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
@@ -331,6 +362,39 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
         setBuyDialogOpen(true);
     };
 
+    const handleBanSeller = async () => {
+        if (!item.seller_id) {
+            toast.error("Seller information is missing");
+            return;
+        }
+
+        setBanningSeller(true);
+        try {
+            const res = await fetch("/api/seller-bans", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    seller_id: item.seller_id,
+                    seller_login: item.seller_login || null,
+                    seller_profile_url: sellerProfileUrl,
+                    item_url: item.url,
+                }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                toast.error(data.error || `Ban failed (${res.status})`);
+                return;
+            }
+            onSellerBanned?.(item.seller_id);
+            setBanDialogOpen(false);
+            toast.success(`${sellerLabel || "Seller"} banned`);
+        } catch {
+            toast.error("Network error — could not ban seller");
+        } finally {
+            setBanningSeller(false);
+        }
+    };
+
     return (
         <div
             data-testid="item-card"
@@ -485,18 +549,50 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                             </button>
                         </>
                     )}
+                    {item.seller_id && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setBanDialogOpen(true);
+                            }}
+                            disabled={banningSeller}
+                            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-red-400/25 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-70 sm:h-7 sm:w-7"
+                            title="Ban seller"
+                        >
+                            {banningSeller ? (
+                                <Loader2 className="h-4 w-4 animate-spin sm:h-3.5 sm:w-3.5" />
+                            ) : (
+                                <UserX className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                            )}
+                        </button>
+                    )}
                 </div>
             </div>
 
-            <div className="flex flex-1 flex-col gap-2 p-3.5">
+            <div className="flex flex-1 flex-col gap-1.5 p-3.5">
                 <h3
-                    className="text-foreground line-clamp-2 min-h-11 text-[13px] leading-snug font-semibold"
+                    className="text-foreground line-clamp-2 min-h-10 text-[13px] leading-snug font-semibold"
                     title={item.title || ""}
                 >
                     {item.title || "Untitled"}
                 </h3>
 
-                <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+                {sellerProfileUrl && sellerLabel && (
+                    <a
+                        href={sellerProfileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-muted-foreground hover:text-foreground -mt-0.5 inline-flex max-w-full items-center gap-1 text-[10px] leading-none font-medium transition-colors"
+                        title={sellerLabel}
+                    >
+                        <span className="truncate">{sellerLabel}</span>
+                        <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                    </a>
+                )}
+
+                <div className="mt-auto flex flex-wrap gap-1.5 pt-0.5">
                     {item.brand && (
                         <span className="border-border/60 bg-muted/40 text-muted-foreground flex h-5 items-center rounded-md border px-1.5 text-[10px] font-medium">
                             {item.brand}
@@ -556,6 +652,74 @@ function ItemCardComponent({ item, showMonitor = false }: ItemCardProps) {
                 View on Vinted
                 <ExternalLink className="h-3 w-3" />
             </a>
+
+            <Dialog open={banDialogOpen} onOpenChange={setBanDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Ban Seller</DialogTitle>
+                        <DialogDescription>
+                            Hide {sellerLabel || "this seller"} from all your
+                            monitor feeds and future alerts. You can unban the
+                            seller later in Account.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="border-border/80 bg-muted/35 flex items-center justify-between gap-3 rounded-lg border p-3">
+                        <div className="min-w-0">
+                            <p className="text-sm font-medium">
+                                {sellerLabel || "Unknown seller"}
+                            </p>
+                            {item.seller_id ? (
+                                <p className="text-muted-foreground mt-0.5 text-xs">
+                                    Seller #{item.seller_id}
+                                </p>
+                            ) : null}
+                        </div>
+                        {sellerProfileUrl ? (
+                            <Button
+                                asChild
+                                variant="outline"
+                                size="sm"
+                                className="h-8 shrink-0 gap-1.5"
+                            >
+                                <a
+                                    href={sellerProfileUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    Profile
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                            </Button>
+                        ) : null}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setBanDialogOpen(false)}
+                            disabled={banningSeller}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleBanSeller}
+                            disabled={banningSeller}
+                            className="gap-1.5"
+                        >
+                            {banningSeller ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <UserX className="h-4 w-4" />
+                            )}
+                            Ban Seller
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={msgOpen} onOpenChange={setMsgOpen}>
                 <DialogContent className="sm:max-w-md">
