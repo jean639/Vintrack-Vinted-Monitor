@@ -27,6 +27,12 @@ test.describe("dashboard feed", () => {
         await expect(nikeCard.getByText("42", { exact: true })).toBeVisible();
         await expect(nikeCard.getByText("🇩🇪 DE")).toBeVisible();
         await expect(nikeCard.getByText("⭐ 4.9 (58)")).toBeVisible();
+        await expect(nikeCard.getByText("@e2e_seller_one")).toBeVisible();
+        await expect(
+            nikeCard.locator(
+                'a[href="https://www.vinted.de/member/880001-e2e_seller_one"]',
+            ),
+        ).toBeVisible();
         await expect(nikeCard.getByText("19.00 EUR")).toBeVisible();
         await expect(nikeCard.getByText("24.49 EUR total")).toBeVisible();
         await expect(nikeCard.getByText("E2E Mock Feed")).toBeVisible();
@@ -52,5 +58,29 @@ test.describe("dashboard feed", () => {
 
         await page.keyboard.press("Escape");
         await expect(preview).toBeHidden();
+    });
+
+    test("hides items from banned sellers", async ({ page, request }) => {
+        const banRes = await request.post("/api/seller-bans", {
+            data: {
+                seller_id: "880002",
+                seller_login: "e2e_seller_two",
+                seller_profile_url:
+                    "https://www.vinted.de/member/880002-e2e_seller_two",
+            },
+        });
+        expect(banRes.ok()).toBeTruthy();
+
+        await page.goto("/feed");
+
+        await expect(
+            page.getByText("E2E Nike Dunk Low Retro"),
+        ).toBeVisible();
+        await expect(
+            page.getByText("E2E Carhartt Detroit Jacket"),
+        ).not.toBeVisible();
+
+        const unbanRes = await request.delete("/api/seller-bans/880002");
+        expect(unbanRes.ok()).toBeTruthy();
     });
 });

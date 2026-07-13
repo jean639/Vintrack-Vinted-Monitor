@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -147,16 +148,18 @@ func (s *Store) SaveItem(item model.Item) error {
 	}
 
 	_, err := s.db.Exec(`
-		INSERT INTO items (id, monitor_id, title, brand, price, total_price, size, condition, url, image_url, extra_images, location, rating, seller_id, found_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		INSERT INTO items (id, monitor_id, title, brand, price, total_price, size, condition, url, image_url, extra_images, location, rating, seller_id, seller_login, seller_profile_url, found_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (id, monitor_id) DO UPDATE SET
 			total_price = COALESCE(EXCLUDED.total_price, items.total_price),
 			brand = COALESCE(EXCLUDED.brand, items.brand),
 			extra_images = COALESCE(EXCLUDED.extra_images, items.extra_images),
 			location = COALESCE(NULLIF(EXCLUDED.location, ''), items.location),
-			rating = COALESCE(NULLIF(EXCLUDED.rating, ''), items.rating)`,
+			rating = COALESCE(NULLIF(EXCLUDED.rating, ''), items.rating),
+			seller_login = COALESCE(NULLIF(EXCLUDED.seller_login, ''), items.seller_login),
+			seller_profile_url = COALESCE(NULLIF(EXCLUDED.seller_profile_url, ''), items.seller_profile_url)`,
 		item.ID, item.MonitorID, item.Title, item.Brand, item.Price, nilIfEmpty(item.TotalPrice), item.Size, item.Condition,
-		item.URL, item.ImageURL, pq.Array(item.ExtraImages), item.Location, item.Rating, nilIfZero(item.SellerID), item.FoundAt,
+		item.URL, item.ImageURL, pq.Array(item.ExtraImages), item.Location, item.Rating, nilIfZero(item.SellerID), nilIfEmpty(item.SellerLogin), nilIfEmpty(item.SellerURL), item.FoundAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert item %d: %w", item.ID, err)
@@ -192,14 +195,16 @@ func (s *Store) BatchSaveItems(items []model.Item) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO items (id, monitor_id, title, brand, price, total_price, size, condition, url, image_url, extra_images, location, rating, seller_id, found_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		INSERT INTO items (id, monitor_id, title, brand, price, total_price, size, condition, url, image_url, extra_images, location, rating, seller_id, seller_login, seller_profile_url, found_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (id, monitor_id) DO UPDATE SET 
 			total_price = COALESCE(EXCLUDED.total_price, items.total_price),
 			brand = COALESCE(EXCLUDED.brand, items.brand),
 			extra_images = COALESCE(EXCLUDED.extra_images, items.extra_images),
 			location = COALESCE(NULLIF(EXCLUDED.location, ''), items.location),
-			rating = COALESCE(NULLIF(EXCLUDED.rating, ''), items.rating)`)
+			rating = COALESCE(NULLIF(EXCLUDED.rating, ''), items.rating),
+			seller_login = COALESCE(NULLIF(EXCLUDED.seller_login, ''), items.seller_login),
+			seller_profile_url = COALESCE(NULLIF(EXCLUDED.seller_profile_url, ''), items.seller_profile_url)`)
 	if err != nil {
 		return fmt.Errorf("prepare: %w", err)
 	}
@@ -207,7 +212,7 @@ func (s *Store) BatchSaveItems(items []model.Item) error {
 
 	for _, item := range items {
 		_, err := stmt.Exec(item.ID, item.MonitorID, item.Title, item.Brand, item.Price, nilIfEmpty(item.TotalPrice), item.Size, item.Condition,
-			item.URL, item.ImageURL, pq.Array(item.ExtraImages), item.Location, item.Rating, nilIfZero(item.SellerID), item.FoundAt)
+			item.URL, item.ImageURL, pq.Array(item.ExtraImages), item.Location, item.Rating, nilIfZero(item.SellerID), nilIfEmpty(item.SellerLogin), nilIfEmpty(item.SellerURL), item.FoundAt)
 		if err != nil {
 			return fmt.Errorf("insert item %d: %w", item.ID, err)
 		}
@@ -294,6 +299,9 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 		s.SyncProxyGroupBandwidthState(m)
 		monitors = append(monitors, m)
 	}
+	if err := s.attachBannedSellerIDs(monitors); err != nil {
+		return nil, err
+	}
 	return monitors, nil
 }
 
@@ -311,7 +319,64 @@ func (s *Store) GetMonitorByID(id int) (model.Monitor, error) {
 		return model.Monitor{}, err
 	}
 	s.SyncProxyGroupBandwidthState(m)
-	return m, nil
+	monitors := []model.Monitor{m}
+	if err := s.attachBannedSellerIDs(monitors); err != nil {
+		return model.Monitor{}, err
+	}
+	return monitors[0], nil
+}
+
+func (s *Store) attachBannedSellerIDs(monitors []model.Monitor) error {
+	if len(monitors) == 0 {
+		return nil
+	}
+
+	userIDs := make([]string, 0, len(monitors))
+	seenUsers := make(map[string]bool, len(monitors))
+	for _, m := range monitors {
+		if m.UserID == "" || seenUsers[m.UserID] {
+			continue
+		}
+		seenUsers[m.UserID] = true
+		userIDs = append(userIDs, m.UserID)
+	}
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT "userId", seller_id
+		FROM seller_bans
+		WHERE "userId" = ANY($1)`,
+		pq.Array(userIDs),
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	bansByUser := make(map[string][]int64, len(userIDs))
+	for rows.Next() {
+		var userID string
+		var sellerID int64
+		if err := rows.Scan(&userID, &sellerID); err != nil {
+			return err
+		}
+		bansByUser[userID] = append(bansByUser[userID], sellerID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for userID := range bansByUser {
+		sort.Slice(bansByUser[userID], func(i, j int) bool {
+			return bansByUser[userID][i] < bansByUser[userID][j]
+		})
+	}
+	for i := range monitors {
+		monitors[i].BannedSellerIDs = bansByUser[monitors[i].UserID]
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
@@ -526,7 +591,7 @@ func (s *Store) RecordAlertEvent(event model.AlertEvent) {
 		INSERT INTO alert_events (
 			"userId", monitor_id, item_id, channel, status, failure_reason, metadata
 		)
-		VALUES (NULLIF($1, ''), NULLIF($2, 0), NULLIF($3, 0), $4, $5, NULLIF($6, ''), $7::jsonb)`,
+		VALUES (NULLIF($1, ''), NULLIF($2, 0), NULLIF($3, 0::bigint), $4, $5, NULLIF($6, ''), $7::jsonb)`,
 		event.UserID,
 		event.MonitorID,
 		event.ItemID,

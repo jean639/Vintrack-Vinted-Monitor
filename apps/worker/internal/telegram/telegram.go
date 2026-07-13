@@ -197,6 +197,13 @@ func itemCaption(item model.Item, monitorName string, proxySource string) string
 	if item.Rating != "" {
 		lines = append(lines, fmt.Sprintf("⭐ %s", escape(item.Rating)))
 	}
+	if item.SellerURL != "" {
+		label := "Seller"
+		if item.SellerLogin != "" {
+			label = "@" + item.SellerLogin
+		}
+		lines = append(lines, fmt.Sprintf("👤 <a href=\"%s\">%s</a>", escapeAttr(item.SellerURL), escape(label)))
+	}
 
 	lines = append(lines,
 		"",
@@ -208,9 +215,12 @@ func itemCaption(item model.Item, monitorName string, proxySource string) string
 }
 
 func itemKeyboard(item model.Item) map[string]interface{} {
-	buttons := make([]map[string]string, 0, 2)
+	buttons := make([]map[string]string, 0, 3)
 	if isTelegramButtonURL(item.URL) {
 		buttons = append(buttons, map[string]string{"text": "View on Vinted", "url": item.URL})
+	}
+	if isTelegramButtonURL(item.SellerURL) {
+		buttons = append(buttons, map[string]string{"text": "Seller", "url": item.SellerURL})
 	}
 	if dashboardURL := dashboardItemURL(item); isTelegramButtonURL(dashboardURL) {
 		buttons = append(buttons, map[string]string{"text": "Dashboard", "url": dashboardURL})

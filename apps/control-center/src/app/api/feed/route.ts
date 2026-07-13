@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
+import {
+    buildSellerProfileUrl,
+    getBannedSellerIds,
+    visibleSellerWhere,
+} from "@/lib/seller-bans";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +27,12 @@ export async function GET() {
             return NextResponse.json([]);
         }
 
+        const bannedSellerIds = await getBannedSellerIds(session.user.id);
+
         const items = await db.items.findMany({
             where: {
                 monitor_id: { in: monitorIds },
+                ...visibleSellerWhere(bannedSellerIds),
             },
             orderBy: { found_at: "desc" },
             take: 100,
@@ -44,6 +52,8 @@ export async function GET() {
                 location: true,
                 rating: true,
                 seller_id: true,
+                seller_login: true,
+                seller_profile_url: true,
                 monitors: {
                     select: { name: true },
                 },
@@ -54,6 +64,13 @@ export async function GET() {
             ...item,
             id: item.id.toString(),
             seller_id: item.seller_id?.toString() || null,
+            seller_profile_url:
+                item.seller_profile_url ||
+                buildSellerProfileUrl(
+                    item.seller_id,
+                    item.seller_login,
+                    item.url,
+                ),
             monitor_name: monitors?.name || "Unknown",
         }));
 

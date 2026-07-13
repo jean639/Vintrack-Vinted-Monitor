@@ -48,6 +48,7 @@ model User {
   
   monitors      monitors[]
   proxy_groups  proxy_groups[]
+  seller_bans   seller_bans[]
   telegram_connections telegram_connections[]
   telegram_connect_codes telegram_connect_codes[]
   vinted_session vinted_sessions?
@@ -213,6 +214,8 @@ model items {
   location     String?
   rating       String?   @db.VarChar(50)
   seller_id    BigInt?
+  seller_login String?   @db.VarChar(255)
+  seller_profile_url String?
   url          String?
   image_url    String?
   extra_images String[]  @default([])
@@ -220,6 +223,20 @@ model items {
   monitors     monitors  @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
 
   @@id([id, monitor_id])
+  @@index([seller_id])
+}
+
+model seller_bans {
+  id                 BigInt   @id @default(autoincrement())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seller_id          BigInt
+  seller_login       String?  @db.VarChar(255)
+  seller_profile_url String?
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+
+  @@unique([userId, seller_id])
+  @@index([seller_id])
 }
 
 model proxy_groups {

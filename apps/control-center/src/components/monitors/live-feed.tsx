@@ -18,7 +18,7 @@ const MONITOR_LIVE_FEED_ITEM_CAP = DEFAULT_LIVE_FEED_ITEM_CAP;
 export function LiveFeed({ monitorId }: { monitorId: number }) {
     const [items, setItems] = useState<ItemData[]>([]);
     const [loading, setLoading] = useState(true);
-    const { incrementItemCount } = useMonitorLiveContext();
+    const { decrementItemCount, incrementItemCount } = useMonitorLiveContext();
     const seenItemIds = useRef<Set<string>>(new Set());
 
     useEffect(() => {
@@ -78,6 +78,12 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
                                 rating: newItem.rating || existing.rating,
                                 seller_id:
                                     newItem.seller_id || existing.seller_id,
+                                seller_login:
+                                    newItem.seller_login ||
+                                    existing.seller_login,
+                                seller_profile_url:
+                                    newItem.seller_profile_url ||
+                                    existing.seller_profile_url,
                                 total_price:
                                     newItem.total_price || existing.total_price,
                                 extra_images:
@@ -116,11 +122,26 @@ export function LiveFeed({ monitorId }: { monitorId: number }) {
         return () => eventSource.close();
     }, [incrementItemCount, monitorId]);
 
+    const handleSellerBanned = (sellerId: string) => {
+        setItems((current) => {
+            const next = current.filter((item) => item.seller_id !== sellerId);
+            decrementItemCount(current.length - next.length);
+            seenItemIds.current = new Set(next.map((item) => String(item.id)));
+            return next;
+        });
+    };
+
     return (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {loading && items.length === 0
                 ? [...Array(5)].map((_, i) => <ItemCardSkeleton key={i} />)
-                : items.map((item) => <ItemCard key={item.id} item={item} />)}
+                : items.map((item) => (
+                      <ItemCard
+                          key={item.id}
+                          item={item}
+                          onSellerBanned={handleSellerBanned}
+                      />
+                  ))}
 
             {items.length === 0 && !loading && (
                 <div className="border-border bg-card col-span-full flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-20">
