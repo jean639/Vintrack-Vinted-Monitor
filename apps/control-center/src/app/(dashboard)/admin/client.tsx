@@ -18,6 +18,9 @@ import {
     ChevronLeft,
     ChevronRight,
     Gauge,
+    Activity,
+    AlertTriangle,
+    CheckCircle2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,15 +57,31 @@ type UserMonitor = {
     id: number;
     name: string;
     query: string;
+    query_delay_ms: number;
     status: string | null;
     region: string;
     created_at: Date | null;
+    price_min: number | null;
     price_max: number | null;
     discord_webhook: string | null;
     webhook_active: boolean;
     telegram_active: boolean;
     proxy_group: { name: string } | null;
     _count: { items: number };
+};
+
+type AdminUserMetrics = {
+    runningMonitors: number;
+    pausedMonitors: number;
+    totalItems: number;
+    newItems24h: number;
+    checks24h: number;
+    successfulChecks24h: number;
+    failedChecks24h: number;
+    successRate24h: number | null;
+    avgDurationMs24h: number | null;
+    lastCheckAt: Date | null;
+    latestError24h: string | null;
 };
 
 type UserRow = {
@@ -73,6 +92,7 @@ type UserRow = {
     role: string;
     _count: { monitors: number; proxy_groups: number };
     monitors: UserMonitor[];
+    metrics: AdminUserMetrics;
 };
 
 type MonitorLimits = {
@@ -124,6 +144,23 @@ function formatCreatedAt(value: Date | null) {
         dateStyle: "medium",
         timeStyle: "short",
     }).format(new Date(value));
+}
+
+function formatMetricDate(value: Date | null) {
+    if (!value) return "No checks";
+
+    return new Intl.DateTimeFormat("de-DE", {
+        dateStyle: "short",
+        timeStyle: "short",
+    }).format(new Date(value));
+}
+
+function formatSuccessRate(value: number | null) {
+    return value === null ? "n/a" : `${value}%`;
+}
+
+function formatDuration(value: number | null) {
+    return value === null ? "n/a" : `${value} ms`;
 }
 
 function limitInputValue(value: number | null | undefined) {
@@ -209,6 +246,18 @@ export function AdminClient({
     const totalUsers = users.length;
     const premiumUsers = users.filter((u) => u.role === "premium").length;
     const adminUsers = users.filter((u) => u.role === "admin").length;
+    const runningMonitors = users.reduce(
+        (sum, user) => sum + user.metrics.runningMonitors,
+        0,
+    );
+    const newItems24h = users.reduce(
+        (sum, user) => sum + user.metrics.newItems24h,
+        0,
+    );
+    const failedChecks24h = users.reduce(
+        (sum, user) => sum + user.metrics.failedChecks24h,
+        0,
+    );
     const serverProxyLineCount = serverProxies
         .split("\n")
         .filter((line) => line.trim().length > 0).length;
@@ -246,6 +295,37 @@ export function AdminClient({
         setSelected(user);
         setPendingRole(user.role);
         setIsOpen(true);
+    };
+
+    const markUserMonitorsStopped = (
+        user: UserRow,
+        monitorId: number | null = null,
+    ): UserRow => {
+        const stoppedCount = user.monitors.filter(
+            (monitor) =>
+                monitor.status === "active" &&
+                (monitorId === null || monitor.id === monitorId),
+        ).length;
+
+        if (stoppedCount === 0) return user;
+
+        return {
+            ...user,
+            monitors: user.monitors.map((monitor) =>
+                monitor.status === "active" &&
+                (monitorId === null || monitor.id === monitorId)
+                    ? { ...monitor, status: "paused" }
+                    : monitor,
+            ),
+            metrics: {
+                ...user.metrics,
+                runningMonitors: Math.max(
+                    0,
+                    user.metrics.runningMonitors - stoppedCount,
+                ),
+                pausedMonitors: user.metrics.pausedMonitors + stoppedCount,
+            },
+        };
     };
 
     const handleSave = async () => {
@@ -372,29 +452,13 @@ export function AdminClient({
             setUsers((prev) =>
                 prev.map((user) =>
                     user.id === selected.id
-                        ? {
-                              ...user,
-                              monitors: user.monitors.map((monitor) =>
-                                  monitor.status === "active"
-                                      ? { ...monitor, status: "paused" }
-                                      : monitor,
-                              ),
-                          }
+                        ? markUserMonitorsStopped(user)
                         : user,
                 ),
             );
 
             setSelected((prev) =>
-                prev
-                    ? {
-                          ...prev,
-                          monitors: prev.monitors.map((monitor) =>
-                              monitor.status === "active"
-                                  ? { ...monitor, status: "paused" }
-                                  : monitor,
-                          ),
-                      }
-                    : prev,
+                prev ? markUserMonitorsStopped(prev) : prev,
             );
 
             toast.success(
@@ -421,29 +485,13 @@ export function AdminClient({
                 setUsers((prev) =>
                     prev.map((user) =>
                         user.id === selected.id
-                            ? {
-                                  ...user,
-                                  monitors: user.monitors.map((monitor) =>
-                                      monitor.id === monitorId
-                                          ? { ...monitor, status: "paused" }
-                                          : monitor,
-                                  ),
-                              }
+                            ? markUserMonitorsStopped(user, monitorId)
                             : user,
                     ),
                 );
 
                 setSelected((prev) =>
-                    prev
-                        ? {
-                              ...prev,
-                              monitors: prev.monitors.map((monitor) =>
-                                  monitor.id === monitorId
-                                      ? { ...monitor, status: "paused" }
-                                      : monitor,
-                              ),
-                          }
-                        : prev,
+                    prev ? markUserMonitorsStopped(prev, monitorId) : prev,
                 );
 
                 toast.success("Monitor stopped");
@@ -500,11 +548,7 @@ export function AdminClient({
     const selectedPausedMonitors =
         selected?.monitors.filter((monitor) => monitor.status !== "active") ??
         [];
-    const selectedItems =
-        selected?.monitors.reduce(
-            (sum, monitor) => sum + monitor._count.items,
-            0,
-        ) ?? 0;
+    const selectedItems = selected?.metrics.totalItems ?? 0;
     const selectedEffectiveLimit = selected
         ? getEffectiveLimit(selected)
         : { value: null, source: "Unlimited" };
@@ -533,7 +577,7 @@ export function AdminClient({
                 </Button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <Card className="border-border/60 from-card to-muted/30 bg-linear-to-br py-0">
                     <CardHeader className="pt-3 pb-3">
                         <div className="flex items-center justify-between">
@@ -580,6 +624,40 @@ export function AdminClient({
                     </CardHeader>
                     <CardContent className="text-muted-foreground pb-6 text-xs">
                         Full dashboard access including role management.
+                    </CardContent>
+                </Card>
+
+                <Card className="to-card border-emerald-200/70 bg-linear-to-br from-emerald-50 py-0 dark:border-emerald-500/20 dark:from-emerald-500/10">
+                    <CardHeader className="pt-3 pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardDescription>Running</CardDescription>
+                            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-400">
+                                <Activity className="h-4 w-4" />
+                            </div>
+                        </div>
+                        <CardTitle className="text-3xl text-emerald-600 dark:text-emerald-400">
+                            {runningMonitors}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-muted-foreground pb-6 text-xs">
+                        Monitors currently marked active.
+                    </CardContent>
+                </Card>
+
+                <Card className="to-card border-sky-200/70 bg-linear-to-br from-sky-50 py-0 dark:border-sky-500/20 dark:from-sky-500/10">
+                    <CardHeader className="pt-3 pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardDescription>24h Items</CardDescription>
+                            <div className="rounded-lg bg-sky-500/10 p-2 text-sky-600 dark:text-sky-400">
+                                <Boxes className="h-4 w-4" />
+                            </div>
+                        </div>
+                        <CardTitle className="text-3xl text-sky-600 dark:text-sky-400">
+                            {newItems24h}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-muted-foreground pb-6 text-xs">
+                        {failedChecks24h} failed checks in the same window.
                     </CardContent>
                 </Card>
             </div>
@@ -633,6 +711,9 @@ export function AdminClient({
                                     Monitors
                                 </th>
                                 <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
+                                    24h Activity
+                                </th>
+                                <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
                                     Limit
                                 </th>
                                 <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
@@ -680,10 +761,40 @@ export function AdminClient({
                                         {getRoleBadge(user.role)}
                                     </td>
                                     <td className="px-5 py-3.5 text-center">
-                                        <span className="text-foreground inline-flex items-center gap-1 text-sm">
-                                            <Monitor className="text-muted-foreground h-3.5 w-3.5" />
-                                            {user._count.monitors}
-                                        </span>
+                                        <div className="flex flex-col items-center gap-1">
+                                            <span className="text-foreground inline-flex items-center gap-1 text-sm">
+                                                <Monitor className="text-muted-foreground h-3.5 w-3.5" />
+                                                {user._count.monitors}
+                                            </span>
+                                            <span className="text-muted-foreground text-[10px] uppercase">
+                                                {user.metrics.runningMonitors}{" "}
+                                                running
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td className="px-5 py-3.5 text-center">
+                                        <div className="flex flex-col items-center gap-1">
+                                            <span className="text-foreground inline-flex items-center gap-1 text-sm">
+                                                <Activity className="text-muted-foreground h-3.5 w-3.5" />
+                                                {user.metrics.checks24h} checks
+                                            </span>
+                                            <span
+                                                className={`text-[10px] uppercase ${
+                                                    user.metrics
+                                                        .failedChecks24h > 0
+                                                        ? "text-amber-600 dark:text-amber-400"
+                                                        : "text-muted-foreground"
+                                                }`}
+                                            >
+                                                {user.metrics.newItems24h} items
+                                                /{" "}
+                                                {
+                                                    user.metrics
+                                                        .failedChecks24h
+                                                }{" "}
+                                                failed
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="px-5 py-3.5 text-center">
                                         <div className="flex flex-col items-center gap-1">
@@ -745,7 +856,7 @@ export function AdminClient({
                             {paginatedUsers.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={6}
+                                        colSpan={7}
                                         className="px-5 py-12 text-center"
                                     >
                                         <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
@@ -1175,7 +1286,7 @@ export function AdminClient({
                                 </div>
                             </div>
 
-                            <div className="grid gap-3 md:grid-cols-4">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                                 <Card className="py-0">
                                     <CardHeader className="pt-3 pb-2">
                                         <CardDescription>
@@ -1199,6 +1310,16 @@ export function AdminClient({
                                 <Card className="py-0">
                                     <CardHeader className="pt-3 pb-2">
                                         <CardDescription>
+                                            Paused Monitors
+                                        </CardDescription>
+                                        <CardTitle className="text-2xl">
+                                            {selected.metrics.pausedMonitors}
+                                        </CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="py-0">
+                                    <CardHeader className="pt-3 pb-2">
+                                        <CardDescription>
                                             Found Items
                                         </CardDescription>
                                         <CardTitle className="text-2xl">
@@ -1209,13 +1330,100 @@ export function AdminClient({
                                 <Card className="py-0">
                                     <CardHeader className="pt-3 pb-2">
                                         <CardDescription>
-                                            Proxy Groups
+                                            New Items 24h
                                         </CardDescription>
-                                        <CardTitle className="text-2xl">
-                                            {selected._count.proxy_groups}
+                                        <CardTitle className="text-2xl text-sky-600">
+                                            {selected.metrics.newItems24h}
                                         </CardTitle>
                                     </CardHeader>
                                 </Card>
+                                <Card className="py-0">
+                                    <CardHeader className="pt-3 pb-2">
+                                        <CardDescription>
+                                            Checks 24h
+                                        </CardDescription>
+                                        <CardTitle className="text-2xl">
+                                            {selected.metrics.checks24h}
+                                        </CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="py-0">
+                                    <CardHeader className="pt-3 pb-2">
+                                        <CardDescription>
+                                            Success Rate
+                                        </CardDescription>
+                                        <CardTitle className="flex items-center gap-2 text-2xl">
+                                            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                                            {formatSuccessRate(
+                                                selected.metrics.successRate24h,
+                                            )}
+                                        </CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="py-0">
+                                    <CardHeader className="pt-3 pb-2">
+                                        <CardDescription>
+                                            Failed Checks
+                                        </CardDescription>
+                                        <CardTitle className="flex items-center gap-2 text-2xl">
+                                            <AlertTriangle
+                                                className={`h-5 w-5 ${
+                                                    selected.metrics
+                                                        .failedChecks24h > 0
+                                                        ? "text-amber-600"
+                                                        : "text-muted-foreground"
+                                                }`}
+                                            />
+                                            {selected.metrics.failedChecks24h}
+                                        </CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="py-0">
+                                    <CardHeader className="pt-3 pb-2">
+                                        <CardDescription>
+                                            Avg Duration
+                                        </CardDescription>
+                                        <CardTitle className="text-2xl">
+                                            {formatDuration(
+                                                selected.metrics
+                                                    .avgDurationMs24h,
+                                            )}
+                                        </CardTitle>
+                                    </CardHeader>
+                                </Card>
+                            </div>
+
+                            <div className="border-border/60 bg-card rounded-xl border px-4 py-3">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="text-foreground text-sm font-semibold">
+                                            24h Monitor Health
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                            Last check:{" "}
+                                            {formatMetricDate(
+                                                selected.metrics.lastCheckAt,
+                                            )}
+                                        </p>
+                                    </div>
+                                    <Badge
+                                        variant={
+                                            selected.metrics.failedChecks24h > 0
+                                                ? "outline"
+                                                : "secondary"
+                                        }
+                                        className="self-start sm:self-auto"
+                                    >
+                                        {selected.metrics.failedChecks24h > 0
+                                            ? `${selected.metrics.failedChecks24h} failures`
+                                            : "No recent failures"}
+                                    </Badge>
+                                </div>
+                                {selected.metrics.latestError24h ? (
+                                    <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                                        {selected.metrics.latestError24h}
+                                    </p>
+                                ) : null}
                             </div>
 
                             <div className="border-border/60 bg-card rounded-2xl border">
@@ -1253,9 +1461,19 @@ export function AdminClient({
                                                         </div>
                                                         <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                                                             <span>
+                                                                Query:{" "}
+                                                                {monitor.query}
+                                                            </span>
+                                                            <span>
                                                                 {getRegionLabel(
                                                                     monitor.region,
                                                                 )}
+                                                            </span>
+                                                            <span>
+                                                                {
+                                                                    monitor.query_delay_ms
+                                                                }{" "}
+                                                                ms delay
                                                             </span>
                                                             <span>
                                                                 {
@@ -1378,6 +1596,10 @@ export function AdminClient({
                                                         </Badge>
                                                     </div>
                                                     <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                                                        <span>
+                                                            Query:{" "}
+                                                            {monitor.query}
+                                                        </span>
                                                         <span className="inline-flex items-center gap-1">
                                                             <Clock3 className="h-3.5 w-3.5" />
                                                             {formatCreatedAt(
@@ -1398,10 +1620,28 @@ export function AdminClient({
                                                             )}
                                                         </span>
                                                         <span>
+                                                            {
+                                                                monitor.query_delay_ms
+                                                            }{" "}
+                                                            ms delay
+                                                        </span>
+                                                        <span>
                                                             {monitor.proxy_group
                                                                 ?.name ??
                                                                 "Server Proxies"}
                                                         </span>
+                                                        {monitor.price_min ||
+                                                        monitor.price_max ? (
+                                                            <span>
+                                                                Price{" "}
+                                                                {monitor.price_min ??
+                                                                    0}
+                                                                -
+                                                                {monitor.price_max ??
+                                                                    "any"}{" "}
+                                                                EUR
+                                                            </span>
+                                                        ) : null}
                                                         <span className="inline-flex items-center gap-1">
                                                             <Webhook className="h-3.5 w-3.5" />
                                                             {[
