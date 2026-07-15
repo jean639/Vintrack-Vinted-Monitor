@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { AdminClient } from "./client";
 import { getFreeProxyAdminState } from "@/actions/admin";
 import { Prisma } from "@prisma/client";
@@ -61,14 +62,18 @@ function emptyMetrics(): AdminUserMetrics {
     };
 }
 
-async function getAdminUserMetrics(userIds: string[]) {
+type CachedAdminUserMetrics = Omit<AdminUserMetrics, "lastCheckAt"> & {
+    lastCheckAt: string | null;
+};
+
+async function loadAdminUserMetrics(userIds: string[]) {
     const metrics = new Map<string, AdminUserMetrics>(
         userIds.map((userId) => [userId, emptyMetrics()]),
     );
 
     if (userIds.length === 0) return metrics;
 
-    const [monitorRows, itemRows, runRows, errorRows] = await Promise.all([
+    const [monitorRows, runRows, errorRows] = await Promise.all([
         db.$queryRaw<CountRow[]>`
             SELECT
                 "userId",
@@ -84,24 +89,10 @@ async function getAdminUserMetrics(userIds: string[]) {
         db.$queryRaw<CountRow[]>`
             SELECT
                 m."userId",
-                COUNT(i.id)::bigint AS total_items,
-                COUNT(i.id) FILTER (
-                    WHERE i.found_at >= NOW() - INTERVAL '24 hours'
-                )::bigint AS new_items_24h
-            FROM monitors m
-            LEFT JOIN items i ON i.monitor_id = m.id
-            WHERE m."userId" IN (${Prisma.join(userIds)})
-            GROUP BY m."userId"
-        `.catch((error) => {
-            console.error("[admin] failed to load 24h item metrics", error);
-            return [];
-        }),
-        db.$queryRaw<CountRow[]>`
-            SELECT
-                m."userId",
                 COUNT(r.id)::bigint AS checks_24h,
                 COUNT(r.id) FILTER (WHERE r.status = 'success')::bigint AS successful_checks_24h,
                 COUNT(r.id) FILTER (WHERE r.status = 'failed')::bigint AS failed_checks_24h,
+                COALESCE(SUM(r.new_item_count), 0)::bigint AS new_items_24h,
                 AVG(r.duration_ms)::float AS avg_duration_ms_24h,
                 MAX(r.checked_at) AS last_check_at
             FROM monitors m
@@ -140,13 +131,6 @@ async function getAdminUserMetrics(userIds: string[]) {
         metrics.set(row.userId, current);
     }
 
-    for (const row of itemRows) {
-        const current = metrics.get(row.userId) ?? emptyMetrics();
-        current.totalItems = Number(row.total_items ?? 0);
-        current.newItems24h = Number(row.new_items_24h ?? 0);
-        metrics.set(row.userId, current);
-    }
-
     for (const row of runRows) {
         const current = metrics.get(row.userId) ?? emptyMetrics();
         const checks = Number(row.checks_24h ?? 0);
@@ -154,6 +138,7 @@ async function getAdminUserMetrics(userIds: string[]) {
         current.checks24h = checks;
         current.successfulChecks24h = successful;
         current.failedChecks24h = Number(row.failed_checks_24h ?? 0);
+        current.newItems24h = Number(row.new_items_24h ?? 0);
         current.successRate24h =
             checks > 0 ? Math.round((successful / checks) * 100) : null;
         current.avgDurationMs24h =
@@ -172,6 +157,39 @@ async function getAdminUserMetrics(userIds: string[]) {
     }
 
     return metrics;
+}
+
+const getCachedAdminUserMetrics = unstable_cache(
+    async (userIds: string[]) => {
+        const metrics = await loadAdminUserMetrics(userIds);
+        return Array.from(metrics.entries()).map(
+            ([userId, values]) =>
+                [
+                    userId,
+                    {
+                        ...values,
+                        lastCheckAt: values.lastCheckAt?.toISOString() ?? null,
+                    },
+                ] as [string, CachedAdminUserMetrics],
+        );
+    },
+    ["admin-user-metrics-v2"],
+    { revalidate: 30 },
+);
+
+async function getAdminUserMetrics(userIds: string[]) {
+    const entries = await getCachedAdminUserMetrics(userIds);
+    return new Map<string, AdminUserMetrics>(
+        entries.map(([userId, values]) => [
+            userId,
+            {
+                ...values,
+                lastCheckAt: values.lastCheckAt
+                    ? new Date(values.lastCheckAt)
+                    : null,
+            },
+        ]),
+    );
 }
 
 export default async function AdminPage({

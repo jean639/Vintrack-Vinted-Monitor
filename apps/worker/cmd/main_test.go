@@ -3,9 +3,31 @@ package main
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"vintrack-worker/internal/database"
 )
+
+func TestFreeProxyValidationTimeout(t *testing.T) {
+	tests := []struct {
+		name         string
+		maxLatencyMs int
+		want         time.Duration
+	}{
+		{name: "default", maxLatencyMs: 0, want: 4 * time.Second},
+		{name: "normal", maxLatencyMs: 2500, want: 4 * time.Second},
+		{name: "custom", maxLatencyMs: 4000, want: 5500 * time.Millisecond},
+		{name: "capped", maxLatencyMs: 15000, want: 8 * time.Second},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := freeProxyValidationTimeout(test.maxLatencyMs); got != test.want {
+				t.Fatalf("freeProxyValidationTimeout(%d) = %s, want %s", test.maxLatencyMs, got, test.want)
+			}
+		})
+	}
+}
 
 func TestInterleaveFreeProxyCandidates(t *testing.T) {
 	batches := [][]database.FreeProxyCandidate{

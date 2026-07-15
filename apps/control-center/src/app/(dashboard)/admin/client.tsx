@@ -577,10 +577,6 @@ export function AdminClient({
         (sum, user) => sum + user.metrics.pausedMonitors,
         0,
     );
-    const totalItems = users.reduce(
-        (sum, user) => sum + user.metrics.totalItems,
-        0,
-    );
     const checks24h = users.reduce(
         (sum, user) => sum + user.metrics.checks24h,
         0,
@@ -660,7 +656,17 @@ export function AdminClient({
 
         setLoadingUserDetailsId(user.id);
         const monitors = await getAdminUserDetails(user.id);
-        const hydratedUser = { ...user, monitors };
+        const hydratedUser = {
+            ...user,
+            monitors,
+            metrics: {
+                ...user.metrics,
+                totalItems: monitors.reduce(
+                    (sum, monitor) => sum + monitor._count.items,
+                    0,
+                ),
+            },
+        };
 
         setUsers((prev) =>
             prev.map((current) =>
@@ -1194,7 +1200,7 @@ export function AdminClient({
                         <OverviewMetric
                             label="New items 24h"
                             value={newItems24h}
-                            detail={`${totalItems} lifetime items`}
+                            detail="From completed monitor checks"
                             icon={Boxes}
                             iconClassName="bg-rose-500/10 text-rose-600"
                         />
@@ -1270,10 +1276,10 @@ export function AdminClient({
                             <div className="mt-4 grid gap-3 sm:grid-cols-3">
                                 <div className="bg-muted/30 rounded-lg px-4 py-3">
                                     <p className="text-muted-foreground text-xs">
-                                        Lifetime items
+                                        Successful checks
                                     </p>
                                     <p className="mt-1 text-xl font-semibold">
-                                        {totalItems}
+                                        {successfulChecks24h}
                                     </p>
                                 </div>
                                 <div className="bg-muted/30 rounded-lg px-4 py-3">

@@ -172,8 +172,8 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 		return
 	}
 	regionBatches := make([][]database.FreeProxyCandidate, 0, len(regions))
-	perRegionBatch := settingInt(store, "FREE_PROXY_HEALTH_BATCH_PER_REGION", 100)
-	bootstrapBatch := settingInt(store, "FREE_PROXY_BOOTSTRAP_BATCH_PER_REGION", 500)
+	perRegionBatch := settingInt(store, "FREE_PROXY_HEALTH_BATCH_PER_REGION", 40)
+	bootstrapBatch := settingInt(store, "FREE_PROXY_BOOTSTRAP_BATCH_PER_REGION", 120)
 	minActive := settingInt(store, "free_proxy_min_active_per_region", 25)
 	for _, region := range regions {
 		batchSize := perRegionBatch
@@ -197,6 +197,7 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 	threshold := settingInt(store, "free_proxy_failure_threshold", 3)
 	quarantineMinutes := settingInt(store, "free_proxy_quarantine_minutes", 30)
 	maxLatencyMs := settingInt(store, "free_proxy_max_latency_ms", 2500)
+	validationTimeout := freeProxyValidationTimeout(maxLatencyMs)
 	concurrency := settingInt(store, "FREE_PROXY_HEALTH_CONCURRENCY", 100)
 	if concurrency < 1 {
 		concurrency = 1
@@ -218,7 +219,9 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 				return
 			default:
 			}
-			result, err := scraper.ValidateFreeProxy(ctx, candidate.ProxyURL, candidate.Region, maxLatencyMs)
+			validationCtx, cancelValidation := context.WithTimeout(ctx, validationTimeout)
+			result, err := scraper.ValidateFreeProxy(validationCtx, candidate.ProxyURL, candidate.Region, maxLatencyMs)
+			cancelValidation()
 			if err != nil {
 				failed.Add(1)
 				store.RecordFreeProxyFailure(candidate.ProxyURL, candidate.Region, result.StatusCode, err.Error(), threshold, quarantineMinutes)
@@ -237,6 +240,20 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 		failed.Load(),
 		time.Since(startedAt).Round(time.Second),
 	)
+}
+
+func freeProxyValidationTimeout(maxLatencyMs int) time.Duration {
+	if maxLatencyMs <= 0 {
+		maxLatencyMs = 2500
+	}
+	timeout := time.Duration(maxLatencyMs+1500) * time.Millisecond
+	if timeout < 4*time.Second {
+		return 4 * time.Second
+	}
+	if timeout > 8*time.Second {
+		return 8 * time.Second
+	}
+	return timeout
 }
 
 func interleaveFreeProxyCandidates(batches [][]database.FreeProxyCandidate) []database.FreeProxyCandidate {
