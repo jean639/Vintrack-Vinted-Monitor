@@ -23,6 +23,36 @@ func TestParseUserIDFromJWT_Valid(t *testing.T) {
 	}
 }
 
+func TestParseUserIDFromJWT_PrefersSubjectOverAccountID(t *testing.T) {
+	token := "header.eyJhY2NvdW50X2lkIjo2Nzg5MCwic3ViIjoiMTIzNDUifQ.signature"
+
+	userID, userIDStr := parseUserIDFromJWT(token)
+	if userID != 12345 {
+		t.Errorf("userID = %d, want 12345", userID)
+	}
+	if userIDStr != "12345" {
+		t.Errorf("userIDStr = %q, want %q", userIDStr, "12345")
+	}
+}
+
+func TestParseUserIDFromJWT_PrefersActorSubject(t *testing.T) {
+	token := "header.eyJhY2NvdW50X2lkIjo2Nzg5MCwiYWN0Ijp7InN1YiI6IjU0MzIxIn0sInN1YiI6IjEyMzQ1In0.signature"
+
+	userID, _ := parseUserIDFromJWT(token)
+	if userID != 54321 {
+		t.Errorf("userID = %d, want 54321", userID)
+	}
+}
+
+func TestParseUserIDFromJWT_FallsBackToAccountID(t *testing.T) {
+	token := "header.eyJhY2NvdW50X2lkIjoiNjc4OTAifQ.signature"
+
+	userID, _ := parseUserIDFromJWT(token)
+	if userID != 67890 {
+		t.Errorf("userID = %d, want 67890", userID)
+	}
+}
+
 func TestParseUserIDFromJWT_InvalidToken(t *testing.T) {
 	tests := []struct {
 		name  string

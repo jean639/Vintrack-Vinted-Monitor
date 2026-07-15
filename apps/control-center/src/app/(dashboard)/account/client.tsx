@@ -81,6 +81,8 @@ type ExtensionSyncResult = {
     ok?: boolean;
     status?: string;
     domain?: string;
+    vintedId?: number;
+    vintedName?: string;
     error?: string;
     reason?: string;
 };
@@ -273,8 +275,13 @@ export function AccountClient({
                 const syncedCount =
                     completedSyncs.length || payload.syncedDomains?.length || 0;
                 if (payload.syncOk !== false && syncedCount > 0) {
+                    const syncedAccount = completedSyncs.find(
+                        (result) => result.vintedName,
+                    )?.vintedName;
                     toast.success(
-                        `Extension connected and synced ${syncedCount} Vinted session${syncedCount === 1 ? "" : "s"}`,
+                        syncedAccount
+                            ? `Extension connected to @${syncedAccount}`
+                            : `Extension connected and synced ${syncedCount} Vinted session${syncedCount === 1 ? "" : "s"}`,
                     );
                 } else {
                     const issue = getSyncIssue(payload.results);
@@ -306,8 +313,13 @@ export function AccountClient({
 
                 const completedSyncs = getCompletedSyncs(payload.results);
                 if (completedSyncs.length > 0) {
+                    const syncedAccount = completedSyncs.find(
+                        (result) => result.vintedName,
+                    )?.vintedName;
                     toast.success(
-                        `Synced ${completedSyncs.length} Vinted session${completedSyncs.length === 1 ? "" : "s"}`,
+                        syncedAccount
+                            ? `Synced Vinted account @${syncedAccount}`
+                            : `Synced ${completedSyncs.length} Vinted session${completedSyncs.length === 1 ? "" : "s"}`,
                     );
                 } else {
                     const issue = getSyncIssue(payload.results);

@@ -54,23 +54,46 @@ function cookieSyncKey(domain, storeId) {
   return `${sanitizeDomain(domain)}|${storeId || ""}`;
 }
 
-function accessTokenExpiresSoon(token) {
+function accessTokenClaims(token) {
   const parts = String(token || "").split(".");
   if (parts.length !== 3) {
-    return false;
+    return {};
   }
 
   try {
     const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
     const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, "=");
-    const claims = JSON.parse(atob(padded));
-    return (
-      typeof claims?.exp === "number" &&
-      claims.exp * 1000 - Date.now() <= PROACTIVE_BROWSER_REFRESH_MS
-    );
+    return JSON.parse(atob(padded));
   } catch {
-    return false;
+    return {};
   }
+}
+
+function accessTokenIdentityIds(token) {
+  const claims = accessTokenClaims(token);
+  return [claims?.act?.sub, claims?.sub, claims?.account_id]
+    .map((value) => Number(value || 0))
+    .filter(
+      (value, index, values) =>
+        Number.isFinite(value) && value > 0 && values.indexOf(value) === index,
+    );
+}
+
+function accessTokenAccountId(token) {
+  return accessTokenIdentityIds(token)[0] || 0;
+}
+
+function accessTokenIssuedAt(token) {
+  const issuedAt = Number(accessTokenClaims(token)?.iat || 0);
+  return Number.isFinite(issuedAt) && issuedAt > 0 ? issuedAt : 0;
+}
+
+function accessTokenExpiresSoon(token) {
+  const expiresAt = Number(accessTokenClaims(token)?.exp || 0);
+  return (
+    expiresAt > 0 &&
+    expiresAt * 1000 - Date.now() <= PROACTIVE_BROWSER_REFRESH_MS
+  );
 }
 
 function cookieDomainMatches(cookieDomain, targetDomain) {
@@ -265,6 +288,67 @@ async function getOpenVintedTabs(preferredDomain = "") {
   });
 }
 
+function mostRecentlyUsedTab(tabs) {
+  return [...tabs].sort(
+    (left, right) =>
+      Number(right?.lastAccessed || 0) - Number(left?.lastAccessed || 0) ||
+      Number(right?.id || 0) - Number(left?.id || 0),
+  )[0];
+}
+
+async function getBrowserAccountForTab(tab) {
+  if (typeof tab?.id !== "number") {
+    return { ok: false, error: "The selected Vinted tab is unavailable." };
+  }
+
+  try {
+    await waitForTabBridge(tab.id, 3000);
+  } catch {
+    await extensionApi.tabs.reload(tab.id);
+    await waitForTabLoad(tab.id);
+    await waitForTabBridge(tab.id, 10000);
+  }
+  return extensionApi.tabs.sendMessage(tab.id, {
+    type: "VINTRACK_GET_BROWSER_ACCOUNT",
+    payload: { requestId: crypto.randomUUID() },
+  });
+}
+
+async function selectAccessCookieForTab(
+  tab,
+  preferredDomain = "",
+  accountId = 0,
+) {
+  const tabDomain = domainFromUrl(tab?.url || "");
+  const targetDomain = tabDomain || sanitizeDomain(preferredDomain);
+  const storeId =
+    typeof tab?.cookieStoreId === "string" ? tab.cookieStoreId : "";
+  const cookies = (await extensionApi.cookies.getAll({
+    name: "access_token_web",
+  })).filter((cookie) => {
+    const cookieStoreId =
+      typeof cookie?.storeId === "string" ? cookie.storeId : "";
+    return (
+      cookieDomainMatches(cookie?.domain || "", targetDomain) &&
+      (!storeId || cookieStoreId === storeId) &&
+      (!accountId || accessTokenIdentityIds(cookie?.value).includes(accountId))
+    );
+  });
+
+  return [...cookies].sort((left, right) => {
+    const issuedAtDifference =
+      accessTokenIssuedAt(right?.value) - accessTokenIssuedAt(left?.value);
+    if (issuedAtDifference !== 0) {
+      return issuedAtDifference;
+    }
+    const leftDomain = sanitizeDomain(left?.domain || "");
+    const rightDomain = sanitizeDomain(right?.domain || "");
+    if (leftDomain === targetDomain && rightDomain !== targetDomain) return -1;
+    if (rightDomain === targetDomain && leftDomain !== targetDomain) return 1;
+    return Number(right?.expirationDate || 0) - Number(left?.expirationDate || 0);
+  })[0];
+}
+
 async function refreshOpenVintedBrowserSessions(preferredDomain = "") {
   const tabs = await getOpenVintedTabs(preferredDomain);
   if (tabs.length === 0) {
@@ -400,6 +484,10 @@ function formatRuntimeState(storage) {
 async function performDomainSync(domain, options = {}) {
   const normalizedDomain = sanitizeDomain(domain);
   const storeId = typeof options.storeId === "string" ? options.storeId : "";
+  const selectedAccessToken = String(options.accessToken || "").trim();
+  const allowAccountSwitch = options.allowAccountSwitch === true;
+  const browserVintedId = Number(options.browserVintedId || 0);
+  const browserVintedName = String(options.browserVintedName || "").trim();
   if (!isVintedDomain(normalizedDomain)) {
     return { ok: false, reason: "unsupported-domain" };
   }
@@ -409,9 +497,11 @@ async function performDomainSync(domain, options = {}) {
     return { ok: false, reason: "not-configured" };
   }
 
-  const accessCookie = await extensionApi.cookies.get(
-    cookieLookupDetails(normalizedDomain, "access_token_web", storeId),
-  );
+  const accessCookie = selectedAccessToken
+    ? { value: selectedAccessToken }
+    : await extensionApi.cookies.get(
+        cookieLookupDetails(normalizedDomain, "access_token_web", storeId),
+      );
 
   if (!accessCookie?.value) {
     return { ok: false, reason: "missing-browser-token" };
@@ -449,6 +539,9 @@ async function performDomainSync(domain, options = {}) {
           access_token: accessCookie?.value || "",
           domain: normalizedDomain,
           user_agent: navigator.userAgent,
+          allow_account_switch: allowAccountSwitch,
+          browser_vinted_id: browserVintedId,
+          browser_vinted_name: browserVintedName,
         }),
         signal: controller.signal,
       });
@@ -509,6 +602,9 @@ async function performDomainSync(domain, options = {}) {
     domain: sanitizeDomain(data.domain || normalizedDomain),
     status,
     storeId,
+    vintedId: Number(data.vinted_id || 0),
+    vintedName:
+      typeof data.vinted_name === "string" ? data.vinted_name.trim() : "",
     reason: completed ? "" : status || "sync-not-completed",
     retryable: status === "ignored_invalid_browser_session",
     error: completed ? "" : syncStatusError(data),
@@ -518,13 +614,21 @@ async function performDomainSync(domain, options = {}) {
 async function syncDomain(domain, options = {}) {
   const normalizedDomain = sanitizeDomain(domain);
   const storeId = typeof options.storeId === "string" ? options.storeId : "";
-  const key = cookieSyncKey(normalizedDomain, storeId);
+  const accessToken = String(options.accessToken || "").trim();
+  const accountId = accessTokenAccountId(accessToken);
+  const key = `${cookieSyncKey(normalizedDomain, storeId)}|${accountId}|${options.allowAccountSwitch === true}`;
   const activeSync = inFlightSyncs.get(key);
   if (activeSync) {
     return activeSync;
   }
 
-  const sync = performDomainSync(normalizedDomain, { storeId });
+  const sync = performDomainSync(normalizedDomain, {
+    storeId,
+    accessToken,
+    allowAccountSwitch: options.allowAccountSwitch === true,
+    browserVintedId: options.browserVintedId,
+    browserVintedName: options.browserVintedName,
+  });
   inFlightSyncs.set(key, sync);
   try {
     return await sync;
@@ -570,8 +674,96 @@ async function syncAllVintedDomains() {
   return results;
 }
 
-async function syncPreferredOrAllDomains(preferredDomain) {
+async function syncPreferredOpenTab(preferredDomain, options = {}) {
+  const tabs = await getOpenVintedTabs(preferredDomain);
+  const selectedTab = mostRecentlyUsedTab(tabs);
+  if (!selectedTab) {
+    return [
+      {
+        ok: false,
+        reason: "no-open-vinted-tab",
+        error:
+          "Open the Vinted account you want to use in a tab, then sync again.",
+      },
+    ];
+  }
+
+  const domain = domainFromUrl(selectedTab.url || "");
+  let browserAccount;
+  try {
+    browserAccount = await getBrowserAccountForTab(selectedTab);
+  } catch (error) {
+    return [
+      {
+        ok: false,
+        domain,
+        reason: "browser-account-lookup-failed",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not identify the account in the selected Vinted tab.",
+      },
+    ];
+  }
+  const accountId = Number(browserAccount?.accountId || 0);
+  if (!browserAccount?.ok || !accountId) {
+    return [
+      {
+        ok: false,
+        domain,
+        reason: "browser-account-lookup-failed",
+        error:
+          browserAccount?.error ||
+          "Could not identify the account in the selected Vinted tab.",
+      },
+    ];
+  }
+  const accessCookie = await selectAccessCookieForTab(
+    selectedTab,
+    preferredDomain,
+    accountId,
+  );
+  if (!accessCookie?.value) {
+    return [
+      {
+        ok: false,
+        domain,
+        reason: "missing-browser-token",
+        error:
+          `No session token matched ${browserAccount.accountName ? `@${browserAccount.accountName}` : "the account"} open in the selected Vinted tab. Reload that tab and try again.`,
+      },
+    ];
+  }
+
+  const storeId =
+    typeof accessCookie.storeId === "string" ? accessCookie.storeId : "";
+  try {
+    return [
+      await syncDomain(domain, {
+        storeId,
+        accessToken: accessCookie.value,
+        allowAccountSwitch: options.allowAccountSwitch === true,
+        browserVintedId: accountId,
+        browserVintedName: browserAccount.accountName,
+      }),
+    ];
+  } catch (error) {
+    return [
+      {
+        ok: false,
+        domain,
+        storeId,
+        error: error instanceof Error ? error.message : "unknown-error",
+      },
+    ];
+  }
+}
+
+async function syncPreferredOrAllDomains(preferredDomain, options = {}) {
   const normalizedPreferredDomain = sanitizeDomain(preferredDomain);
+  if (options.preferOpenTab === true) {
+    return syncPreferredOpenTab(normalizedPreferredDomain, options);
+  }
   if (normalizedPreferredDomain && isVintedDomain(normalizedPreferredDomain)) {
     const cookies = (
       await extensionApi.cookies.getAll({ name: "access_token_web" })
@@ -624,8 +816,11 @@ async function syncPreferredOrAllDomains(preferredDomain) {
   return syncAllVintedDomains();
 }
 
-async function syncAndPersistPreferredOrAllDomains(preferredDomain) {
-  let results = await syncPreferredOrAllDomains(preferredDomain);
+async function syncAndPersistPreferredOrAllDomains(
+  preferredDomain,
+  options = {},
+) {
+  let results = await syncPreferredOrAllDomains(preferredDomain, options);
   if (
     !results.some(isCompletedSyncResult) &&
     results.some(
@@ -635,7 +830,7 @@ async function syncAndPersistPreferredOrAllDomains(preferredDomain) {
     const refreshResults =
       await refreshOpenVintedBrowserSessions(preferredDomain);
     if (refreshResults.some((result) => result.ok)) {
-      results = await syncPreferredOrAllDomains(preferredDomain);
+      results = await syncPreferredOrAllDomains(preferredDomain, options);
       if (results.length === 0) {
         results = [
           {
@@ -1040,8 +1235,13 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       ensurePeriodicSyncAlarm();
 
-      const results =
-        await syncAndPersistPreferredOrAllDomains(preferredDomain);
+      const results = await syncAndPersistPreferredOrAllDomains(
+        preferredDomain,
+        {
+          preferOpenTab: true,
+          allowAccountSwitch: true,
+        },
+      );
       const config = await getConfig();
       const successful = results.some(isCompletedSyncResult);
       const failedResult = results.find((result) => !result.ok);
@@ -1065,8 +1265,13 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const preferredDomain = String(
         message?.payload?.preferredDomain || "",
       ).trim();
-      const results =
-        await syncAndPersistPreferredOrAllDomains(preferredDomain);
+      const results = await syncAndPersistPreferredOrAllDomains(
+        preferredDomain,
+        {
+          preferOpenTab: true,
+          allowAccountSwitch: true,
+        },
+      );
       const config = await getConfig();
       const successful = results.some(isCompletedSyncResult);
       const failedResult = results.find((result) => !result.ok);
