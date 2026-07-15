@@ -27,6 +27,14 @@ type LatestErrorRow = {
     latest_error_24h: string | null;
 };
 
+type AlertIssueSummaryRow = {
+    channel: string;
+    status: string;
+    failure_reason: string | null;
+    event_count: bigint;
+    last_seen_at: Date;
+};
+
 type AdminUserMetrics = {
     runningMonitors: number;
     pausedMonitors: number;
@@ -39,6 +47,17 @@ type AdminUserMetrics = {
     avgDurationMs24h: number | null;
     lastCheckAt: Date | null;
     latestError24h: string | null;
+};
+
+type AdminLogRow = {
+    id: string;
+    type: "audit" | "monitor" | "alert";
+    title: string;
+    detail: string | null;
+    status: string;
+    subject: string | null;
+    actor: string | null;
+    createdAt: Date;
 };
 
 function emptyMetrics(): AdminUserMetrics {
@@ -149,7 +168,122 @@ async function getAdminUserMetrics(userIds: string[]) {
     return metrics;
 }
 
-export default async function AdminPage() {
+async function getAdminLogs(): Promise<AdminLogRow[]> {
+    const logs: AdminLogRow[] = [];
+
+    try {
+        const auditRows = await db.audit_events.findMany({
+            orderBy: { created_at: "desc" },
+            take: 60,
+            select: {
+                id: true,
+                action: true,
+                target_type: true,
+                target_id: true,
+                status: true,
+                created_at: true,
+                user: { select: { name: true, email: true } },
+            },
+        });
+
+        logs.push(
+            ...auditRows.map((row) => ({
+                id: `audit-${row.id.toString()}`,
+                type: "audit" as const,
+                title: row.action,
+                detail: row.target_type
+                    ? `${row.target_type}${row.target_id ? ` #${row.target_id}` : ""}`
+                    : null,
+                status: row.status,
+                subject: row.target_id,
+                actor: row.user?.name ?? row.user?.email ?? null,
+                createdAt: row.created_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load audit logs", error);
+    }
+
+    try {
+        const monitorRows = await db.monitor_events.findMany({
+            orderBy: { created_at: "desc" },
+            take: 60,
+            select: {
+                id: true,
+                event_type: true,
+                severity: true,
+                message: true,
+                created_at: true,
+                monitor: {
+                    select: {
+                        name: true,
+                        user: { select: { name: true, email: true } },
+                    },
+                },
+            },
+        });
+
+        logs.push(
+            ...monitorRows.map((row) => ({
+                id: `monitor-${row.id.toString()}`,
+                type: "monitor" as const,
+                title: row.event_type,
+                detail: row.message,
+                status: row.severity,
+                subject: row.monitor.name,
+                actor: row.monitor.user.name ?? row.monitor.user.email ?? null,
+                createdAt: row.created_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load monitor logs", error);
+    }
+
+    try {
+        const alertRows = await db.$queryRaw<AlertIssueSummaryRow[]>`
+            SELECT
+                channel,
+                status,
+                failure_reason,
+                COUNT(*)::bigint AS event_count,
+                MAX(created_at) AS last_seen_at
+            FROM alert_events
+            WHERE created_at >= NOW() - INTERVAL '24 hours'
+              AND (
+                status <> 'success'
+                OR failure_reason IS NOT NULL
+              )
+            GROUP BY channel, status, failure_reason
+            ORDER BY event_count DESC, last_seen_at DESC
+            LIMIT 20
+        `;
+
+        logs.push(
+            ...alertRows.map((row) => ({
+                id: `alert-${row.channel}-${row.status}-${row.failure_reason ?? "unknown"}`,
+                type: "alert" as const,
+                title: `${row.channel} alert issues`,
+                detail: `${Number(row.event_count)} event${Number(row.event_count) === 1 ? "" : "s"} in 24h${row.failure_reason ? ` · ${row.failure_reason}` : ""}`,
+                status: row.status,
+                subject: "24h summary",
+                actor: null,
+                createdAt: row.last_seen_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load alert logs", error);
+    }
+
+    return logs
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, 100);
+}
+
+export default async function AdminPage({
+    searchParams,
+}: {
+    searchParams?: Promise<{ tab?: string }>;
+}) {
     const session = await auth();
     if (!session?.user?.id) redirect("/login");
 
@@ -241,10 +375,15 @@ export default async function AdminPage() {
     } catch (error) {
         console.error("[admin] failed to load server proxies", error);
     }
+    const logs = await getAdminLogs();
+    const params = await searchParams;
+    const initialTab = params?.tab;
 
     return (
         <AdminClient
             users={usersWithMetrics}
+            logs={logs}
+            initialTab={initialTab}
             currentUserId={session.user.id}
             serverProxies={serverProxies}
             monitorLimits={{
