@@ -1,7 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+    Activity,
+    AlertTriangle,
+    BarChart3,
+    CheckCircle2,
+    ChevronLeft,
+    ChevronRight,
     Shield,
     Crown,
     User,
@@ -9,18 +15,15 @@ import {
     Globe,
     Server,
     Search,
+    ScrollText,
+    Settings2,
     Users,
     Sparkles,
     PauseCircle,
     Clock3,
     Boxes,
     Webhook,
-    ChevronLeft,
-    ChevronRight,
     Gauge,
-    Activity,
-    AlertTriangle,
-    CheckCircle2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -95,6 +98,19 @@ type UserRow = {
     metrics: AdminUserMetrics;
 };
 
+type AdminTab = "overview" | "users" | "roles" | "logs" | "settings";
+
+type AdminLogRow = {
+    id: string;
+    type: "audit" | "monitor" | "alert";
+    title: string;
+    detail: string | null;
+    status: string;
+    subject: string | null;
+    actor: string | null;
+    createdAt: Date;
+};
+
 type MonitorLimits = {
     global: number | null;
     roles: Record<string, number | null>;
@@ -124,6 +140,17 @@ const ROLES = [
 
 const LIMIT_ROLES = ROLES.filter((role) => role.value !== "admin");
 const USER_PAGE_SIZES = [25, 50, 100] as const;
+const ADMIN_TABS: {
+    value: AdminTab;
+    label: string;
+    icon: typeof BarChart3;
+}[] = [
+    { value: "overview", label: "Overview", icon: BarChart3 },
+    { value: "users", label: "Users", icon: Users },
+    { value: "roles", label: "Roles", icon: Shield },
+    { value: "logs", label: "Logs", icon: ScrollText },
+    { value: "settings", label: "Settings", icon: Settings2 },
+];
 
 function getRoleBadge(role: string) {
     const r = ROLES.find((r) => r.value === role) ?? ROLES[0];
@@ -171,18 +198,31 @@ function formatLimit(value: number | null) {
     return value === null ? "Unlimited" : `${value} active`;
 }
 
+function normalizeTab(value: string | null | undefined): AdminTab {
+    return ADMIN_TABS.some((tab) => tab.value === value)
+        ? (value as AdminTab)
+        : "overview";
+}
+
 export function AdminClient({
     users: initialUsers,
+    logs,
+    initialTab,
     currentUserId,
     serverProxies: initialServerProxies,
     monitorLimits: initialMonitorLimits,
 }: {
     users: UserRow[];
+    logs: AdminLogRow[];
+    initialTab?: string;
     currentUserId: string;
     serverProxies: string;
     monitorLimits: MonitorLimits;
 }) {
     const [users, setUsers] = useState<UserRow[]>(initialUsers);
+    const [activeTab, setActiveTab] = useState<AdminTab>(
+        normalizeTab(initialTab),
+    );
     const [selected, setSelected] = useState<UserRow | null>(null);
     const [pendingRole, setPendingRole] = useState<string>("");
     const [isOpen, setIsOpen] = useState(false);
@@ -216,6 +256,19 @@ export function AdminClient({
     const [serverProxies, setServerProxies] = useState(initialServerProxies);
     const [isSavingServerProxies, setIsSavingServerProxies] = useState(false);
 
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const tab = normalizeTab(params.get("tab"));
+        setActiveTab(tab);
+    }, []);
+
+    const switchTab = (tab: AdminTab) => {
+        setActiveTab(tab);
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", tab);
+        window.history.replaceState(null, "", url.toString());
+    };
+
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const filteredUsers = users.filter((user) => {
         if (!normalizedQuery) return true;
@@ -244,6 +297,7 @@ export function AdminClient({
     );
 
     const totalUsers = users.length;
+    const freeUsers = users.filter((u) => u.role === "free").length;
     const premiumUsers = users.filter((u) => u.role === "premium").length;
     const adminUsers = users.filter((u) => u.role === "admin").length;
     const runningMonitors = users.reduce(
@@ -258,6 +312,44 @@ export function AdminClient({
         (sum, user) => sum + user.metrics.failedChecks24h,
         0,
     );
+    const totalMonitors = users.reduce(
+        (sum, user) => sum + user._count.monitors,
+        0,
+    );
+    const pausedMonitors = users.reduce(
+        (sum, user) => sum + user.metrics.pausedMonitors,
+        0,
+    );
+    const totalItems = users.reduce(
+        (sum, user) => sum + user.metrics.totalItems,
+        0,
+    );
+    const checks24h = users.reduce(
+        (sum, user) => sum + user.metrics.checks24h,
+        0,
+    );
+    const successfulChecks24h = users.reduce(
+        (sum, user) => sum + user.metrics.successfulChecks24h,
+        0,
+    );
+    const successRate24h =
+        checks24h > 0 ? Math.round((successfulChecks24h / checks24h) * 100) : null;
+    const topUsers = [...users]
+        .sort(
+            (a, b) =>
+                b.metrics.runningMonitors - a.metrics.runningMonitors ||
+                b.metrics.newItems24h - a.metrics.newItems24h ||
+                b._count.monitors - a._count.monitors,
+        )
+        .slice(0, 5);
+    const importantLogs = logs
+        .filter(
+            (log) =>
+                log.status !== "success" ||
+                log.type === "monitor" ||
+                log.detail,
+        )
+        .slice(0, 6);
     const serverProxyLineCount = serverProxies
         .split("\n")
         .filter((line) => line.trim().length > 0).length;
@@ -283,6 +375,18 @@ export function AdminClient({
 
         return { value: null, source: "Unlimited" };
     };
+    const limitedUsers = users.filter((user) => {
+        const limit = getEffectiveLimit(user);
+        return limit.value !== null && user.metrics.runningMonitors >= limit.value;
+    });
+    const userOverrides = users.filter(
+        (user) =>
+            monitorLimits.users[user.id] !== null &&
+            monitorLimits.users[user.id] !== undefined,
+    ).length;
+    const roleLimitsConfigured = Object.values(monitorLimits.roles).filter(
+        (value) => value !== null && value !== undefined,
+    ).length;
 
     const openUserDetails = (user: UserRow) => {
         setSelected(user);
@@ -558,25 +662,46 @@ export function AdminClient({
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                     <h1 className="mt-3 text-3xl font-bold tracking-tight">
-                        User Management
+                        Admin Panel
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
-                        Search users, review access levels, and update roles
-                        from one place.
+                        Overview, users, roles, logs, and operational settings
+                        in separate workspaces.
                     </p>
                 </div>
-
-                <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 self-start rounded-xl lg:self-auto"
-                    onClick={() => setIsProxyDialogOpen(true)}
-                >
-                    <Server className="mr-2 h-4 w-4" />
-                    Server Proxies
-                </Button>
             </div>
 
+            <div
+                role="tablist"
+                aria-label="Admin sections"
+                className="border-border/60 bg-card flex flex-wrap gap-1 rounded-xl border p-1 shadow-sm"
+            >
+                {ADMIN_TABS.map((tab) => {
+                    const Icon = tab.icon;
+                    const isActive = activeTab === tab.value;
+
+                    return (
+                        <button
+                            key={tab.value}
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            className={`flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${
+                                isActive
+                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            }`}
+                            onClick={() => switchTab(tab.value)}
+                        >
+                            <Icon className="h-4 w-4" />
+                            {tab.label}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {activeTab === "overview" ? (
+                <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <Card className="border-border/60 from-card to-muted/30 bg-linear-to-br py-0">
                     <CardHeader className="pt-3 pb-3">
@@ -661,7 +786,237 @@ export function AdminClient({
                     </CardContent>
                 </Card>
             </div>
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+                        <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                            <div className="mb-4 flex items-center justify-between">
+                                <div>
+                                    <p className="text-foreground text-sm font-semibold">
+                                        Monitor Health
+                                    </p>
+                                    <p className="text-muted-foreground text-xs">
+                                        Current monitor mix and 24h worker
+                                        activity.
+                                    </p>
+                                </div>
+                                <Badge
+                                    variant={
+                                        failedChecks24h > 0
+                                            ? "outline"
+                                            : "secondary"
+                                    }
+                                    className="rounded-md text-[10px] uppercase"
+                                >
+                                    {failedChecks24h > 0
+                                        ? `${failedChecks24h} failures`
+                                        : "Healthy"}
+                                </Badge>
+                            </div>
 
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                    <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                                        Total monitors
+                                    </p>
+                                    <p className="mt-1 text-2xl font-semibold">
+                                        {totalMonitors}
+                                    </p>
+                                </div>
+                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                    <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                                        Paused
+                                    </p>
+                                    <p className="mt-1 text-2xl font-semibold">
+                                        {pausedMonitors}
+                                    </p>
+                                </div>
+                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                    <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                                        Checks 24h
+                                    </p>
+                                    <p className="mt-1 text-2xl font-semibold">
+                                        {checks24h}
+                                    </p>
+                                </div>
+                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                    <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                                        Success rate
+                                    </p>
+                                    <p className="mt-1 text-2xl font-semibold">
+                                        {formatSuccessRate(successRate24h)}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                                <div className="bg-muted/30 rounded-xl px-4 py-3">
+                                    <p className="text-muted-foreground text-xs">
+                                        Lifetime items
+                                    </p>
+                                    <p className="mt-1 text-xl font-semibold">
+                                        {totalItems}
+                                    </p>
+                                </div>
+                                <div className="bg-muted/30 rounded-xl px-4 py-3">
+                                    <p className="text-muted-foreground text-xs">
+                                        New items 24h
+                                    </p>
+                                    <p className="mt-1 text-xl font-semibold">
+                                        {newItems24h}
+                                    </p>
+                                </div>
+                                <div className="bg-muted/30 rounded-xl px-4 py-3">
+                                    <p className="text-muted-foreground text-xs">
+                                        Server proxies
+                                    </p>
+                                    <p className="mt-1 text-xl font-semibold">
+                                        {serverProxyLineCount}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                            <div className="mb-4">
+                                <p className="text-foreground text-sm font-semibold">
+                                    Limits & Capacity
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                    Active monitor limits that need admin
+                                    attention.
+                                </p>
+                            </div>
+                            <div className="space-y-3">
+                                {[
+                                    ["Users at limit", limitedUsers.length],
+                                    ["User overrides", userOverrides],
+                                    ["Role limits", roleLimitsConfigured],
+                                ].map(([label, count]) => (
+                                    <div
+                                        key={label}
+                                        className="flex items-center justify-between rounded-xl border px-4 py-3"
+                                    >
+                                        <span className="text-sm font-medium">
+                                            {label}
+                                        </span>
+                                        <span className="text-muted-foreground text-sm">
+                                            {count}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            {limitedUsers.length > 0 ? (
+                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                                    <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                                        {limitedUsers.length} user
+                                        {limitedUsers.length === 1 ? "" : "s"} at
+                                        active monitor capacity
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                                        Review role or user overrides in the
+                                        Roles tab.
+                                    </p>
+                                </div>
+                            ) : (
+                                <p className="text-muted-foreground mt-4 rounded-xl border px-4 py-3 text-xs">
+                                    No users are currently blocked by active
+                                    monitor limits.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
+                            <div className="border-border/60 border-b px-5 py-4">
+                                <p className="text-foreground text-sm font-semibold">
+                                    Top Active Users
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                    Sorted by running monitors and 24h item
+                                    output.
+                                </p>
+                            </div>
+                            <div className="divide-border/50 divide-y">
+                                {topUsers.map((user) => (
+                                    <button
+                                        key={user.id}
+                                        type="button"
+                                        className="hover:bg-muted/40 flex w-full items-center justify-between gap-4 px-5 py-3 text-left transition-colors"
+                                        onClick={() => openUserDetails(user)}
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="text-foreground truncate text-sm font-medium">
+                                                {user.name ?? "Unknown"}
+                                            </p>
+                                            <p className="text-muted-foreground truncate text-xs">
+                                                {user.email ?? "No email"}
+                                            </p>
+                                        </div>
+                                        <div className="text-right text-xs">
+                                            <p className="text-foreground font-semibold">
+                                                {user.metrics.runningMonitors}{" "}
+                                                running
+                                            </p>
+                                            <p className="text-muted-foreground">
+                                                {user.metrics.newItems24h} items
+                                                / 24h
+                                            </p>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
+                            <div className="border-border/60 border-b px-5 py-4">
+                                <p className="text-foreground text-sm font-semibold">
+                                    Recent Important Events
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                    Failures and monitor events without the
+                                    successful alert noise.
+                                </p>
+                            </div>
+                            {importantLogs.length > 0 ? (
+                                <div className="divide-border/50 divide-y">
+                                    {importantLogs.map((log) => (
+                                        <div key={log.id} className="px-5 py-3">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Badge
+                                                    variant="outline"
+                                                    className="rounded-md text-[10px] uppercase"
+                                                >
+                                                    {log.type}
+                                                </Badge>
+                                                <span className="text-foreground text-sm font-medium">
+                                                    {log.title}
+                                                </span>
+                                                <span className="text-muted-foreground ml-auto text-xs">
+                                                    {formatMetricDate(
+                                                        log.createdAt,
+                                                    )}
+                                                </span>
+                                            </div>
+                                            <p className="text-muted-foreground mt-1 truncate text-xs">
+                                                {log.detail ??
+                                                    log.subject ??
+                                                    log.actor ??
+                                                    "No detail"}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-muted-foreground px-5 py-8 text-center text-sm">
+                                    No important events right now.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </>
+            ) : null}
+
+            {activeTab === "users" ? (
             <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
                 <div className="border-border/60 flex flex-col gap-3 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
@@ -938,8 +1293,49 @@ export function AdminClient({
                     </div>
                 </div>
             </div>
+            ) : null}
 
-            <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+            {activeTab === "roles" ? (
+                <>
+                    <div className="grid gap-4 md:grid-cols-3">
+                        {ROLES.map((role) => {
+                            const count =
+                                role.value === "free"
+                                    ? freeUsers
+                                    : role.value === "premium"
+                                      ? premiumUsers
+                                      : adminUsers;
+                            const Icon = role.icon;
+
+                            return (
+                                <Card key={role.value} className="py-0">
+                                    <CardHeader className="pt-3 pb-3">
+                                        <div className="flex items-center justify-between">
+                                            <CardDescription>
+                                                {role.label}
+                                            </CardDescription>
+                                            <div className="bg-muted text-muted-foreground rounded-lg p-2">
+                                                <Icon className="h-4 w-4" />
+                                            </div>
+                                        </div>
+                                        <CardTitle className="text-3xl">
+                                            {count}
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="text-muted-foreground pb-6 text-xs">
+                                        {role.value === "free" &&
+                                            "Standard accounts with personal proxy requirements."}
+                                        {role.value === "premium" &&
+                                            "Accounts with shared server proxy access."}
+                                        {role.value === "admin" &&
+                                            "Accounts with full dashboard and admin access."}
+                                    </CardContent>
+                                </Card>
+                            );
+                        })}
+                    </div>
+
+                    <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
                         <p className="text-foreground text-sm font-semibold">
@@ -1014,6 +1410,136 @@ export function AdminClient({
                     ))}
                 </div>
             </div>
+                </>
+            ) : null}
+
+            {activeTab === "logs" ? (
+                <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
+                    <div className="border-border/60 flex flex-col gap-1 border-b px-5 py-4">
+                        <p className="text-foreground text-sm font-semibold">
+                            Admin Logs
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                            Latest audit, monitor, and alert events.
+                        </p>
+                    </div>
+                    {logs.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-muted/30">
+                                    <tr className="border-border border-b">
+                                        <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
+                                            Event
+                                        </th>
+                                        <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
+                                            Subject
+                                        </th>
+                                        <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
+                                            Actor
+                                        </th>
+                                        <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
+                                            Status
+                                        </th>
+                                        <th className="text-muted-foreground px-5 py-3 text-right text-[11px] font-medium tracking-wider uppercase">
+                                            Time
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-border/50 divide-y">
+                                    {logs.map((log) => (
+                                        <tr key={log.id}>
+                                            <td className="px-5 py-3.5">
+                                                <div className="space-y-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="rounded-md text-[10px] uppercase"
+                                                        >
+                                                            {log.type}
+                                                        </Badge>
+                                                        <p className="text-foreground text-sm font-medium">
+                                                            {log.title}
+                                                        </p>
+                                                    </div>
+                                                    {log.detail ? (
+                                                        <p className="text-muted-foreground max-w-xl truncate text-xs">
+                                                            {log.detail}
+                                                        </p>
+                                                    ) : null}
+                                                </div>
+                                            </td>
+                                            <td className="text-muted-foreground px-5 py-3.5 text-sm">
+                                                {log.subject ?? "-"}
+                                            </td>
+                                            <td className="text-muted-foreground px-5 py-3.5 text-sm">
+                                                {log.actor ?? "-"}
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <Badge
+                                                    variant="secondary"
+                                                    className="rounded-md text-[10px] uppercase"
+                                                >
+                                                    {log.status}
+                                                </Badge>
+                                            </td>
+                                            <td className="text-muted-foreground px-5 py-3.5 text-right text-xs">
+                                                {formatMetricDate(log.createdAt)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-muted-foreground px-5 py-12 text-center text-sm">
+                            No admin logs found yet.
+                        </div>
+                    )}
+                </div>
+            ) : null}
+
+            {activeTab === "settings" ? (
+                <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                            <p className="text-foreground text-sm font-semibold">
+                                Server Proxies
+                            </p>
+                            <p className="text-muted-foreground text-xs">
+                                Premium and admin monitors use this shared proxy
+                                pool when Server Proxies is selected.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 self-start rounded-xl"
+                            onClick={() => setIsProxyDialogOpen(true)}
+                        >
+                            <Server className="mr-2 h-4 w-4" />
+                            Manage Proxies
+                        </Button>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="border-border/60 rounded-xl border px-4 py-3">
+                            <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                                Active lines
+                            </p>
+                            <p className="mt-1 text-2xl font-semibold">
+                                {serverProxyLineCount}
+                            </p>
+                        </div>
+                        <div className="border-border/60 rounded-xl border px-4 py-3">
+                            <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
+                                Sync
+                            </p>
+                            <p className="text-muted-foreground mt-1 text-sm">
+                                Worker refreshes this setting every sync cycle.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
 
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
                 <DialogContent className="sm:max-w-md">

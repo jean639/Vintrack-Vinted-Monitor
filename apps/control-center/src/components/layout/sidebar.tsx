@@ -44,7 +44,7 @@ const experimentalNavItems = [
 ];
 
 const adminNavItems = [
-    { href: "/admin", label: "User Management", icon: Shield },
+    { href: "/admin", label: "Admin Panel", icon: Shield },
 ];
 
 interface SidebarProps {
