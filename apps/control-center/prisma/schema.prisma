@@ -177,6 +177,7 @@ model monitor_runs {
   checked_at      DateTime @default(now()) @db.Timestamp(6)
 
   @@index([monitor_id, checked_at])
+  @@index([checked_at, monitor_id])
   @@index([status])
 }
 
@@ -273,6 +274,7 @@ model items {
   monitors     monitors  @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
 
   @@id([id, monitor_id])
+  @@index([monitor_id, found_at])
   @@index([seller_id])
 }
 
