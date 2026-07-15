@@ -38,7 +38,9 @@ func (m *Manager) Sync(ctx context.Context) {
 	activeIDs := make(map[int]bool, len(monitors))
 
 	for _, mon := range monitors {
-		if mon.ProxyGroupID == nil {
+		if mon.ProxySource == "free" {
+			mon.FreeProxyVersion = m.engine.FreeProxyRegionVersion(mon.Region)
+		} else if mon.ProxyGroupID == nil {
 			mon.ServerProxyVersion = m.engine.ServerProxyVersion()
 		}
 		activeIDs[mon.ID] = true

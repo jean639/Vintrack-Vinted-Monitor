@@ -18,7 +18,6 @@ import {
     ScrollText,
     Settings2,
     Users,
-    Sparkles,
     PauseCircle,
     Clock3,
     Boxes,
@@ -51,12 +50,17 @@ import {
     setUserRole,
     setUserActiveMonitorLimit,
     getAdminLogs,
+    getFreeProxyAdminState,
     getAdminUserDetails,
+    addFreeProxies,
+    clearFreeProxyQuarantine,
+    importFreeProxiesNow,
+    updateFreeProxySettings,
     updateServerProxies,
     stopSingleUserMonitor,
     stopUserActiveMonitors,
 } from "@/actions/admin";
-import { getRegionLabel } from "@/lib/regions";
+import { getRegionLabel, REGIONS } from "@/lib/regions";
 
 type UserMonitor = {
     id: number;
@@ -119,6 +123,56 @@ type MonitorLimits = {
     users: Record<string, number | null>;
 };
 
+type FreeProxyRow = {
+    id: number;
+    proxy_url: string;
+    protocol: string;
+    source: string;
+    status: string;
+    success_count: number;
+    failure_count: number;
+    last_checked_at: Date | null;
+    last_success_at: Date | null;
+    last_failure_at: Date | null;
+    quarantined_until: Date | null;
+    last_error: string | null;
+};
+
+type FreeProxyState = {
+    settings: {
+        enabled: boolean;
+        autoImportEnabled: boolean;
+        importSource: string;
+        importUrl: string;
+        maxPoolSize: number;
+        failureThreshold: number;
+        quarantineMinutes: number;
+        minActivePerRegion: number;
+        maxLatencyMs: number;
+        starterRegions: string;
+    };
+    counts: {
+        active: number;
+        pending: number;
+        quarantined: number;
+        disabled: number;
+        total: number;
+    };
+    regions: {
+        region: string;
+        active: number;
+        warming: number;
+        pending: number;
+        cooldown: number;
+        dead: number;
+        successRate: number | null;
+        medianLatencyMs: number | null;
+        lastCheckedAt: Date | null;
+        healthy: boolean;
+    }[];
+    recent: FreeProxyRow[];
+};
+
 const ROLES = [
     {
         value: "free",
@@ -142,17 +196,117 @@ const ROLES = [
 
 const LIMIT_ROLES = ROLES.filter((role) => role.value !== "admin");
 const USER_PAGE_SIZES = [25, 50, 100] as const;
+const FREE_PROXY_SOURCE_OPTIONS = [
+    {
+        value: "iplocate_all",
+        label: "IPLocate all",
+        url: "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt",
+    },
+    {
+        value: "iplocate_http",
+        label: "IPLocate HTTP",
+        url: "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt",
+    },
+    {
+        value: "iplocate_https",
+        label: "IPLocate HTTPS",
+        url: "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/https.txt",
+    },
+    {
+        value: "iplocate_socks4",
+        label: "IPLocate SOCKS4",
+        url: "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks4.txt",
+    },
+    {
+        value: "iplocate_socks5",
+        label: "IPLocate SOCKS5",
+        url: "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks5.txt",
+    },
+    {
+        value: "proxyscrape",
+        label: "ProxyScrape",
+        url: "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text",
+    },
+    {
+        value: "custom",
+        label: "Custom URL",
+        url: "",
+    },
+] as const;
 const ADMIN_TABS: {
     value: AdminTab;
     label: string;
     icon: typeof BarChart3;
+    description: string;
 }[] = [
-    { value: "overview", label: "Overview", icon: BarChart3 },
-    { value: "users", label: "Users", icon: Users },
-    { value: "roles", label: "Roles", icon: Shield },
-    { value: "logs", label: "Logs", icon: ScrollText },
-    { value: "settings", label: "Settings", icon: Settings2 },
+    {
+        value: "overview",
+        label: "Overview",
+        icon: BarChart3,
+        description: "Live system capacity, monitor health, and recent issues.",
+    },
+    {
+        value: "users",
+        label: "Users",
+        icon: Users,
+        description: "Accounts, usage, monitor activity, and quick actions.",
+    },
+    {
+        value: "roles",
+        label: "Roles",
+        icon: Shield,
+        description: "Access levels and active monitor limits.",
+    },
+    {
+        value: "logs",
+        label: "Logs",
+        icon: ScrollText,
+        description: "Important audit, monitor, and alert events.",
+    },
+    {
+        value: "settings",
+        label: "Settings",
+        icon: Settings2,
+        description: "Shared proxy infrastructure and worker configuration.",
+    },
 ];
+
+function OverviewMetric({
+    label,
+    value,
+    detail,
+    icon: Icon,
+    iconClassName,
+}: {
+    label: string;
+    value: number | string;
+    detail: string;
+    icon: typeof BarChart3;
+    iconClassName: string;
+}) {
+    return (
+        <div className="bg-card min-w-0 px-4 py-4 sm:px-5">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="text-muted-foreground text-[11px] font-medium uppercase">
+                        {label}
+                    </p>
+                    <p className="mt-1 text-2xl font-semibold tabular-nums">
+                        {value}
+                    </p>
+                </div>
+                <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${iconClassName}`}
+                >
+                    <Icon className="h-4 w-4" />
+                </span>
+            </div>
+            <p className="text-muted-foreground mt-2 truncate text-[11px]">
+                {detail}
+            </p>
+        </div>
+    );
+}
 
 function getRoleBadge(role: string) {
     const r = ROLES.find((r) => r.value === role) ?? ROLES[0];
@@ -206,12 +360,22 @@ function normalizeTab(value: string | null | undefined): AdminTab {
         : "overview";
 }
 
+function normalizeFreeProxySettings(settings: FreeProxyState["settings"]) {
+    if (settings.importSource === "custom") return settings;
+    const source = FREE_PROXY_SOURCE_OPTIONS.find(
+        (option) => option.value === settings.importSource,
+    );
+    if (!source?.url || source.url === settings.importUrl) return settings;
+    return { ...settings, importUrl: source.url };
+}
+
 export function AdminClient({
     users: initialUsers,
     logs,
     initialTab,
     currentUserId,
     serverProxies: initialServerProxies,
+    freeProxyState: initialFreeProxyState,
     monitorLimits: initialMonitorLimits,
 }: {
     users: UserRow[];
@@ -219,6 +383,7 @@ export function AdminClient({
     initialTab?: string;
     currentUserId: string;
     serverProxies: string;
+    freeProxyState: FreeProxyState;
     monitorLimits: MonitorLimits;
 }) {
     const [users, setUsers] = useState<UserRow[]>(initialUsers);
@@ -244,9 +409,8 @@ export function AdminClient({
     const [stoppingMonitorId, setStoppingMonitorId] = useState<number | null>(
         null,
     );
-    const [monitorLimits, setMonitorLimits] = useState<MonitorLimits>(
-        initialMonitorLimits,
-    );
+    const [monitorLimits, setMonitorLimits] =
+        useState<MonitorLimits>(initialMonitorLimits);
     const [globalLimitInput, setGlobalLimitInput] = useState(
         limitInputValue(initialMonitorLimits.global),
     );
@@ -263,6 +427,73 @@ export function AdminClient({
     const [userLimitInput, setUserLimitInput] = useState("");
     const [serverProxies, setServerProxies] = useState(initialServerProxies);
     const [isSavingServerProxies, setIsSavingServerProxies] = useState(false);
+    const [freeProxyState, setFreeProxyState] = useState(initialFreeProxyState);
+    const [freeProxySettings, setFreeProxySettings] = useState(
+        normalizeFreeProxySettings(initialFreeProxyState.settings),
+    );
+    const [manualFreeProxies, setManualFreeProxies] = useState("");
+    const [isSavingFreeProxySettings, setIsSavingFreeProxySettings] =
+        useState(false);
+    const [isImportingFreeProxies, setIsImportingFreeProxies] = useState(false);
+    const [isAddingFreeProxies, setIsAddingFreeProxies] = useState(false);
+    const [isClearingFreeProxyQuarantine, setIsClearingFreeProxyQuarantine] =
+        useState(false);
+    const starterRegionSet = new Set(
+        freeProxySettings.starterRegions
+            .split(",")
+            .map((region) => region.trim().toLowerCase())
+            .filter(Boolean),
+    );
+    const freeProxyHealthByRegion = new Map(
+        freeProxyState.regions.map((region) => [region.region, region]),
+    );
+    const displayedFreeProxyRegions = REGIONS.filter((region) =>
+        starterRegionSet.has(region.code),
+    ).map((region) => {
+        const health = freeProxyHealthByRegion.get(region.code);
+        return health
+            ? { ...health, initializing: false }
+            : {
+                  region: region.code,
+                  active: 0,
+                  warming: 0,
+                  pending: 0,
+                  cooldown: 0,
+                  dead: 0,
+                  successRate: null,
+                  medianLatencyMs: null,
+                  lastCheckedAt: null,
+                  healthy: false,
+                  initializing: true,
+              };
+    });
+
+    const toggleStarterRegion = (regionCode: string) => {
+        setFreeProxySettings((current) => {
+            const selected = new Set(
+                current.starterRegions
+                    .split(",")
+                    .map((region) => region.trim().toLowerCase())
+                    .filter(Boolean),
+            );
+
+            if (selected.has(regionCode)) {
+                if (selected.size === 1) return current;
+                selected.delete(regionCode);
+            } else {
+                selected.add(regionCode);
+            }
+
+            return {
+                ...current,
+                starterRegions: REGIONS.filter((region) =>
+                    selected.has(region.code),
+                )
+                    .map((region) => region.code)
+                    .join(","),
+            };
+        });
+    };
 
     const loadAdminLogs = () => {
         if (logsLoaded || isLoadingLogs) return;
@@ -316,8 +547,7 @@ export function AdminClient({
         userPageStart,
         userPageStart + usersPerPage,
     );
-    const shownUserStart =
-        filteredUsers.length === 0 ? 0 : userPageStart + 1;
+    const shownUserStart = filteredUsers.length === 0 ? 0 : userPageStart + 1;
     const shownUserEnd = Math.min(
         userPageStart + usersPerPage,
         filteredUsers.length,
@@ -360,7 +590,9 @@ export function AdminClient({
         0,
     );
     const successRate24h =
-        checks24h > 0 ? Math.round((successfulChecks24h / checks24h) * 100) : null;
+        checks24h > 0
+            ? Math.round((successfulChecks24h / checks24h) * 100)
+            : null;
     const topUsers = [...users]
         .sort(
             (a, b) =>
@@ -404,7 +636,9 @@ export function AdminClient({
     };
     const limitedUsers = users.filter((user) => {
         const limit = getEffectiveLimit(user);
-        return limit.value !== null && user.metrics.runningMonitors >= limit.value;
+        return (
+            limit.value !== null && user.metrics.runningMonitors >= limit.value
+        );
     });
     const userOverrides = users.filter(
         (user) =>
@@ -415,7 +649,9 @@ export function AdminClient({
         (value) => value !== null && value !== undefined,
     ).length;
     const activeMonitorShare =
-        totalMonitors > 0 ? Math.round((runningMonitors / totalMonitors) * 100) : 0;
+        totalMonitors > 0
+            ? Math.round((runningMonitors / totalMonitors) * 100)
+            : 0;
 
     const hydrateUserDetails = async (user: UserRow) => {
         if (user.monitors.length > 0 || user._count.monitors === 0) {
@@ -583,7 +819,9 @@ export function AdminClient({
         if (!selected) return;
 
         const previous = monitorLimits.users[selected.id] ?? null;
-        const next = userLimitInput.trim() ? Number(userLimitInput.trim()) : null;
+        const next = userLimitInput.trim()
+            ? Number(userLimitInput.trim())
+            : null;
 
         setMonitorLimits((prev) => ({
             ...prev,
@@ -707,6 +945,133 @@ export function AdminClient({
         }
     };
 
+    const refreshFreeProxyState = async () => {
+        const nextState = await getFreeProxyAdminState();
+        setFreeProxyState(nextState);
+        setFreeProxySettings(normalizeFreeProxySettings(nextState.settings));
+    };
+
+    const handleSaveFreeProxySettings = async () => {
+        setIsSavingFreeProxySettings(true);
+        const formData = new FormData();
+        formData.set("enabled", String(freeProxySettings.enabled));
+        formData.set(
+            "autoImportEnabled",
+            String(freeProxySettings.autoImportEnabled),
+        );
+        formData.set("importSource", freeProxySettings.importSource);
+        formData.set("importUrl", freeProxySettings.importUrl);
+        formData.set("maxPoolSize", String(freeProxySettings.maxPoolSize));
+        formData.set(
+            "failureThreshold",
+            String(freeProxySettings.failureThreshold),
+        );
+        formData.set(
+            "quarantineMinutes",
+            String(freeProxySettings.quarantineMinutes),
+        );
+        formData.set(
+            "minActivePerRegion",
+            String(freeProxySettings.minActivePerRegion),
+        );
+        formData.set("maxLatencyMs", String(freeProxySettings.maxLatencyMs));
+        formData.set("starterRegions", freeProxySettings.starterRegions);
+
+        try {
+            const result = await updateFreeProxySettings(formData);
+            if (!result.success) {
+                toast.error(result.error);
+                return;
+            }
+            await refreshFreeProxyState();
+            toast.success(
+                "Free proxy settings saved. New regions start on the next worker cycle.",
+            );
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to save free proxy settings",
+            );
+        } finally {
+            setIsSavingFreeProxySettings(false);
+        }
+    };
+
+    const handleImportFreeProxies = async () => {
+        setIsImportingFreeProxies(true);
+        try {
+            const result = await importFreeProxiesNow();
+            if (!result.success) {
+                toast.error(result.error);
+                return;
+            }
+            await refreshFreeProxyState();
+            toast.success(
+                result.limitReached
+                    ? "Free proxy pool limit already reached"
+                    : `Imported ${result.addedCount} free proxies`,
+            );
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to import free proxies",
+            );
+        } finally {
+            setIsImportingFreeProxies(false);
+        }
+    };
+
+    const handleAddFreeProxies = async () => {
+        const formData = new FormData();
+        formData.set("proxies", manualFreeProxies);
+        setIsAddingFreeProxies(true);
+
+        try {
+            const result = await addFreeProxies(formData);
+            if (!result.success) {
+                toast.error(result.error);
+                return;
+            }
+            await refreshFreeProxyState();
+            setManualFreeProxies("");
+            const skippedCount = result.skippedCount ?? 0;
+            toast.success(
+                `Added ${result.addedCount} free proxies${
+                    skippedCount > 0 ? `, skipped ${skippedCount}` : ""
+                }`,
+            );
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to add free proxies",
+            );
+        } finally {
+            setIsAddingFreeProxies(false);
+        }
+    };
+
+    const handleClearFreeProxyQuarantine = async () => {
+        setIsClearingFreeProxyQuarantine(true);
+        try {
+            const result = await clearFreeProxyQuarantine();
+            await refreshFreeProxyState();
+            toast.success(
+                `Restored ${result.restoredCount} quarantined proxies`,
+            );
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to clear quarantine",
+            );
+        } finally {
+            setIsClearingFreeProxyQuarantine(false);
+        }
+    };
+
     const selectedActiveMonitors =
         selected?.monitors.filter((monitor) => monitor.status === "active") ??
         [];
@@ -723,25 +1088,60 @@ export function AdminClient({
         : { value: null, source: "Unlimited" };
     const isLoadingSelectedDetails =
         selected !== null && loadingUserDetailsId === selected.id;
+    const deadFreeProxyHealthCount = freeProxyState.regions.reduce(
+        (sum, region) => sum + region.dead,
+        0,
+    );
+    const readyFreeProxyRegionCount = freeProxyState.regions.filter(
+        (region) => region.healthy,
+    ).length;
+    const activeTabDefinition =
+        ADMIN_TABS.find((tab) => tab.value === activeTab) ?? ADMIN_TABS[0];
+    const ActiveTabIcon = activeTabDefinition.icon;
+    const hasOperationalIssues = successRate24h !== null && successRate24h < 90;
 
     return (
-        <div className="space-y-8">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                    <h1 className="mt-3 text-3xl font-bold tracking-tight">
-                        Admin Panel
-                    </h1>
-                    <p className="text-muted-foreground mt-1 text-sm">
-                        Overview, users, roles, logs, and operational settings
-                        in separate workspaces.
-                    </p>
+        <div className="space-y-6">
+            <div className="border-border/60 flex flex-col gap-4 border-b pb-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="flex items-start gap-3">
+                    <div className="border-border/70 bg-muted/40 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border">
+                        <ActiveTabIcon className="text-muted-foreground h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold">Admin Panel</h1>
+                        <p className="text-muted-foreground mt-1 text-sm">
+                            {activeTabDefinition.description}
+                        </p>
+                    </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+                    <div className="flex items-center gap-2">
+                        <span
+                            className={`h-2 w-2 rounded-full ${
+                                hasOperationalIssues
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500"
+                            }`}
+                        />
+                        <span className="font-medium">
+                            {hasOperationalIssues
+                                ? "Needs attention"
+                                : "Operational"}
+                        </span>
+                    </div>
+                    <span className="text-muted-foreground">
+                        {runningMonitors} running monitors
+                    </span>
+                    <span className="text-muted-foreground">
+                        {readyFreeProxyRegionCount} proxy regions ready
+                    </span>
                 </div>
             </div>
 
             <div
                 role="tablist"
                 aria-label="Admin sections"
-                className="border-border/60 bg-card flex flex-wrap gap-1 rounded-xl border p-1 shadow-sm"
+                className="border-border/60 bg-card flex gap-1 overflow-x-auto rounded-lg border p-1"
             >
                 {ADMIN_TABS.map((tab) => {
                     const Icon = tab.icon;
@@ -753,9 +1153,9 @@ export function AdminClient({
                             type="button"
                             role="tab"
                             aria-selected={isActive}
-                            className={`flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${
+                            className={`flex h-9 min-w-max flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
                                 isActive
-                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    ? "bg-primary text-primary-foreground"
                                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                             }`}
                             onClick={() => switchTab(tab.value)}
@@ -769,92 +1169,45 @@ export function AdminClient({
 
             {activeTab === "overview" ? (
                 <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                <Card className="border-border/60 from-card to-muted/30 bg-linear-to-br py-0">
-                    <CardHeader className="pt-3 pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardDescription>Total Users</CardDescription>
-                            <div className="bg-primary/10 text-primary rounded-lg p-2">
-                                <Users className="h-4 w-4" />
-                            </div>
-                        </div>
-                        <CardTitle className="text-3xl">{totalUsers}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-muted-foreground pb-6 text-xs">
-                        Active accounts visible in this workspace.
-                    </CardContent>
-                </Card>
-
-                <Card className="to-card border-amber-200/70 bg-linear-to-br from-amber-50 py-0 dark:border-amber-500/20 dark:from-amber-500/10">
-                    <CardHeader className="pt-3 pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardDescription>Premium</CardDescription>
-                            <div className="rounded-lg bg-amber-500/10 p-2 text-amber-600 dark:text-amber-400">
-                                <Crown className="h-4 w-4" />
-                            </div>
-                        </div>
-                        <CardTitle className="text-3xl text-amber-600 dark:text-amber-400">
-                            {premiumUsers}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-muted-foreground pb-6 text-xs">
-                        Users with access to server proxy features.
-                    </CardContent>
-                </Card>
-
-                <Card className="to-card border-red-200/70 bg-linear-to-br from-red-50 py-0 dark:border-red-500/20 dark:from-red-500/10">
-                    <CardHeader className="pt-3 pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardDescription>Admins</CardDescription>
-                            <div className="rounded-lg bg-red-500/10 p-2 text-red-600 dark:text-red-400">
-                                <Sparkles className="h-4 w-4" />
-                            </div>
-                        </div>
-                        <CardTitle className="text-3xl text-red-600 dark:text-red-400">
-                            {adminUsers}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-muted-foreground pb-6 text-xs">
-                        Full dashboard access including role management.
-                    </CardContent>
-                </Card>
-
-                <Card className="to-card border-emerald-200/70 bg-linear-to-br from-emerald-50 py-0 dark:border-emerald-500/20 dark:from-emerald-500/10">
-                    <CardHeader className="pt-3 pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardDescription>Running</CardDescription>
-                            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-400">
-                                <Activity className="h-4 w-4" />
-                            </div>
-                        </div>
-                        <CardTitle className="text-3xl text-emerald-600 dark:text-emerald-400">
-                            {runningMonitors}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-muted-foreground pb-6 text-xs">
-                        Monitors currently marked active.
-                    </CardContent>
-                </Card>
-
-                <Card className="to-card border-sky-200/70 bg-linear-to-br from-sky-50 py-0 dark:border-sky-500/20 dark:from-sky-500/10">
-                    <CardHeader className="pt-3 pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardDescription>24h Items</CardDescription>
-                            <div className="rounded-lg bg-sky-500/10 p-2 text-sky-600 dark:text-sky-400">
-                                <Boxes className="h-4 w-4" />
-                            </div>
-                        </div>
-                        <CardTitle className="text-3xl text-sky-600 dark:text-sky-400">
-                            {newItems24h}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-muted-foreground pb-6 text-xs">
-                        {failedChecks24h} failed checks in the same window.
-                    </CardContent>
-                </Card>
-            </div>
+                    <div className="border-border/60 bg-border/60 grid gap-px overflow-hidden rounded-lg border sm:grid-cols-2 xl:grid-cols-5">
+                        <OverviewMetric
+                            label="Total users"
+                            value={totalUsers}
+                            detail={`${premiumUsers} premium · ${adminUsers} admin`}
+                            icon={Users}
+                            iconClassName="bg-muted text-muted-foreground"
+                        />
+                        <OverviewMetric
+                            label="Running"
+                            value={runningMonitors}
+                            detail={`${pausedMonitors} paused monitors`}
+                            icon={Activity}
+                            iconClassName="bg-emerald-500/10 text-emerald-600"
+                        />
+                        <OverviewMetric
+                            label="Checks 24h"
+                            value={checks24h}
+                            detail={`${formatSuccessRate(successRate24h)} successful`}
+                            icon={Gauge}
+                            iconClassName="bg-sky-500/10 text-sky-600"
+                        />
+                        <OverviewMetric
+                            label="New items 24h"
+                            value={newItems24h}
+                            detail={`${totalItems} lifetime items`}
+                            icon={Boxes}
+                            iconClassName="bg-rose-500/10 text-rose-600"
+                        />
+                        <OverviewMetric
+                            label="Proxy regions"
+                            value={readyFreeProxyRegionCount}
+                            detail={`${freeProxyState.regions.length} configured regions`}
+                            icon={Globe}
+                            iconClassName="bg-amber-500/10 text-amber-600"
+                        />
+                    </div>
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                        <div className="border-border/60 bg-card flex h-full flex-col rounded-2xl border p-5 shadow-sm">
+                        <div className="border-border/60 bg-card flex h-full flex-col rounded-lg border p-5">
                             <div className="mb-4 flex items-center justify-between">
                                 <div>
                                     <p className="text-foreground text-sm font-semibold">
@@ -880,7 +1233,7 @@ export function AdminClient({
                             </div>
 
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                <div className="border-border/60 rounded-lg border px-4 py-3">
                                     <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
                                         Total monitors
                                     </p>
@@ -888,7 +1241,7 @@ export function AdminClient({
                                         {totalMonitors}
                                     </p>
                                 </div>
-                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                <div className="border-border/60 rounded-lg border px-4 py-3">
                                     <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
                                         Paused
                                     </p>
@@ -896,7 +1249,7 @@ export function AdminClient({
                                         {pausedMonitors}
                                     </p>
                                 </div>
-                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                <div className="border-border/60 rounded-lg border px-4 py-3">
                                     <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
                                         Checks 24h
                                     </p>
@@ -904,7 +1257,7 @@ export function AdminClient({
                                         {checks24h}
                                     </p>
                                 </div>
-                                <div className="border-border/60 rounded-xl border px-4 py-3">
+                                <div className="border-border/60 rounded-lg border px-4 py-3">
                                     <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
                                         Success rate
                                     </p>
@@ -915,7 +1268,7 @@ export function AdminClient({
                             </div>
 
                             <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                                <div className="bg-muted/30 rounded-xl px-4 py-3">
+                                <div className="bg-muted/30 rounded-lg px-4 py-3">
                                     <p className="text-muted-foreground text-xs">
                                         Lifetime items
                                     </p>
@@ -923,7 +1276,7 @@ export function AdminClient({
                                         {totalItems}
                                     </p>
                                 </div>
-                                <div className="bg-muted/30 rounded-xl px-4 py-3">
+                                <div className="bg-muted/30 rounded-lg px-4 py-3">
                                     <p className="text-muted-foreground text-xs">
                                         New items 24h
                                     </p>
@@ -931,7 +1284,7 @@ export function AdminClient({
                                         {newItems24h}
                                     </p>
                                 </div>
-                                <div className="bg-muted/30 rounded-xl px-4 py-3">
+                                <div className="bg-muted/30 rounded-lg px-4 py-3">
                                     <p className="text-muted-foreground text-xs">
                                         Server proxies
                                     </p>
@@ -941,7 +1294,7 @@ export function AdminClient({
                                 </div>
                             </div>
 
-                            <div className="mt-4 flex-1 rounded-xl border px-4 py-3">
+                            <div className="mt-4 flex-1 rounded-lg border px-4 py-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <p className="text-muted-foreground text-xs font-medium">
                                         Running capacity
@@ -987,7 +1340,7 @@ export function AdminClient({
                             </div>
                         </div>
 
-                        <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                        <div className="border-border/60 bg-card rounded-lg border p-5">
                             <div className="mb-4">
                                 <p className="text-foreground text-sm font-semibold">
                                     Limits & Capacity
@@ -1005,7 +1358,7 @@ export function AdminClient({
                                 ].map(([label, count]) => (
                                     <div
                                         key={label}
-                                        className="flex items-center justify-between rounded-xl border px-4 py-3"
+                                        className="flex items-center justify-between rounded-lg border px-4 py-3"
                                     >
                                         <span className="text-sm font-medium">
                                             {label}
@@ -1017,11 +1370,13 @@ export function AdminClient({
                                 ))}
                             </div>
                             {limitedUsers.length > 0 ? (
-                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">
                                     <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
                                         {limitedUsers.length} user
-                                        {limitedUsers.length === 1 ? "" : "s"} at
-                                        active monitor capacity
+                                        {limitedUsers.length === 1
+                                            ? ""
+                                            : "s"}{" "}
+                                        at active monitor capacity
                                     </p>
                                     <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
                                         Review role or user overrides in the
@@ -1029,7 +1384,7 @@ export function AdminClient({
                                     </p>
                                 </div>
                             ) : (
-                                <p className="text-muted-foreground mt-4 rounded-xl border px-4 py-3 text-xs">
+                                <p className="text-muted-foreground mt-4 rounded-lg border px-4 py-3 text-xs">
                                     No users are currently blocked by active
                                     monitor limits.
                                 </p>
@@ -1038,7 +1393,7 @@ export function AdminClient({
                     </div>
 
                     <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
+                        <div className="border-border/60 bg-card overflow-hidden rounded-lg border">
                             <div className="border-border/60 border-b px-5 py-4">
                                 <p className="text-foreground text-sm font-semibold">
                                     Top Active Users
@@ -1079,7 +1434,7 @@ export function AdminClient({
                             </div>
                         </div>
 
-                        <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
+                        <div className="border-border/60 bg-card overflow-hidden rounded-lg border">
                             <div className="border-border/60 border-b px-5 py-4">
                                 <p className="text-foreground text-sm font-semibold">
                                     Recent Important Events
@@ -1129,282 +1484,302 @@ export function AdminClient({
             ) : null}
 
             {activeTab === "users" ? (
-            <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
-                <div className="border-border/60 flex flex-col gap-3 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <p className="text-foreground text-sm font-semibold">
-                            Team Members
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                            {filteredUsers.length} of {totalUsers} users shown
-                        </p>
-                    </div>
-                    <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
-                        <div className="relative flex-1">
-                            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-                            <Input
-                                value={searchQuery}
-                                onChange={(event) => {
-                                    setSearchQuery(event.target.value);
-                                    setUserPage(1);
-                                }}
-                                placeholder="Search by name, email or role..."
-                                className="h-10 pl-9"
-                            />
+                <div className="border-border/60 bg-card overflow-hidden rounded-lg border">
+                    <div className="border-border/60 flex flex-col gap-3 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                            <p className="text-foreground text-sm font-semibold">
+                                Team Members
+                            </p>
+                            <p className="text-muted-foreground text-xs">
+                                {filteredUsers.length} of {totalUsers} users
+                                shown
+                            </p>
                         </div>
-                        {normalizedQuery ? (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-10 self-start px-3 text-xs sm:self-auto"
-                                onClick={() => setSearchQuery("")}
-                            >
-                                Clear search
-                            </Button>
-                        ) : null}
-                    </div>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-muted/30">
-                            <tr className="border-border border-b">
-                                <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
-                                    User
-                                </th>
-                                <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
-                                    Role
-                                </th>
-                                <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
-                                    Monitors
-                                </th>
-                                <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
-                                    24h Activity
-                                </th>
-                                <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
-                                    Limit
-                                </th>
-                                <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
-                                    Proxy Groups
-                                </th>
-                                <th className="text-muted-foreground px-5 py-3 text-right text-[11px] font-medium tracking-wider uppercase">
-                                    Actions
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-border/50 divide-y">
-                            {paginatedUsers.map((user) => {
-                                const effectiveLimit = getEffectiveLimit(user);
-                                return (
-                                    <tr
-                                        key={user.id}
-                                        className="hover:bg-muted/40 cursor-pointer transition-colors"
-                                        onClick={() => openUserDetails(user)}
-                                    >
-                                    <td className="px-5 py-3.5">
-                                        <div className="flex items-center gap-3">
-                                            {user.image ? (
-                                                <img
-                                                    src={user.image}
-                                                    alt=""
-                                                    className="h-10 w-10 rounded-full object-cover"
-                                                />
-                                            ) : (
-                                                <div className="bg-muted text-muted-foreground flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold">
-                                                    {user.name?.[0]?.toUpperCase() ??
-                                                        "?"}
-                                                </div>
-                                            )}
-                                            <div className="min-w-0">
-                                                <p className="text-foreground truncate text-sm font-medium">
-                                                    {user.name ?? "Unknown"}
-                                                </p>
-                                                <p className="text-muted-foreground truncate text-xs">
-                                                    {user.email ?? "—"}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3.5">
-                                        {getRoleBadge(user.role)}
-                                    </td>
-                                    <td className="px-5 py-3.5 text-center">
-                                        <div className="flex flex-col items-center gap-1">
-                                            <span className="text-foreground inline-flex items-center gap-1 text-sm">
-                                                <Monitor className="text-muted-foreground h-3.5 w-3.5" />
-                                                {user._count.monitors}
-                                            </span>
-                                            <span className="text-muted-foreground text-[10px] uppercase">
-                                                {user.metrics.runningMonitors}{" "}
-                                                running
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3.5 text-center">
-                                        <div className="flex flex-col items-center gap-1">
-                                            <span className="text-foreground inline-flex items-center gap-1 text-sm">
-                                                <Activity className="text-muted-foreground h-3.5 w-3.5" />
-                                                {user.metrics.checks24h} checks
-                                            </span>
-                                            <span
-                                                className={`text-[10px] uppercase ${
-                                                    user.metrics
-                                                        .failedChecks24h > 0
-                                                        ? "text-amber-600 dark:text-amber-400"
-                                                        : "text-muted-foreground"
-                                                }`}
-                                            >
-                                                {user.metrics.newItems24h} items
-                                                /{" "}
-                                                {
-                                                    user.metrics
-                                                        .failedChecks24h
-                                                }{" "}
-                                                failed
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3.5 text-center">
-                                        <div className="flex flex-col items-center gap-1">
-                                            <span className="text-foreground text-sm">
-                                                {formatLimit(
-                                                    effectiveLimit.value,
-                                                )}
-                                            </span>
-                                            <span className="text-muted-foreground text-[10px] uppercase">
-                                                {effectiveLimit.source}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3.5 text-center">
-                                        <span className="text-foreground inline-flex items-center gap-1 text-sm">
-                                            <Globe className="text-muted-foreground h-3.5 w-3.5" />
-                                            {user._count.proxy_groups}
-                                        </span>
-                                    </td>
-                                    <td className="px-5 py-3.5 text-right">
-                                        <div className="flex items-center justify-end gap-2">
-                                            {user.id === currentUserId ? (
-                                                <Badge
-                                                    variant="outline"
-                                                    className="rounded-full text-[10px] tracking-wide uppercase"
-                                                >
-                                                    You
-                                                </Badge>
-                                            ) : (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="h-8 rounded-lg text-xs"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        openRoleDialog(user);
-                                                    }}
-                                                >
-                                                    Change Role
-                                                </Button>
-                                            )}
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="text-muted-foreground h-8 rounded-lg px-2 text-xs"
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    openUserDetails(user);
-                                                }}
-                                            >
-                                                Details
-                                                <ChevronRight className="ml-1 h-3.5 w-3.5" />
-                                            </Button>
-                                        </div>
-                                    </td>
-                                    </tr>
-                                );
-                            })}
-                            {paginatedUsers.length === 0 ? (
-                                <tr>
-                                    <td
-                                        colSpan={7}
-                                        className="px-5 py-12 text-center"
-                                    >
-                                        <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
-                                            <div className="bg-muted text-muted-foreground rounded-full p-3">
-                                                <Search className="h-5 w-5" />
-                                            </div>
-                                            <p className="text-foreground text-sm font-medium">
-                                                No users match your search
-                                            </p>
-                                            <p className="text-muted-foreground text-sm">
-                                                Try a different name, email
-                                                address, or role.
-                                            </p>
-                                        </div>
-                                    </td>
-                                </tr>
+                        <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+                            <div className="relative flex-1">
+                                <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                                <Input
+                                    value={searchQuery}
+                                    onChange={(event) => {
+                                        setSearchQuery(event.target.value);
+                                        setUserPage(1);
+                                    }}
+                                    placeholder="Search by name, email or role..."
+                                    className="h-10 pl-9"
+                                />
+                            </div>
+                            {normalizedQuery ? (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-10 self-start px-3 text-xs sm:self-auto"
+                                    onClick={() => setSearchQuery("")}
+                                >
+                                    Clear search
+                                </Button>
                             ) : null}
-                        </tbody>
-                    </table>
-                </div>
-                <div className="border-border/60 flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-muted-foreground text-xs">
-                        Showing {shownUserStart}-{shownUserEnd} of{" "}
-                        {filteredUsers.length} users
+                        </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-muted-foreground flex items-center gap-2 text-xs">
-                            Rows
-                            <select
-                                value={usersPerPage}
-                                onChange={(event) => {
-                                    setUsersPerPage(
-                                        Number(
-                                            event.target.value,
-                                        ) as (typeof USER_PAGE_SIZES)[number],
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-muted/30">
+                                <tr className="border-border border-b">
+                                    <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
+                                        User
+                                    </th>
+                                    <th className="text-muted-foreground px-5 py-3 text-left text-[11px] font-medium tracking-wider uppercase">
+                                        Role
+                                    </th>
+                                    <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
+                                        Monitors
+                                    </th>
+                                    <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
+                                        24h Activity
+                                    </th>
+                                    <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
+                                        Limit
+                                    </th>
+                                    <th className="text-muted-foreground px-5 py-3 text-center text-[11px] font-medium tracking-wider uppercase">
+                                        Proxy Groups
+                                    </th>
+                                    <th className="text-muted-foreground px-5 py-3 text-right text-[11px] font-medium tracking-wider uppercase">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-border/50 divide-y">
+                                {paginatedUsers.map((user) => {
+                                    const effectiveLimit =
+                                        getEffectiveLimit(user);
+                                    return (
+                                        <tr
+                                            key={user.id}
+                                            className="hover:bg-muted/40 cursor-pointer transition-colors"
+                                            onClick={() =>
+                                                openUserDetails(user)
+                                            }
+                                        >
+                                            <td className="px-5 py-3.5">
+                                                <div className="flex items-center gap-3">
+                                                    {user.image ? (
+                                                        <img
+                                                            src={user.image}
+                                                            alt=""
+                                                            className="h-10 w-10 rounded-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div className="bg-muted text-muted-foreground flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold">
+                                                            {user.name?.[0]?.toUpperCase() ??
+                                                                "?"}
+                                                        </div>
+                                                    )}
+                                                    <div className="min-w-0">
+                                                        <p className="text-foreground truncate text-sm font-medium">
+                                                            {user.name ??
+                                                                "Unknown"}
+                                                        </p>
+                                                        <p className="text-muted-foreground truncate text-xs">
+                                                            {user.email ?? "—"}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                {getRoleBadge(user.role)}
+                                            </td>
+                                            <td className="px-5 py-3.5 text-center">
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className="text-foreground inline-flex items-center gap-1 text-sm">
+                                                        <Monitor className="text-muted-foreground h-3.5 w-3.5" />
+                                                        {user._count.monitors}
+                                                    </span>
+                                                    <span className="text-muted-foreground text-[10px] uppercase">
+                                                        {
+                                                            user.metrics
+                                                                .runningMonitors
+                                                        }{" "}
+                                                        running
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-center">
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className="text-foreground inline-flex items-center gap-1 text-sm">
+                                                        <Activity className="text-muted-foreground h-3.5 w-3.5" />
+                                                        {user.metrics.checks24h}{" "}
+                                                        checks
+                                                    </span>
+                                                    <span
+                                                        className={`text-[10px] uppercase ${
+                                                            user.metrics
+                                                                .failedChecks24h >
+                                                            0
+                                                                ? "text-amber-600 dark:text-amber-400"
+                                                                : "text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        {
+                                                            user.metrics
+                                                                .newItems24h
+                                                        }{" "}
+                                                        items /{" "}
+                                                        {
+                                                            user.metrics
+                                                                .failedChecks24h
+                                                        }{" "}
+                                                        failed
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-center">
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className="text-foreground text-sm">
+                                                        {formatLimit(
+                                                            effectiveLimit.value,
+                                                        )}
+                                                    </span>
+                                                    <span className="text-muted-foreground text-[10px] uppercase">
+                                                        {effectiveLimit.source}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-center">
+                                                <span className="text-foreground inline-flex items-center gap-1 text-sm">
+                                                    <Globe className="text-muted-foreground h-3.5 w-3.5" />
+                                                    {user._count.proxy_groups}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    {user.id ===
+                                                    currentUserId ? (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="rounded-full text-[10px] tracking-wide uppercase"
+                                                        >
+                                                            You
+                                                        </Badge>
+                                                    ) : (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-8 rounded-lg text-xs"
+                                                            onClick={(
+                                                                event,
+                                                            ) => {
+                                                                event.stopPropagation();
+                                                                openRoleDialog(
+                                                                    user,
+                                                                );
+                                                            }}
+                                                        >
+                                                            Change Role
+                                                        </Button>
+                                                    )}
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-muted-foreground h-8 rounded-lg px-2 text-xs"
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            openUserDetails(
+                                                                user,
+                                                            );
+                                                        }}
+                                                    >
+                                                        Details
+                                                        <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
                                     );
-                                    setUserPage(1);
-                                }}
-                                className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                                })}
+                                {paginatedUsers.length === 0 ? (
+                                    <tr>
+                                        <td
+                                            colSpan={7}
+                                            className="px-5 py-12 text-center"
+                                        >
+                                            <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                                                <div className="bg-muted text-muted-foreground rounded-full p-3">
+                                                    <Search className="h-5 w-5" />
+                                                </div>
+                                                <p className="text-foreground text-sm font-medium">
+                                                    No users match your search
+                                                </p>
+                                                <p className="text-muted-foreground text-sm">
+                                                    Try a different name, email
+                                                    address, or role.
+                                                </p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : null}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="border-border/60 flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-muted-foreground text-xs">
+                            Showing {shownUserStart}-{shownUserEnd} of{" "}
+                            {filteredUsers.length} users
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <label className="text-muted-foreground flex items-center gap-2 text-xs">
+                                Rows
+                                <select
+                                    value={usersPerPage}
+                                    onChange={(event) => {
+                                        setUsersPerPage(
+                                            Number(
+                                                event.target.value,
+                                            ) as (typeof USER_PAGE_SIZES)[number],
+                                        );
+                                        setUserPage(1);
+                                    }}
+                                    className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                                >
+                                    {USER_PAGE_SIZES.map((size) => (
+                                        <option key={size} value={size}>
+                                            {size}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-9 w-9 p-0"
+                                onClick={() =>
+                                    setUserPage((page) => Math.max(1, page - 1))
+                                }
+                                disabled={currentUserPage === 1}
+                                aria-label="Previous user page"
                             >
-                                {USER_PAGE_SIZES.map((size) => (
-                                    <option key={size} value={size}>
-                                        {size}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-9 w-9 p-0"
-                            onClick={() =>
-                                setUserPage((page) => Math.max(1, page - 1))
-                            }
-                            disabled={currentUserPage === 1}
-                            aria-label="Previous user page"
-                        >
-                            <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <span className="text-muted-foreground min-w-20 text-center text-xs">
-                            Page {currentUserPage} / {totalUserPages}
-                        </span>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-9 w-9 p-0"
-                            onClick={() =>
-                                setUserPage((page) =>
-                                    Math.min(totalUserPages, page + 1),
-                                )
-                            }
-                            disabled={currentUserPage === totalUserPages}
-                            aria-label="Next user page"
-                        >
-                            <ChevronRight className="h-4 w-4" />
-                        </Button>
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <span className="text-muted-foreground min-w-20 text-center text-xs">
+                                Page {currentUserPage} / {totalUserPages}
+                            </span>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-9 w-9 p-0"
+                                onClick={() =>
+                                    setUserPage((page) =>
+                                        Math.min(totalUserPages, page + 1),
+                                    )
+                                }
+                                disabled={currentUserPage === totalUserPages}
+                                aria-label="Next user page"
+                            >
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </div>
                 </div>
-            </div>
             ) : null}
 
             {activeTab === "roles" ? (
@@ -1447,86 +1822,95 @@ export function AdminClient({
                         })}
                     </div>
 
-                    <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                        <p className="text-foreground text-sm font-semibold">
-                            Active Monitor Limits
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                            Empty values mean unlimited. Existing running
-                            monitors are not paused automatically.
-                        </p>
-                    </div>
-                    <div className="bg-primary/10 text-primary rounded-lg p-2">
-                        <Gauge className="h-4 w-4" />
-                    </div>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-4">
-                    <div className="space-y-2">
-                        <Label htmlFor="global-monitor-limit">
-                            Global default
-                        </Label>
-                        <div className="flex gap-2">
-                            <Input
-                                id="global-monitor-limit"
-                                type="number"
-                                min={0}
-                                value={globalLimitInput}
-                                onChange={(event) =>
-                                    setGlobalLimitInput(event.target.value)
-                                }
-                                placeholder="Unlimited"
-                            />
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleSaveGlobalLimit}
-                            >
-                                Save
-                            </Button>
-                        </div>
-                    </div>
-
-                    {LIMIT_ROLES.map((role) => (
-                        <div key={role.value} className="space-y-2">
-                            <Label htmlFor={`role-monitor-limit-${role.value}`}>
-                                {role.label}
-                            </Label>
-                            <div className="flex gap-2">
-                                <Input
-                                    id={`role-monitor-limit-${role.value}`}
-                                    type="number"
-                                    min={0}
-                                    value={roleLimitInputs[role.value] ?? ""}
-                                    onChange={(event) =>
-                                        setRoleLimitInputs((prev) => ({
-                                            ...prev,
-                                            [role.value]: event.target.value,
-                                        }))
-                                    }
-                                    placeholder="Global"
-                                />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() =>
-                                        handleSaveRoleLimit(role.value)
-                                    }
-                                >
-                                    Save
-                                </Button>
+                    <div className="border-border/60 bg-card rounded-lg border p-5">
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-foreground text-sm font-semibold">
+                                    Active Monitor Limits
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                    Empty values mean unlimited. Existing
+                                    running monitors are not paused
+                                    automatically.
+                                </p>
+                            </div>
+                            <div className="bg-primary/10 text-primary rounded-lg p-2">
+                                <Gauge className="h-4 w-4" />
                             </div>
                         </div>
-                    ))}
-                </div>
-            </div>
+
+                        <div className="grid gap-3 lg:grid-cols-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="global-monitor-limit">
+                                    Global default
+                                </Label>
+                                <div className="flex gap-2">
+                                    <Input
+                                        id="global-monitor-limit"
+                                        type="number"
+                                        min={0}
+                                        value={globalLimitInput}
+                                        onChange={(event) =>
+                                            setGlobalLimitInput(
+                                                event.target.value,
+                                            )
+                                        }
+                                        placeholder="Unlimited"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={handleSaveGlobalLimit}
+                                    >
+                                        Save
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {LIMIT_ROLES.map((role) => (
+                                <div key={role.value} className="space-y-2">
+                                    <Label
+                                        htmlFor={`role-monitor-limit-${role.value}`}
+                                    >
+                                        {role.label}
+                                    </Label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            id={`role-monitor-limit-${role.value}`}
+                                            type="number"
+                                            min={0}
+                                            value={
+                                                roleLimitInputs[role.value] ??
+                                                ""
+                                            }
+                                            onChange={(event) =>
+                                                setRoleLimitInputs((prev) => ({
+                                                    ...prev,
+                                                    [role.value]:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                            placeholder="Global"
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() =>
+                                                handleSaveRoleLimit(role.value)
+                                            }
+                                        >
+                                            Save
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </>
             ) : null}
 
             {activeTab === "logs" ? (
-                <div className="border-border/60 bg-card overflow-hidden rounded-2xl border shadow-sm">
+                <div className="border-border/60 bg-card overflow-hidden rounded-lg border">
                     <div className="border-border/60 flex flex-col gap-1 border-b px-5 py-4">
                         <p className="text-foreground text-sm font-semibold">
                             Admin Logs
@@ -1599,7 +1983,9 @@ export function AdminClient({
                                                 </Badge>
                                             </td>
                                             <td className="text-muted-foreground px-5 py-3.5 text-right text-xs">
-                                                {formatMetricDate(log.createdAt)}
+                                                {formatMetricDate(
+                                                    log.createdAt,
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -1615,44 +2001,636 @@ export function AdminClient({
             ) : null}
 
             {activeTab === "settings" ? (
-                <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="space-y-1">
-                            <p className="text-foreground text-sm font-semibold">
-                                Server Proxies
-                            </p>
-                            <p className="text-muted-foreground text-xs">
-                                Premium and admin monitors use this shared proxy
-                                pool when Server Proxies is selected.
-                            </p>
+                <div className="space-y-4">
+                    <div className="border-border/60 bg-card flex flex-col gap-3 rounded-lg border px-5 py-4 md:flex-row md:items-center md:justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-muted text-muted-foreground rounded-lg p-2">
+                                <Server className="h-4 w-4" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold">
+                                    Server Proxies
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                    Premium/admin infrastructure ·{" "}
+                                    {serverProxyLineCount} active line
+                                    {serverProxyLineCount === 1 ? "" : "s"} ·
+                                    refreshed every worker sync.
+                                </p>
+                            </div>
                         </div>
                         <Button
                             type="button"
                             variant="outline"
-                            className="h-10 self-start rounded-xl"
+                            className="h-9 self-start rounded-lg md:self-auto"
                             onClick={() => setIsProxyDialogOpen(true)}
                         >
                             <Server className="mr-2 h-4 w-4" />
-                            Manage Proxies
+                            Manage
                         </Button>
                     </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                        <div className="border-border/60 rounded-xl border px-4 py-3">
-                            <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                                Active lines
-                            </p>
-                            <p className="mt-1 text-2xl font-semibold">
-                                {serverProxyLineCount}
-                            </p>
+
+                    <div className="border-border/60 bg-card rounded-lg border p-5">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                                <p className="text-foreground text-sm font-semibold">
+                                    Free Proxy Pool
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                    Shared free proxies for monitor catalog
+                                    fetching. Account actions stay off this
+                                    pool.
+                                </p>
+                            </div>
+                            <Badge
+                                variant={
+                                    freeProxySettings.enabled
+                                        ? "secondary"
+                                        : "outline"
+                                }
+                                className="self-start rounded-md text-[10px] uppercase"
+                            >
+                                {freeProxySettings.enabled
+                                    ? "Enabled"
+                                    : "Disabled"}
+                            </Badge>
                         </div>
-                        <div className="border-border/60 rounded-xl border px-4 py-3">
-                            <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                                Sync
-                            </p>
-                            <p className="text-muted-foreground mt-1 text-sm">
-                                Worker refreshes this setting every sync cycle.
-                            </p>
+
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                            {[
+                                ["Active", freeProxyState.counts.active],
+                                ["Pending", freeProxyState.counts.pending],
+                                ["Cooldown", freeProxyState.counts.quarantined],
+                                ["Total", freeProxyState.counts.total],
+                                ["Dead", deadFreeProxyHealthCount],
+                            ].map(([label, count]) => (
+                                <div
+                                    key={label}
+                                    className="border-border/60 rounded-lg border px-3 py-3"
+                                >
+                                    <p className="text-muted-foreground text-[10px] font-medium tracking-widest uppercase">
+                                        {label}
+                                    </p>
+                                    <p className="mt-1 text-xl font-semibold">
+                                        {count}
+                                    </p>
+                                </div>
+                            ))}
                         </div>
+
+                        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                            <label className="border-border/60 flex items-start gap-3 rounded-lg border px-4 py-3">
+                                <input
+                                    type="checkbox"
+                                    checked={freeProxySettings.enabled}
+                                    onChange={(event) =>
+                                        setFreeProxySettings((prev) => ({
+                                            ...prev,
+                                            enabled: event.target.checked,
+                                        }))
+                                    }
+                                    className="mt-1"
+                                />
+                                <span>
+                                    <span className="text-sm font-medium">
+                                        Enable for users
+                                    </span>
+                                    <span className="text-muted-foreground block text-xs">
+                                        Shows Free Proxy Pool in monitor proxy
+                                        selection.
+                                    </span>
+                                </span>
+                            </label>
+                            <label className="border-border/60 flex items-start gap-3 rounded-lg border px-4 py-3">
+                                <input
+                                    type="checkbox"
+                                    checked={
+                                        freeProxySettings.autoImportEnabled
+                                    }
+                                    onChange={(event) =>
+                                        setFreeProxySettings((prev) => ({
+                                            ...prev,
+                                            autoImportEnabled:
+                                                event.target.checked,
+                                        }))
+                                    }
+                                    className="mt-1"
+                                />
+                                <span>
+                                    <span className="text-sm font-medium">
+                                        Auto import
+                                    </span>
+                                    <span className="text-muted-foreground block text-xs">
+                                        Worker refreshes the configured source
+                                        periodically.
+                                    </span>
+                                </span>
+                            </label>
+                        </div>
+
+                        <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)]">
+                            <div className="rounded-lg border p-4">
+                                <div className="mb-4">
+                                    <p className="text-sm font-semibold">
+                                        Import Source
+                                    </p>
+                                    <p className="text-muted-foreground text-xs">
+                                        Imported proxies stay pending until
+                                        Vintrack validates them against Vinted
+                                        per starter region.
+                                    </p>
+                                </div>
+                                <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-source">
+                                            Source
+                                        </Label>
+                                        <select
+                                            id="free-proxy-source"
+                                            value={
+                                                freeProxySettings.importSource
+                                            }
+                                            onChange={(event) => {
+                                                const selected =
+                                                    FREE_PROXY_SOURCE_OPTIONS.find(
+                                                        (option) =>
+                                                            option.value ===
+                                                            event.target.value,
+                                                    );
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        importSource:
+                                                            event.target.value,
+                                                        importUrl:
+                                                            selected?.url ||
+                                                            prev.importUrl,
+                                                    }),
+                                                );
+                                            }}
+                                            className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+                                        >
+                                            {FREE_PROXY_SOURCE_OPTIONS.map(
+                                                (option) => (
+                                                    <option
+                                                        key={option.value}
+                                                        value={option.value}
+                                                    >
+                                                        {option.label}
+                                                    </option>
+                                                ),
+                                            )}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-import-url">
+                                            Import URL
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-import-url"
+                                            value={freeProxySettings.importUrl}
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        importSource: "custom",
+                                                        importUrl:
+                                                            event.target.value,
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                </div>
+                                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_130px]">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <Label>Starter regions</Label>
+                                            <span className="text-muted-foreground text-[11px]">
+                                                {starterRegionSet.size} selected
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4">
+                                            {REGIONS.map((region) => {
+                                                const selected =
+                                                    starterRegionSet.has(
+                                                        region.code,
+                                                    );
+                                                const health =
+                                                    freeProxyHealthByRegion.get(
+                                                        region.code,
+                                                    );
+                                                return (
+                                                    <button
+                                                        key={region.code}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            toggleStarterRegion(
+                                                                region.code,
+                                                            )
+                                                        }
+                                                        aria-pressed={selected}
+                                                        className={`flex min-w-0 items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${
+                                                            selected
+                                                                ? "border-primary bg-primary/5 text-foreground"
+                                                                : "border-border/70 bg-background text-muted-foreground hover:bg-muted/50"
+                                                        }`}
+                                                    >
+                                                        <span className="flex min-w-0 items-center gap-1.5">
+                                                            <span>
+                                                                {region.flag}
+                                                            </span>
+                                                            <span className="truncate">
+                                                                {region.label}
+                                                            </span>
+                                                        </span>
+                                                        <span
+                                                            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                                                health?.healthy
+                                                                    ? "bg-emerald-500"
+                                                                    : health
+                                                                      ? "bg-amber-500"
+                                                                      : "bg-muted-foreground/30"
+                                                            }`}
+                                                            title={
+                                                                health?.healthy
+                                                                    ? `${health.active + health.warming} usable proxies`
+                                                                    : health
+                                                                      ? "Pool is degraded"
+                                                                      : "No pool checks yet"
+                                                            }
+                                                        />
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-max-pool">
+                                            Max pool
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-max-pool"
+                                            type="number"
+                                            min={1}
+                                            value={
+                                                freeProxySettings.maxPoolSize
+                                            }
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        maxPoolSize: Number(
+                                                            event.target.value,
+                                                        ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border p-4">
+                                <div className="mb-4">
+                                    <p className="text-sm font-semibold">
+                                        Validation Rules
+                                    </p>
+                                    <p className="text-muted-foreground text-xs">
+                                        Two successful Vinted checks are needed
+                                        before a proxy enters rotation.
+                                    </p>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-failures">
+                                            Failures
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-failures"
+                                            type="number"
+                                            min={1}
+                                            value={
+                                                freeProxySettings.failureThreshold
+                                            }
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        failureThreshold:
+                                                            Number(
+                                                                event.target
+                                                                    .value,
+                                                            ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-quarantine">
+                                            Cooldown
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-quarantine"
+                                            type="number"
+                                            min={1}
+                                            value={
+                                                freeProxySettings.quarantineMinutes
+                                            }
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        quarantineMinutes:
+                                                            Number(
+                                                                event.target
+                                                                    .value,
+                                                            ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-min-active">
+                                            Min active
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-min-active"
+                                            type="number"
+                                            min={1}
+                                            value={
+                                                freeProxySettings.minActivePerRegion
+                                            }
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        minActivePerRegion:
+                                                            Number(
+                                                                event.target
+                                                                    .value,
+                                                            ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-max-latency">
+                                            Max ms
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-max-latency"
+                                            type="number"
+                                            min={500}
+                                            value={
+                                                freeProxySettings.maxLatencyMs
+                                            }
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        maxLatencyMs: Number(
+                                                            event.target.value,
+                                                        ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 rounded-lg border">
+                            <div className="border-border/60 flex items-center justify-between border-b px-4 py-3">
+                                <div>
+                                    <p className="text-sm font-semibold">
+                                        Region Health
+                                    </p>
+                                    <p className="text-muted-foreground text-xs">
+                                        Free Pool is usable only when a region
+                                        has enough active validated proxies.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="divide-border/60 divide-y">
+                                {displayedFreeProxyRegions.length > 0 ? (
+                                    displayedFreeProxyRegions.map((region) => (
+                                        <div
+                                            key={region.region}
+                                            className="grid gap-3 px-4 py-3 text-sm sm:grid-cols-[150px_1fr_90px_90px_110px]"
+                                        >
+                                            <div className="font-semibold">
+                                                {getRegionLabel(region.region)}
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 text-xs">
+                                                <Badge
+                                                    variant={
+                                                        region.healthy
+                                                            ? "secondary"
+                                                            : "outline"
+                                                    }
+                                                    className="rounded-md uppercase"
+                                                >
+                                                    {region.initializing
+                                                        ? "Waiting"
+                                                        : region.healthy
+                                                          ? "Healthy"
+                                                          : "Degraded"}
+                                                </Badge>
+                                                <span className="text-muted-foreground">
+                                                    {region.initializing
+                                                        ? "Waiting for the worker to assign candidates"
+                                                        : `${region.active + region.warming} usable / ${region.active} active / ${region.warming} warming / ${region.pending} pending / ${region.cooldown} cooldown / ${region.dead} dead`}
+                                                </span>
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                {region.successRate === null
+                                                    ? "n/a"
+                                                    : `${region.successRate}%`}{" "}
+                                                ok
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                {region.medianLatencyMs === null
+                                                    ? "n/a"
+                                                    : `${region.medianLatencyMs}ms`}
+                                            </div>
+                                            <div className="text-muted-foreground text-xs">
+                                                {formatMetricDate(
+                                                    region.lastCheckedAt,
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-muted-foreground px-4 py-6 text-sm">
+                                        No region health checks yet. Import
+                                        proxies and let the worker validate
+                                        them.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            <Button
+                                type="button"
+                                onClick={handleSaveFreeProxySettings}
+                                disabled={isSavingFreeProxySettings}
+                            >
+                                {isSavingFreeProxySettings
+                                    ? "Saving..."
+                                    : "Save Settings"}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleImportFreeProxies}
+                                disabled={isImportingFreeProxies}
+                            >
+                                {isImportingFreeProxies
+                                    ? "Importing..."
+                                    : "Import Now"}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleClearFreeProxyQuarantine}
+                                disabled={
+                                    isClearingFreeProxyQuarantine ||
+                                    freeProxyState.counts.quarantined === 0
+                                }
+                            >
+                                {isClearingFreeProxyQuarantine
+                                    ? "Restoring..."
+                                    : "Clear Quarantine"}
+                            </Button>
+                        </div>
+
+                        <details className="border-border/70 mt-5 rounded-lg border">
+                            <summary className="hover:bg-muted/40 flex cursor-pointer list-none items-center justify-between rounded-lg px-4 py-3 transition-colors [&::-webkit-details-marker]:hidden">
+                                <span>
+                                    <span className="block text-sm font-semibold">
+                                        Advanced diagnostics
+                                    </span>
+                                    <span className="text-muted-foreground block text-xs">
+                                        Manual proxy input and recent raw pool
+                                        entries.
+                                    </span>
+                                </span>
+                            </summary>
+                            <div className="border-border/60 grid gap-4 border-t p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                                <div className="space-y-3">
+                                    <div>
+                                        <p className="text-sm font-semibold">
+                                            Manual Add
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                            One proxy per line. Supports URL,
+                                            host:port, and authenticated
+                                            formats.
+                                        </p>
+                                    </div>
+                                    <textarea
+                                        value={manualFreeProxies}
+                                        onChange={(event) =>
+                                            setManualFreeProxies(
+                                                event.target.value,
+                                            )
+                                        }
+                                        spellCheck={false}
+                                        placeholder="http://host:port&#10;host:port"
+                                        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-40 w-full rounded-md border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={handleAddFreeProxies}
+                                        disabled={
+                                            isAddingFreeProxies ||
+                                            manualFreeProxies.trim().length ===
+                                                0
+                                        }
+                                    >
+                                        {isAddingFreeProxies
+                                            ? "Adding..."
+                                            : "Add Proxies"}
+                                    </Button>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <div>
+                                        <p className="text-sm font-semibold">
+                                            Recent Pool Entries
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                            Latest imported, checked, or
+                                            quarantined proxies.
+                                        </p>
+                                    </div>
+                                    <div className="border-border/60 max-h-72 overflow-auto rounded-lg border">
+                                        {freeProxyState.recent.length > 0 ? (
+                                            <div className="divide-border/60 divide-y">
+                                                {freeProxyState.recent.map(
+                                                    (proxy) => (
+                                                        <div
+                                                            key={proxy.id}
+                                                            className="px-3 py-2"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-mono text-xs">
+                                                                    {
+                                                                        proxy.proxy_url
+                                                                    }
+                                                                </span>
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className="ml-auto rounded-md text-[10px] uppercase"
+                                                                >
+                                                                    {
+                                                                        proxy.status
+                                                                    }
+                                                                </Badge>
+                                                            </div>
+                                                            <p className="text-muted-foreground mt-1 text-[11px]">
+                                                                {proxy.source} ·{" "}
+                                                                {proxy.protocol}{" "}
+                                                                ·{" "}
+                                                                {
+                                                                    proxy.success_count
+                                                                }{" "}
+                                                                ok /{" "}
+                                                                {
+                                                                    proxy.failure_count
+                                                                }{" "}
+                                                                fail · checked{" "}
+                                                                {formatMetricDate(
+                                                                    proxy.last_checked_at,
+                                                                )}
+                                                            </p>
+                                                            {proxy.last_error ? (
+                                                                <p className="text-muted-foreground mt-1 truncate text-[11px]">
+                                                                    {
+                                                                        proxy.last_error
+                                                                    }
+                                                                </p>
+                                                            ) : null}
+                                                        </div>
+                                                    ),
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <p className="text-muted-foreground px-4 py-8 text-center text-sm">
+                                                No free proxies added yet.
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
                     </div>
                 </div>
             ) : null}
@@ -1779,7 +2757,7 @@ export function AdminClient({
 
                     {selected ? (
                         <div className="space-y-6">
-                            <div className="border-border/60 bg-muted/20 flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="border-border/60 bg-muted/20 flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="flex items-center gap-3">
                                     {selected.image ? (
                                         <img
@@ -1847,7 +2825,7 @@ export function AdminClient({
                                 </div>
                             </div>
 
-                            <div className="border-border/60 bg-card rounded-xl border px-4 py-4 sm:px-5">
+                            <div className="border-border/60 bg-card rounded-lg border px-4 py-4 sm:px-5">
                                 <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] md:items-center">
                                     <div className="min-w-0 space-y-3">
                                         <div>
@@ -1881,9 +2859,7 @@ export function AdminClient({
                                                 className="rounded-md px-2 py-1 text-[11px]"
                                             >
                                                 Running:{" "}
-                                                {
-                                                    selectedRunningMonitors
-                                                }
+                                                {selectedRunningMonitors}
                                             </Badge>
                                         </div>
                                     </div>
@@ -2036,7 +3012,7 @@ export function AdminClient({
                                 </Card>
                             </div>
 
-                            <div className="border-border/60 bg-card rounded-xl border px-4 py-3">
+                            <div className="border-border/60 bg-card rounded-lg border px-4 py-3">
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
                                         <p className="text-foreground text-sm font-semibold">
@@ -2069,15 +3045,15 @@ export function AdminClient({
                                 ) : null}
                             </div>
 
-                            <div className="border-border/60 bg-card rounded-2xl border">
+                            <div className="border-border/60 bg-card rounded-lg border">
                                 <div className="flex items-center justify-between px-4 py-3">
                                     <div>
                                         <p className="text-foreground text-sm font-semibold">
                                             Running Monitors
                                         </p>
                                         <p className="text-muted-foreground text-xs">
-                                            {selectedRunningMonitors}{" "}
-                                            currently active
+                                            {selectedRunningMonitors} currently
+                                            active
                                         </p>
                                     </div>
                                 </div>
@@ -2193,7 +3169,7 @@ export function AdminClient({
                                 )}
                             </div>
 
-                            <div className="border-border/60 bg-card rounded-2xl border">
+                            <div className="border-border/60 bg-card rounded-lg border">
                                 <div className="px-4 py-3">
                                     <p className="text-foreground text-sm font-semibold">
                                         All Monitors

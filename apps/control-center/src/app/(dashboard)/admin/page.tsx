@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { AdminClient } from "./client";
+import { getFreeProxyAdminState } from "@/actions/admin";
 import { Prisma } from "@prisma/client";
 import {
     GLOBAL_MONITOR_LIMIT_SCOPE,
@@ -227,6 +228,7 @@ export default async function AdminPage({
     ];
     const limits = await getMonitorLimits(limitScopes);
     let serverProxies = "";
+    const freeProxyState = await getFreeProxyAdminState();
     try {
         const serverProxyRows = await db.$queryRaw<{ value: string }[]>`
             SELECT value FROM app_settings WHERE key = ${"server_proxies"}
@@ -245,6 +247,7 @@ export default async function AdminPage({
             initialTab={initialTab}
             currentUserId={session.user.id}
             serverProxies={serverProxies}
+            freeProxyState={freeProxyState}
             monitorLimits={{
                 global: limits.get(GLOBAL_MONITOR_LIMIT_SCOPE) ?? null,
                 roles: Object.fromEntries(

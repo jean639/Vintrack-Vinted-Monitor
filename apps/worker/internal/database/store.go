@@ -40,6 +40,11 @@ type proxyGroupBandwidthState struct {
 	resetAt time.Time
 }
 
+type FreeProxyCandidate struct {
+	ProxyURL string
+	Region   string
+}
+
 func NewStore(connStr string, redisCache *cache.RedisCache) (*Store, error) {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
@@ -137,6 +142,356 @@ func (s *Store) GetSettingValue(key string) (string, bool, error) {
 		return "", false, err
 	}
 	return value, true, nil
+}
+
+func (s *Store) GetActiveFreeProxyRegions() ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT region
+		FROM monitors
+		WHERE status = 'active'
+		  AND proxy_source = 'free'
+		ORDER BY region`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var regions []string
+	for rows.Next() {
+		var region string
+		if err := rows.Scan(&region); err != nil {
+			return nil, err
+		}
+		regions = append(regions, region)
+	}
+	if len(regions) == 0 {
+		regions = append(regions, "de")
+	}
+	return regions, rows.Err()
+}
+
+func (s *Store) GetActiveFreeProxies(region string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.db.Query(`
+		SELECT fp.proxy_url
+		FROM free_proxy_health fph
+		JOIN free_proxies fp ON fp.id = fph.proxy_id
+		WHERE fph.region = $1
+		  AND (
+			fph.status = 'active'
+			OR (fph.status = 'pending' AND fph.success_streak > 0)
+		  )
+		  AND fp.status <> 'disabled'
+		  AND (fph.next_check_at IS NULL OR fph.next_check_at <= NOW() + INTERVAL '15 minutes')
+		ORDER BY
+		  CASE WHEN fph.status = 'active' THEN 0 ELSE 1 END,
+		  fph.score DESC,
+		  fph.latency_ms ASC NULLS LAST,
+		  fph.last_success_at DESC NULLS LAST
+		LIMIT $2`, region, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var proxies []string
+	for rows.Next() {
+		var proxyURL string
+		if err := rows.Scan(&proxyURL); err != nil {
+			return nil, err
+		}
+		proxies = append(proxies, proxyURL)
+	}
+	return proxies, rows.Err()
+}
+
+func (s *Store) UpsertFreeProxy(proxyURL string, protocol string, host string, port int, source string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO free_proxies (
+			proxy_url, protocol, host, port, source, status, failure_count, last_error, quarantined_until, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, 'pending', 0, NULL, NULL, NOW())
+		ON CONFLICT (proxy_url) DO UPDATE
+		SET protocol = EXCLUDED.protocol,
+			host = EXCLUDED.host,
+			port = EXCLUDED.port,
+			source = EXCLUDED.source,
+			status = CASE
+				WHEN free_proxies.status = 'disabled'
+				  AND EXCLUDED.source LIKE 'iplocate%'
+				  AND (free_proxies.last_checked_at IS NULL OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours')
+				THEN 'pending'
+				ELSE free_proxies.status
+			END,
+			last_error = CASE
+				WHEN free_proxies.status = 'disabled'
+				  AND EXCLUDED.source LIKE 'iplocate%'
+				  AND (free_proxies.last_checked_at IS NULL OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours')
+				THEN NULL
+				ELSE free_proxies.last_error
+			END,
+			updated_at = NOW()`,
+		proxyURL, protocol, host, port, source)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`
+		UPDATE free_proxy_health fph
+		SET status = 'pending',
+			failure_streak = 0,
+			last_error = NULL,
+			next_check_at = NOW(),
+			updated_at = NOW()
+		FROM free_proxies fp
+		WHERE fp.id = fph.proxy_id
+		  AND fp.proxy_url = $1
+		  AND fp.status = 'pending'
+		  AND fph.status = 'dead'
+		  AND (fph.last_checked_at IS NULL OR fph.last_checked_at < NOW() - INTERVAL '6 hours')`, proxyURL)
+	return err
+}
+
+func (s *Store) EnsureFreeProxyHealthRows(regions []string, limit int) error {
+	if len(regions) == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	if _, err := s.db.Exec(`
+		DELETE FROM free_proxy_health fph
+		USING free_proxies fp
+		WHERE fp.id = fph.proxy_id
+		  AND fp.source LIKE 'iplocate:%'
+		  AND fp.source <> 'iplocate:' || LOWER(fph.region)
+		  AND fph.success_count = 0`,
+	); err != nil {
+		return err
+	}
+
+	for _, region := range regions {
+		if _, err := s.db.Exec(`
+			WITH desired AS (
+				SELECT fp.id
+				FROM free_proxies fp
+				LEFT JOIN free_proxy_health current_health
+				  ON current_health.proxy_id = fp.id
+				 AND current_health.region = $1
+				WHERE fp.status <> 'disabled'
+				  AND (fp.source NOT LIKE 'iplocate:%' OR fp.source = 'iplocate:' || $1)
+				ORDER BY
+				  CASE
+					WHEN current_health.status = 'active' THEN 0
+					WHEN current_health.status = 'pending' AND current_health.success_streak > 0 THEN 1
+					ELSE 2
+				  END,
+				  CASE WHEN fp.source = 'iplocate:' || $1 THEN 0 ELSE 1 END,
+				  CASE fp.protocol
+					WHEN 'socks4' THEN 0
+					WHEN 'http' THEN 1
+					WHEN 'socks5' THEN 2
+					ELSE 3
+				  END,
+				  fp.last_success_at DESC NULLS LAST,
+				  fp.failure_count ASC,
+				  fp.updated_at DESC
+				LIMIT $2
+			), removed AS (
+				DELETE FROM free_proxy_health fph
+				WHERE fph.region = $1
+				  AND NOT EXISTS (
+					SELECT 1 FROM desired WHERE desired.id = fph.proxy_id
+				  )
+				RETURNING fph.id
+			)
+			INSERT INTO free_proxy_health (proxy_id, region, status, next_check_at, updated_at)
+			SELECT desired.id, $1, 'pending', NOW(), NOW()
+			FROM desired
+			ON CONFLICT (proxy_id, region) DO NOTHING`, region, limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) GetFreeProxiesDueForCheck(regions []string, limit int) ([]FreeProxyCandidate, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if len(regions) == 0 {
+		regions = []string{"de"}
+	}
+	rows, err := s.db.Query(`
+		SELECT fp.proxy_url, fph.region
+		FROM free_proxy_health fph
+		JOIN free_proxies fp ON fp.id = fph.proxy_id
+		WHERE fph.region = ANY($1)
+		  AND fp.status <> 'disabled'
+		  AND fph.status IN ('pending', 'active', 'cooldown')
+		  AND (fph.next_check_at IS NULL OR fph.next_check_at <= NOW())
+		ORDER BY
+		  CASE
+			WHEN fph.status = 'pending' AND fph.success_streak > 0 THEN 0
+			WHEN fph.status = 'pending' THEN 1
+			WHEN fph.status = 'active' THEN 2
+			ELSE 3
+		  END,
+		  fph.success_streak DESC,
+		  fph.last_checked_at ASC NULLS FIRST,
+		  fph.score DESC
+		LIMIT $2`, pq.Array(regions), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var proxies []FreeProxyCandidate
+	for rows.Next() {
+		var candidate FreeProxyCandidate
+		if err := rows.Scan(&candidate.ProxyURL, &candidate.Region); err != nil {
+			return nil, err
+		}
+		proxies = append(proxies, candidate)
+	}
+	return proxies, rows.Err()
+}
+
+func (s *Store) RecordFreeProxySuccess(proxyURL string, region string, latencyMs int) {
+	if proxyURL == "" {
+		return
+	}
+	if _, err := s.db.Exec(`
+		UPDATE free_proxy_health fph
+		SET status = CASE WHEN fph.success_streak + 1 >= 2 THEN 'active' ELSE 'pending' END,
+			success_streak = fph.success_streak + 1,
+			failure_streak = 0,
+			success_count = fph.success_count + 1,
+			latency_ms = $3,
+			last_status_code = 200,
+			last_checked_at = NOW(),
+			last_success_at = NOW(),
+			last_error = NULL,
+			next_check_at = CASE
+				WHEN fph.success_streak + 1 >= 2 THEN NOW() + INTERVAL '10 minutes'
+				ELSE NOW() + INTERVAL '30 seconds'
+			END,
+			score = LEAST(100, 50 + ((fph.success_streak + 1) * 10) - GREATEST(0, $3 - 1000) / 100),
+			updated_at = NOW()
+		FROM free_proxies fp
+		WHERE fp.id = fph.proxy_id
+		  AND fp.proxy_url = $1
+		  AND fph.region = $2`, proxyURL, region, latencyMs); err != nil {
+		log.Printf("free proxy success update failed: %v", err)
+	}
+	if _, err := s.db.Exec(`
+		UPDATE free_proxies
+		SET status = 'active',
+			success_count = success_count + 1,
+			failure_count = 0,
+			last_checked_at = NOW(),
+			last_success_at = NOW(),
+			last_error = NULL,
+			updated_at = NOW()
+		WHERE proxy_url = $1`, proxyURL); err != nil {
+		log.Printf("free proxy aggregate success update failed: %v", err)
+	}
+}
+
+func (s *Store) RecordFreeProxyFailure(proxyURL string, region string, statusCode int, message string, failureThreshold int, quarantineMinutes int) {
+	if proxyURL == "" {
+		return
+	}
+	if failureThreshold < 1 {
+		failureThreshold = 3
+	}
+	if quarantineMinutes < 1 {
+		quarantineMinutes = 30
+	}
+	if len(message) > 1000 {
+		message = message[:1000]
+	}
+	if _, err := s.db.Exec(`
+		UPDATE free_proxy_health fph
+		SET failure_streak = fph.failure_streak + 1,
+			success_streak = 0,
+			failure_count = fph.failure_count + 1,
+			last_status_code = NULLIF($3, 0),
+			last_checked_at = NOW(),
+			last_failure_at = NOW(),
+			last_error = $4,
+			status = CASE
+				WHEN fph.status = 'pending' AND fph.success_streak = 0 THEN 'dead'
+				WHEN fph.status = 'cooldown' AND fph.failure_streak + 1 >= $5 THEN 'dead'
+				WHEN fph.status = 'active' THEN 'cooldown'
+				WHEN fph.failure_streak + 1 >= $5 THEN 'cooldown'
+				ELSE 'cooldown'
+			END,
+			next_check_at = CASE
+				WHEN fph.status = 'pending' AND fph.success_streak = 0 THEN NULL
+				WHEN fph.status = 'cooldown' AND fph.failure_streak + 1 >= $5 THEN NULL
+				ELSE NOW() + ($6::text || ' minutes')::interval
+			END,
+			score = CASE
+				WHEN fph.status = 'pending' AND fph.success_streak = 0 THEN 0
+				ELSE GREATEST(0, fph.score - 40)
+			END,
+			updated_at = NOW()
+		FROM free_proxies fp
+		WHERE fp.id = fph.proxy_id
+		  AND fp.proxy_url = $1
+		  AND fph.region = $2`, proxyURL, region, statusCode, message, failureThreshold, quarantineMinutes); err != nil {
+		log.Printf("free proxy failure update failed: %v", err)
+	}
+	if _, err := s.db.Exec(`
+		UPDATE free_proxies
+		SET failure_count = failure_count + 1,
+			last_checked_at = NOW(),
+			last_failure_at = NOW(),
+			last_error = $2,
+			updated_at = NOW()
+		WHERE proxy_url = $1`, proxyURL, message); err != nil {
+		log.Printf("free proxy aggregate failure update failed: %v", err)
+	}
+}
+
+func (s *Store) DisableGloballyDeadFreeProxies() {
+	if _, err := s.db.Exec(`
+		UPDATE free_proxies fp
+		SET status = 'disabled',
+			updated_at = NOW(),
+			last_error = 'disabled after failing all regional Vinted checks'
+		WHERE fp.status <> 'disabled'
+		  AND EXISTS (
+			SELECT 1
+			FROM free_proxy_health fph
+			WHERE fph.proxy_id = fp.id
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM free_proxy_health fph
+			WHERE fph.proxy_id = fp.id
+			  AND fph.status <> 'dead'
+		  )`); err != nil {
+		log.Printf("free proxy dead disable failed: %v", err)
+	}
+}
+
+func (s *Store) CountActiveFreeProxies(region string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM free_proxy_health fph
+		JOIN free_proxies fp ON fp.id = fph.proxy_id
+		WHERE fph.region = $1
+		  AND (
+			fph.status = 'active'
+			OR (fph.status = 'pending' AND fph.success_streak > 0)
+		  )
+		  AND fp.status <> 'disabled'`, region).Scan(&count)
+	return count, err
 }
 
 func (s *Store) SaveItem(item model.Item) error {
@@ -279,7 +634,7 @@ func nilIfEmpty(v string) interface{} {
 
 func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT m.id, m."userId", m.name, m.query, m.anti_keywords, m.query_delay_ms, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.status_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, tc.chat_id, m.telegram_active, u.dedupe_monitor_alerts, m.proxy_group_id, pg.name, pg.bandwidth_limit_bytes, COALESCE(pg.bandwidth_rx_bytes, 0), COALESCE(pg.bandwidth_tx_bytes, 0), pg.bandwidth_reset_at, pg.proxies
+		SELECT m.id, m."userId", m.name, m.query, m.anti_keywords, m.query_delay_ms, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.status_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, tc.chat_id, m.telegram_active, u.dedupe_monitor_alerts, m.proxy_group_id, COALESCE(NULLIF(m.proxy_source, ''), CASE WHEN m.proxy_group_id IS NULL THEN 'server' ELSE 'group' END), pg.name, pg.bandwidth_limit_bytes, COALESCE(pg.bandwidth_rx_bytes, 0), COALESCE(pg.bandwidth_tx_bytes, 0), pg.bandwidth_reset_at, pg.proxies
 		FROM monitors m
 		JOIN "User" u ON u.id = m."userId"
 		LEFT JOIN proxy_groups pg ON m.proxy_group_id = pg.id
@@ -293,7 +648,7 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 	var monitors []model.Monitor
 	for rows.Next() {
 		var m model.Monitor
-		if err := rows.Scan(&m.ID, &m.UserID, &m.Name, &m.Query, &m.AntiKeywords, &m.QueryDelayMs, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.StatusIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.TelegramChatID, &m.TelegramActive, &m.DedupeMonitorAlerts, &m.ProxyGroupID, &m.ProxyGroupName, &m.ProxyGroupLimitBytes, &m.ProxyGroupRxBytes, &m.ProxyGroupTxBytes, &m.ProxyGroupResetAt, &m.Proxies); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Name, &m.Query, &m.AntiKeywords, &m.QueryDelayMs, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.StatusIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.TelegramChatID, &m.TelegramActive, &m.DedupeMonitorAlerts, &m.ProxyGroupID, &m.ProxySource, &m.ProxyGroupName, &m.ProxyGroupLimitBytes, &m.ProxyGroupRxBytes, &m.ProxyGroupTxBytes, &m.ProxyGroupResetAt, &m.Proxies); err != nil {
 			return nil, err
 		}
 		s.SyncProxyGroupBandwidthState(m)
@@ -308,13 +663,13 @@ func (s *Store) GetActiveMonitors() ([]model.Monitor, error) {
 func (s *Store) GetMonitorByID(id int) (model.Monitor, error) {
 	var m model.Monitor
 	err := s.db.QueryRow(`
-		SELECT m.id, m."userId", m.name, m.query, m.anti_keywords, m.query_delay_ms, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.status_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, tc.chat_id, m.telegram_active, u.dedupe_monitor_alerts, m.proxy_group_id, pg.name, pg.bandwidth_limit_bytes, COALESCE(pg.bandwidth_rx_bytes, 0), COALESCE(pg.bandwidth_tx_bytes, 0), pg.bandwidth_reset_at, pg.proxies
+		SELECT m.id, m."userId", m.name, m.query, m.anti_keywords, m.query_delay_ms, m.price_min, m.price_max, m.size_id, m.catalog_ids, m.brand_ids, m.color_ids, m.status_ids, m.region, m.allowed_countries, m.status, m.discord_webhook, m.webhook_active, tc.chat_id, m.telegram_active, u.dedupe_monitor_alerts, m.proxy_group_id, COALESCE(NULLIF(m.proxy_source, ''), CASE WHEN m.proxy_group_id IS NULL THEN 'server' ELSE 'group' END), pg.name, pg.bandwidth_limit_bytes, COALESCE(pg.bandwidth_rx_bytes, 0), COALESCE(pg.bandwidth_tx_bytes, 0), pg.bandwidth_reset_at, pg.proxies
 		FROM monitors m
 		JOIN "User" u ON u.id = m."userId"
 		LEFT JOIN proxy_groups pg ON m.proxy_group_id = pg.id
 		LEFT JOIN telegram_connections tc ON tc."userId" = m."userId"
 		WHERE m.id = $1`, id,
-	).Scan(&m.ID, &m.UserID, &m.Name, &m.Query, &m.AntiKeywords, &m.QueryDelayMs, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.StatusIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.TelegramChatID, &m.TelegramActive, &m.DedupeMonitorAlerts, &m.ProxyGroupID, &m.ProxyGroupName, &m.ProxyGroupLimitBytes, &m.ProxyGroupRxBytes, &m.ProxyGroupTxBytes, &m.ProxyGroupResetAt, &m.Proxies)
+	).Scan(&m.ID, &m.UserID, &m.Name, &m.Query, &m.AntiKeywords, &m.QueryDelayMs, &m.PriceMin, &m.PriceMax, &m.SizeID, &m.CatalogIDs, &m.BrandIDs, &m.ColorIDs, &m.StatusIDs, &m.Region, &m.AllowedCountries, &m.Status, &m.DiscordWebhook, &m.WebhookActive, &m.TelegramChatID, &m.TelegramActive, &m.DedupeMonitorAlerts, &m.ProxyGroupID, &m.ProxySource, &m.ProxyGroupName, &m.ProxyGroupLimitBytes, &m.ProxyGroupRxBytes, &m.ProxyGroupTxBytes, &m.ProxyGroupResetAt, &m.Proxies)
 	if err != nil {
 		return model.Monitor{}, err
 	}

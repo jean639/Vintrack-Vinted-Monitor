@@ -30,6 +30,7 @@ type Monitor struct {
 	DedupeMonitorAlerts  bool
 	BannedSellerIDs      []int64
 	ProxyGroupID         *int
+	ProxySource          string
 	ProxyGroupName       sql.NullString
 	ProxyGroupLimitBytes *int64
 	ProxyGroupRxBytes    int64
@@ -37,6 +38,7 @@ type Monitor struct {
 	ProxyGroupResetAt    sql.NullTime
 	Proxies              sql.NullString
 	ServerProxyVersion   uint64
+	FreeProxyVersion     uint64
 	CreatedAt            time.Time
 }
 

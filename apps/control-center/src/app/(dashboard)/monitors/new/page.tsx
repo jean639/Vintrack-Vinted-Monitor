@@ -13,6 +13,12 @@ import { CountryFilterPicker } from "@/components/monitors/country-filter-picker
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
 import { AntiKeywordInput } from "@/components/monitors/anti-keyword-input";
+import {
+    FormSection,
+    RegionPoolStatus,
+    getFreeProxyRegionHealth,
+    type FreeProxyOption,
+} from "@/components/monitors/monitor-form-sections";
 import { Switch } from "@/components/ui/switch";
 import { getStatusLocaleForRegionCodes } from "@/lib/regions";
 import {
@@ -21,7 +27,18 @@ import {
     MIN_QUERY_DELAY_MS,
 } from "@/lib/monitor-delay";
 import { buildVintedMonitorUrl } from "@/lib/vinted-url";
-import { ArrowLeft, Copy, ExternalLink, Plus, Send } from "lucide-react";
+import {
+    ArrowLeft,
+    Bell,
+    Copy,
+    Eye,
+    ExternalLink,
+    Network,
+    Plus,
+    Send,
+    Settings2,
+    SlidersHorizontal,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -57,6 +74,12 @@ export default function NewMonitorPage() {
     const [priceMin, setPriceMin] = useState("");
     const [priceMax, setPriceMax] = useState("");
     const [proxyGroups, setProxyGroups] = useState<ProxyGroupOption[]>([]);
+    const [freeProxy, setFreeProxy] = useState<FreeProxyOption>({
+        enabled: false,
+        activeCount: 0,
+        minActivePerRegion: 25,
+        regions: {},
+    });
     const [userRole, setUserRole] = useState<string>("free");
     const [selectedProxyGroup, setSelectedProxyGroup] = useState<string>("");
     const [webhookUrl, setWebhookUrl] = useState<string>("");
@@ -161,11 +184,24 @@ export default function NewMonitorPage() {
             .then(([proxyData, telegramData]) => {
                 const groups = proxyData.groups || [];
                 const role = proxyData.role || "free";
+                const freeProxyOption = proxyData.freeProxy || {
+                    enabled: false,
+                    activeCount: 0,
+                    minActivePerRegion: 25,
+                    regions: {},
+                };
 
                 setProxyGroups(groups);
                 setUserRole(role);
+                setFreeProxy(freeProxyOption);
                 setSelectedProxyGroup((current) => {
                     if (current) return current;
+                    if (
+                        freeProxyOption.enabled &&
+                        freeProxyOption.regions?.de?.healthy
+                    ) {
+                        return "free";
+                    }
                     if (role === "premium" || role === "admin") return "server";
                     return groups[0]?.id ? String(groups[0].id) : "";
                 });
@@ -187,6 +223,34 @@ export default function NewMonitorPage() {
         colorIds: selectedColors,
         statusIds: selectedStatuses,
     });
+    const selectedRegionFreeProxyHealth = getFreeProxyRegionHealth(
+        freeProxy,
+        selectedRegion,
+    );
+    const selectedRegionFreeProxyCount =
+        selectedRegionFreeProxyHealth?.usable ?? 0;
+    const isFreeProxyAvailableForRegion =
+        freeProxy.enabled && Boolean(selectedRegionFreeProxyHealth?.healthy);
+    const activeFilterCount = [
+        selectedAllowedCountries.length > 0,
+        selectedCategories.length > 0,
+        Boolean(priceMin || priceMax),
+        selectedBrands.length > 0,
+        selectedColors.length > 0,
+        selectedStatuses.length > 0,
+        selectedSizes.length > 0,
+    ].filter(Boolean).length;
+    const notificationChannelCount =
+        Number(Boolean(webhookUrl)) + Number(telegramEnabled);
+    const selectedProxySummary = loading
+        ? "Loading"
+        : selectedProxyGroup === "free"
+          ? "Free pool"
+          : selectedProxyGroup === "server"
+            ? "Server"
+            : (proxyGroups.find(
+                  (group) => String(group.id) === selectedProxyGroup,
+              )?.name ?? "Select source");
 
     return (
         <div className="mx-auto max-w-4xl space-y-6">
@@ -209,483 +273,571 @@ export default function NewMonitorPage() {
             <Card className="border-input/60">
                 <CardContent className="p-6">
                     <form action={handleCreate} className="space-y-6">
-                        <div className="space-y-2">
-                            <Label htmlFor="name" className="text-[13px]">
-                                Monitor Name
-                            </Label>
-                            <Input
-                                name="name"
-                                id="name"
-                                placeholder="e.g. Nike Jackets DE"
-                                required
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Internal name for this monitor in the dashboard
-                                and notifications.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="query" className="text-[13px]">
-                                Keywords{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <Input
-                                name="query"
-                                id="query"
-                                placeholder="e.g. Nike Dunk Low Grey"
-                                value={query}
-                                onChange={(event) =>
-                                    setQuery(event.target.value)
-                                }
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Optional Vinted text search. Leave empty if you
-                                only want to filter by category, brand, price,
-                                size, etc.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label
-                                htmlFor="anti_keywords"
-                                className="text-[13px]"
-                            >
-                                Anti Keywords{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <AntiKeywordInput name="anti_keywords" />
-                            <p className="text-muted-foreground text-[12px]">
-                                New items matching any anti keyword in title or
-                                description will be skipped.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label
-                                htmlFor="query_delay_ms"
-                                className="text-[13px]"
-                            >
-                                Query Delay
-                            </Label>
-                            <Input
-                                type="number"
-                                name="query_delay_ms"
-                                id="query_delay_ms"
-                                min={MIN_QUERY_DELAY_MS}
-                                max={MAX_QUERY_DELAY_MS}
-                                step={100}
-                                defaultValue={DEFAULT_QUERY_DELAY_MS}
-                                onInput={handleQueryDelayInput}
-                                onBlur={handleQueryDelayBlur}
-                                required
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Time between Vinted catalog checks in
-                                milliseconds. Between Min. {MIN_QUERY_DELAY_MS}{" "}
-                                ms. - Max. {MAX_QUERY_DELAY_MS} ms.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Country / Region
-                            </Label>
-                            <RegionPicker
-                                selected={selectedRegion}
-                                onChange={setSelectedRegion}
-                            />
-                            <input
-                                type="hidden"
-                                name="region"
-                                value={selectedRegion}
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Select which Vinted country to monitor. Default
-                                is Germany (vinted.de).
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Strict Item Location Filter{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <CountryFilterPicker
-                                selected={selectedAllowedCountries}
-                                onChange={setSelectedAllowedCountries}
-                            />
-                            <input
-                                type="hidden"
-                                name="allowed_countries"
-                                value={selectedAllowedCountries.join(",")}
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Only items located in these countries will be
-                                sent/saved. Leave empty to allow all countries.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Category Filter{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <CategoryPicker
-                                region={selectedRegion}
-                                selected={selectedCategories}
-                                onChange={setSelectedCategories}
-                                onSelectionMetaChange={
-                                    handleCategorySelectionMetaChange
-                                }
-                            />
-                            <input
-                                type="hidden"
-                                name="catalog_ids"
-                                value={selectedCategories.join(",")}
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Limit results to specific Vinted categories.
-                            </p>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <FormSection
+                            title="Basics"
+                            description="Name, keywords, polling delay, and target Vinted region."
+                            icon={Settings2}
+                            summary={selectedRegion.toUpperCase()}
+                        >
                             <div className="space-y-2">
-                                <Label
-                                    htmlFor="price_min"
-                                    className="text-[13px]"
-                                >
-                                    Min Price
+                                <Label htmlFor="name" className="text-[13px]">
+                                    Monitor Name
                                 </Label>
-                                <div className="relative">
-                                    <span className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2 text-sm">
-                                        €
-                                    </span>
-                                    <Input
-                                        type="number"
-                                        name="price_min"
-                                        placeholder="0"
-                                        className="pl-7"
-                                        value={priceMin}
-                                        onChange={(event) =>
-                                            setPriceMin(event.target.value)
-                                        }
-                                    />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label
-                                    htmlFor="price_max"
-                                    className="text-[13px]"
-                                >
-                                    Max Price
-                                </Label>
-                                <div className="relative">
-                                    <span className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2 text-sm">
-                                        €
-                                    </span>
-                                    <Input
-                                        type="number"
-                                        name="price_max"
-                                        placeholder="Any"
-                                        className="pl-7"
-                                        value={priceMax}
-                                        onChange={(event) =>
-                                            setPriceMax(event.target.value)
-                                        }
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Brand Filter{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <BrandPicker
-                                selected={selectedBrands}
-                                onChange={setSelectedBrands}
-                                catalogIds={selectedCategories}
-                            />
-                            <input
-                                type="hidden"
-                                name="brand_ids"
-                                value={selectedBrands.join(",")}
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Limit results to specific brands.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Color Filter{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <ColorPicker
-                                selected={selectedColors}
-                                onChange={setSelectedColors}
-                            />
-                            <input
-                                type="hidden"
-                                name="color_ids"
-                                value={selectedColors.join(",")}
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Limit results to specific colors.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Condition Filter{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <StatusPicker
-                                selected={selectedStatuses}
-                                onChange={setSelectedStatuses}
-                                locale={getStatusLocaleForRegionCodes(
-                                    selectedAllowedCountries.join(","),
-                                    selectedRegion,
-                                )}
-                            />
-                            <input
-                                type="hidden"
-                                name="status_ids"
-                                value={selectedStatuses.join(",")}
-                            />
-                            <p className="text-muted-foreground text-[12px]">
-                                Pick one or more item conditions. Leave empty to
-                                allow all conditions.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2.5">
-                            <Label className="text-[13px]">
-                                Size Filter{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <SizePicker
-                                selected={selectedSizes}
-                                onChange={setSelectedSizes}
-                            />
-                            <input
-                                type="hidden"
-                                name="size_id"
-                                value={selectedSizes.join(",")}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label
-                                htmlFor="discord_webhook"
-                                className="text-[13px]"
-                            >
-                                Discord Webhook{" "}
-                                <span className="text-muted-foreground font-normal">
-                                    (optional)
-                                </span>
-                            </Label>
-                            <div className="flex gap-2">
                                 <Input
-                                    name="discord_webhook"
-                                    id="discord_webhook"
-                                    placeholder="https://discord.com/api/webhooks/..."
-                                    value={webhookUrl}
-                                    onChange={(e) =>
-                                        setWebhookUrl(e.target.value)
+                                    name="name"
+                                    id="name"
+                                    placeholder="e.g. Nike Jackets DE"
+                                    required
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Internal name for this monitor in the
+                                    dashboard and notifications.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="query" className="text-[13px]">
+                                    Keywords{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <Input
+                                    name="query"
+                                    id="query"
+                                    placeholder="e.g. Nike Dunk Low Grey"
+                                    value={query}
+                                    onChange={(event) =>
+                                        setQuery(event.target.value)
                                     }
-                                    className="flex-1"
                                 />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={handleTestWebhook}
-                                    disabled={isTestingWebhook || !webhookUrl}
-                                    className="shrink-0 gap-2"
+                                <p className="text-muted-foreground text-[12px]">
+                                    Optional Vinted text search. Leave empty if
+                                    you only want to filter by category, brand,
+                                    price, size, etc.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label
+                                    htmlFor="anti_keywords"
+                                    className="text-[13px]"
                                 >
-                                    <Send className="h-4 w-4" />
-                                    {isTestingWebhook ? "Testing..." : "Test"}
-                                </Button>
+                                    Anti Keywords{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <AntiKeywordInput name="anti_keywords" />
+                                <p className="text-muted-foreground text-[12px]">
+                                    New items matching any anti keyword in title
+                                    or description will be skipped.
+                                </p>
                             </div>
-                        </div>
 
-                        <div className="space-y-2">
-                            <input
-                                type="hidden"
-                                name="telegram_active"
-                                value={telegramEnabled ? "true" : "false"}
-                            />
-                            <div className="border-border/80 bg-muted/30 flex items-center justify-between rounded-lg border p-3">
-                                <div className="space-y-0.5">
-                                    <Label className="text-[13px]">
-                                        Telegram Notifications
+                            <div className="space-y-2">
+                                <Label
+                                    htmlFor="query_delay_ms"
+                                    className="text-[13px]"
+                                >
+                                    Query Delay
+                                </Label>
+                                <Input
+                                    type="number"
+                                    name="query_delay_ms"
+                                    id="query_delay_ms"
+                                    min={MIN_QUERY_DELAY_MS}
+                                    max={MAX_QUERY_DELAY_MS}
+                                    step={100}
+                                    defaultValue={DEFAULT_QUERY_DELAY_MS}
+                                    onInput={handleQueryDelayInput}
+                                    onBlur={handleQueryDelayBlur}
+                                    required
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Time between Vinted catalog checks in
+                                    milliseconds. Between Min.{" "}
+                                    {MIN_QUERY_DELAY_MS} ms. - Max.{" "}
+                                    {MAX_QUERY_DELAY_MS} ms.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Country / Region
+                                </Label>
+                                <RegionPicker
+                                    selected={selectedRegion}
+                                    onChange={setSelectedRegion}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="region"
+                                    value={selectedRegion}
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Select which Vinted country to monitor.
+                                    Default is Germany (vinted.de).
+                                </p>
+                            </div>
+                        </FormSection>
+
+                        <FormSection
+                            title="Filters"
+                            description="Optional item filters for narrowing the catalog results."
+                            defaultOpen={false}
+                            icon={SlidersHorizontal}
+                            summary={
+                                activeFilterCount > 0
+                                    ? `${activeFilterCount} active`
+                                    : "Optional"
+                            }
+                        >
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Strict Item Location Filter{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <CountryFilterPicker
+                                    selected={selectedAllowedCountries}
+                                    onChange={setSelectedAllowedCountries}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="allowed_countries"
+                                    value={selectedAllowedCountries.join(",")}
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Only items located in these countries will
+                                    be sent/saved. Leave empty to allow all
+                                    countries.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Category Filter{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <CategoryPicker
+                                    region={selectedRegion}
+                                    selected={selectedCategories}
+                                    onChange={setSelectedCategories}
+                                    onSelectionMetaChange={
+                                        handleCategorySelectionMetaChange
+                                    }
+                                />
+                                <input
+                                    type="hidden"
+                                    name="catalog_ids"
+                                    value={selectedCategories.join(",")}
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Limit results to specific Vinted categories.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <div className="space-y-2">
+                                    <Label
+                                        htmlFor="price_min"
+                                        className="text-[13px]"
+                                    >
+                                        Min Price
                                     </Label>
-                                    <p className="text-muted-foreground text-[12px]">
-                                        {hasTelegramConnection
-                                            ? "Send alerts for this monitor to your connected Telegram chat."
-                                            : "Connect Telegram from the dashboard notification settings first."}
-                                    </p>
+                                    <div className="relative">
+                                        <span className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2 text-sm">
+                                            €
+                                        </span>
+                                        <Input
+                                            type="number"
+                                            name="price_min"
+                                            placeholder="0"
+                                            className="pl-7"
+                                            value={priceMin}
+                                            onChange={(event) =>
+                                                setPriceMin(event.target.value)
+                                            }
+                                        />
+                                    </div>
                                 </div>
-                                <Switch
-                                    checked={telegramEnabled}
-                                    disabled={!hasTelegramConnection}
-                                    onCheckedChange={setTelegramEnabled}
+                                <div className="space-y-2">
+                                    <Label
+                                        htmlFor="price_max"
+                                        className="text-[13px]"
+                                    >
+                                        Max Price
+                                    </Label>
+                                    <div className="relative">
+                                        <span className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2 text-sm">
+                                            €
+                                        </span>
+                                        <Input
+                                            type="number"
+                                            name="price_max"
+                                            placeholder="Any"
+                                            className="pl-7"
+                                            value={priceMax}
+                                            onChange={(event) =>
+                                                setPriceMax(event.target.value)
+                                            }
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Brand Filter{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <BrandPicker
+                                    selected={selectedBrands}
+                                    onChange={setSelectedBrands}
+                                    catalogIds={selectedCategories}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="brand_ids"
+                                    value={selectedBrands.join(",")}
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Limit results to specific brands.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Color Filter{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <ColorPicker
+                                    selected={selectedColors}
+                                    onChange={setSelectedColors}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="color_ids"
+                                    value={selectedColors.join(",")}
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Limit results to specific colors.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Condition Filter{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <StatusPicker
+                                    selected={selectedStatuses}
+                                    onChange={setSelectedStatuses}
+                                    locale={getStatusLocaleForRegionCodes(
+                                        selectedAllowedCountries.join(","),
+                                        selectedRegion,
+                                    )}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="status_ids"
+                                    value={selectedStatuses.join(",")}
+                                />
+                                <p className="text-muted-foreground text-[12px]">
+                                    Pick one or more item conditions. Leave
+                                    empty to allow all conditions.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2.5">
+                                <Label className="text-[13px]">
+                                    Size Filter{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <SizePicker
+                                    selected={selectedSizes}
+                                    onChange={setSelectedSizes}
+                                />
+                                <input
+                                    type="hidden"
+                                    name="size_id"
+                                    value={selectedSizes.join(",")}
                                 />
                             </div>
-                        </div>
+                        </FormSection>
 
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">Proxy Group</Label>
-                            {loading ? (
-                                <div className="bg-muted h-10 animate-pulse rounded-md" />
-                            ) : (
-                                <>
-                                    <select
-                                        name="proxy_group_id"
-                                        value={selectedProxyGroup}
+                        <FormSection
+                            title="Notifications"
+                            description="Choose where new item alerts should be sent."
+                            defaultOpen={false}
+                            icon={Bell}
+                            summary={
+                                notificationChannelCount > 0
+                                    ? `${notificationChannelCount} active`
+                                    : "Not configured"
+                            }
+                        >
+                            <div className="space-y-2">
+                                <Label
+                                    htmlFor="discord_webhook"
+                                    className="text-[13px]"
+                                >
+                                    Discord Webhook{" "}
+                                    <span className="text-muted-foreground font-normal">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <div className="flex gap-2">
+                                    <Input
+                                        name="discord_webhook"
+                                        id="discord_webhook"
+                                        placeholder="https://discord.com/api/webhooks/..."
+                                        value={webhookUrl}
                                         onChange={(e) =>
-                                            setSelectedProxyGroup(
-                                                e.target.value,
-                                            )
+                                            setWebhookUrl(e.target.value)
                                         }
-                                        className="border-input bg-background text-foreground h-10 w-full rounded-md border px-3 text-[13px] focus:ring-2 focus:ring-slate-900 focus:ring-offset-1 focus:outline-none"
-                                        required={userRole === "free"}
+                                        className="flex-1"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={handleTestWebhook}
+                                        disabled={
+                                            isTestingWebhook || !webhookUrl
+                                        }
+                                        className="shrink-0 gap-2"
                                     >
+                                        <Send className="h-4 w-4" />
+                                        {isTestingWebhook
+                                            ? "Testing..."
+                                            : "Test"}
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <input
+                                    type="hidden"
+                                    name="telegram_active"
+                                    value={telegramEnabled ? "true" : "false"}
+                                />
+                                <div className="border-border/80 bg-muted/30 flex items-center justify-between rounded-lg border p-3">
+                                    <div className="space-y-0.5">
+                                        <Label className="text-[13px]">
+                                            Telegram Notifications
+                                        </Label>
+                                        <p className="text-muted-foreground text-[12px]">
+                                            {hasTelegramConnection
+                                                ? "Send alerts for this monitor to your connected Telegram chat."
+                                                : "Connect Telegram from the dashboard notification settings first."}
+                                        </p>
+                                    </div>
+                                    <Switch
+                                        checked={telegramEnabled}
+                                        disabled={!hasTelegramConnection}
+                                        onCheckedChange={setTelegramEnabled}
+                                    />
+                                </div>
+                            </div>
+                        </FormSection>
+
+                        <FormSection
+                            title="Proxy Source"
+                            description="Select the connection pool used for Vinted checks."
+                            icon={Network}
+                            summary={selectedProxySummary}
+                        >
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Proxy Source
+                                </Label>
+                                {loading ? (
+                                    <div className="bg-muted h-10 animate-pulse rounded-md" />
+                                ) : (
+                                    <>
+                                        <RegionPoolStatus
+                                            freeProxy={freeProxy}
+                                            selectedRegion={selectedRegion}
+                                            onSelectRegion={setSelectedRegion}
+                                        />
+                                        <select
+                                            name="proxy_group_id"
+                                            value={selectedProxyGroup}
+                                            onChange={(e) =>
+                                                setSelectedProxyGroup(
+                                                    e.target.value,
+                                                )
+                                            }
+                                            className="border-input bg-background text-foreground h-10 w-full rounded-md border px-3 text-[13px] focus:ring-2 focus:ring-slate-900 focus:ring-offset-1 focus:outline-none"
+                                            required={userRole === "free"}
+                                        >
+                                            {userRole === "free" && (
+                                                <option value="" disabled>
+                                                    Select a proxy source
+                                                </option>
+                                            )}
+                                            {(isFreeProxyAvailableForRegion ||
+                                                selectedProxyGroup ===
+                                                    "free") && (
+                                                <option
+                                                    value="free"
+                                                    disabled={
+                                                        !isFreeProxyAvailableForRegion
+                                                    }
+                                                >
+                                                    Free Proxy Pool (
+                                                    {
+                                                        selectedRegionFreeProxyCount
+                                                    }{" "}
+                                                    usable
+                                                    {isFreeProxyAvailableForRegion
+                                                        ? ""
+                                                        : ", degraded"}
+                                                    )
+                                                </option>
+                                            )}
+                                            {(userRole === "premium" ||
+                                                userRole === "admin") && (
+                                                <option value="server">
+                                                    Server Proxies (Premium)
+                                                </option>
+                                            )}
+                                            {proxyGroups.length === 0 &&
+                                                userRole === "free" &&
+                                                !isFreeProxyAvailableForRegion && (
+                                                    <option value="" disabled>
+                                                        No proxy groups — create
+                                                        one first
+                                                    </option>
+                                                )}
+                                            {proxyGroups.map((g) => (
+                                                <option
+                                                    key={g.id}
+                                                    value={g.id.toString()}
+                                                >
+                                                    {g.name} ({g.proxyCount}{" "}
+                                                    proxies)
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {userRole === "free" &&
+                                            proxyGroups.length === 0 &&
+                                            !isFreeProxyAvailableForRegion && (
+                                                <p className="text-[12px] text-amber-600">
+                                                    You need to{" "}
+                                                    <Link
+                                                        href="/proxies"
+                                                        className="font-medium underline"
+                                                    >
+                                                        create a proxy group
+                                                    </Link>{" "}
+                                                    before creating a monitor.
+                                                </p>
+                                            )}
                                         {userRole === "free" && (
-                                            <option value="" disabled>
-                                                Select a proxy group
-                                            </option>
+                                            <p className="text-muted-foreground text-[12px]">
+                                                Select your proxy group or the
+                                                admin managed free pool. Free
+                                                pool needs{" "}
+                                                {freeProxy.minActivePerRegion}{" "}
+                                                valid proxies for{" "}
+                                                {selectedRegion}.
+                                            </p>
                                         )}
                                         {(userRole === "premium" ||
                                             userRole === "admin") && (
-                                            <option value="server">
-                                                ⚡ Server Proxies (Premium)
-                                            </option>
-                                        )}
-                                        {proxyGroups.length === 0 &&
-                                            userRole === "free" && (
-                                                <option value="" disabled>
-                                                    No proxy groups — create one
-                                                    first
-                                                </option>
-                                            )}
-                                        {proxyGroups.map((g) => (
-                                            <option
-                                                key={g.id}
-                                                value={g.id.toString()}
-                                            >
-                                                {g.name} ({g.proxyCount}{" "}
-                                                proxies)
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {userRole === "free" &&
-                                        proxyGroups.length === 0 && (
-                                            <p className="text-[12px] text-amber-600">
-                                                You need to{" "}
-                                                <Link
-                                                    href="/proxies"
-                                                    className="font-medium underline"
-                                                >
-                                                    create a proxy group
-                                                </Link>{" "}
-                                                before creating a monitor.
+                                            <p className="text-muted-foreground text-[12px]">
+                                                Use server proxies or select
+                                                your own group.
                                             </p>
                                         )}
-                                    {userRole === "free" && (
-                                        <p className="text-muted-foreground text-[12px]">
-                                            Select your proxy group to use for
-                                            scraping.
-                                        </p>
-                                    )}
-                                    {(userRole === "premium" ||
-                                        userRole === "admin") && (
-                                        <p className="text-muted-foreground text-[12px]">
-                                            Use server proxies or select your
-                                            own group.
-                                        </p>
-                                    )}
-                                </>
-                            )}
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[13px]">
-                                Monitor URL Preview
-                            </Label>
-                            <div className="border-border/70 bg-muted/20 rounded-xl border p-3">
-                                <div className="flex items-center justify-between gap-3">
-                                    <p className="text-muted-foreground text-[12px]">
-                                        This is the exact Vinted catalog URL for
-                                        the current filter setup.
-                                    </p>
-                                    <a
-                                        href={previewUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="border-input bg-background text-foreground hover:bg-muted inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors"
-                                    >
-                                        Test URL
-                                        <ExternalLink className="h-3.5 w-3.5" />
-                                    </a>
-                                </div>
-                                <div className="relative mt-3">
-                                    <div className="border-border/70 bg-background overflow-x-auto rounded-lg border px-3 py-3 pr-12">
-                                        <code className="text-foreground/90 block text-[11px] break-all whitespace-pre-wrap">
-                                            {previewUrl}
-                                        </code>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleCopyPreviewUrl}
-                                        className="border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground absolute top-1/2 right-2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border transition-colors"
-                                        aria-label="Copy preview URL"
-                                        title="Copy URL"
-                                    >
-                                        <Copy className="h-3.5 w-3.5" />
-                                    </button>
-                                </div>
-                                {selectedCategoryLabels.length > 0 && (
-                                    <div className="mt-3 flex flex-wrap gap-1.5">
-                                        {selectedCategoryLabels.map((label) => (
-                                            <span
-                                                key={label}
-                                                className="border-border/70 bg-background text-muted-foreground inline-flex items-center rounded-full border px-2 py-1 text-[11px]"
-                                            >
-                                                {label}
-                                            </span>
-                                        ))}
-                                    </div>
+                                    </>
                                 )}
                             </div>
-                        </div>
+                        </FormSection>
+
+                        <FormSection
+                            title="Preview"
+                            description="Generated Vinted catalog URL for the current setup."
+                            defaultOpen={false}
+                            icon={Eye}
+                            summary="Vinted URL"
+                        >
+                            <div className="space-y-2">
+                                <Label className="text-[13px]">
+                                    Monitor URL Preview
+                                </Label>
+                                <div className="border-border/70 bg-muted/20 rounded-xl border p-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="text-muted-foreground text-[12px]">
+                                            This is the exact Vinted catalog URL
+                                            for the current filter setup.
+                                        </p>
+                                        <a
+                                            href={previewUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="border-input bg-background text-foreground hover:bg-muted inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors"
+                                        >
+                                            Test URL
+                                            <ExternalLink className="h-3.5 w-3.5" />
+                                        </a>
+                                    </div>
+                                    <div className="relative mt-3">
+                                        <div className="border-border/70 bg-background overflow-x-auto rounded-lg border px-3 py-3 pr-12">
+                                            <code className="text-foreground/90 block text-[11px] break-all whitespace-pre-wrap">
+                                                {previewUrl}
+                                            </code>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyPreviewUrl}
+                                            className="border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground absolute top-1/2 right-2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border transition-colors"
+                                            aria-label="Copy preview URL"
+                                            title="Copy URL"
+                                        >
+                                            <Copy className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                    {selectedCategoryLabels.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-1.5">
+                                            {selectedCategoryLabels.map(
+                                                (label) => (
+                                                    <span
+                                                        key={label}
+                                                        className="border-border/70 bg-background text-muted-foreground inline-flex items-center rounded-full border px-2 py-1 text-[11px]"
+                                                    >
+                                                        {label}
+                                                    </span>
+                                                ),
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </FormSection>
 
                         <div className="pt-2">
                             <Button
                                 type="submit"
                                 className="w-full gap-1.5"
                                 disabled={
-                                    userRole === "free" &&
-                                    (!selectedProxyGroup ||
-                                        proxyGroups.length === 0)
+                                    (userRole === "free" &&
+                                        !selectedProxyGroup) ||
+                                    (selectedProxyGroup === "free" &&
+                                        !isFreeProxyAvailableForRegion)
                                 }
                             >
                                 <Plus className="h-4 w-4" /> Create Monitor
