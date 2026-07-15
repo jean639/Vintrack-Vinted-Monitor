@@ -203,6 +203,7 @@ export function AccountClient({
 
                 const payload = event.data.payload as {
                     ok?: boolean;
+                    syncOk?: boolean;
                     error?: string;
                     syncedDomains?: string[];
                     configured?: boolean;
@@ -235,12 +236,18 @@ export function AccountClient({
                 const completedSyncs = getCompletedSyncs(payload.results);
                 const syncedCount =
                     completedSyncs.length || payload.syncedDomains?.length || 0;
-                if (syncedCount > 0) {
+                if (payload.syncOk !== false && syncedCount > 0) {
                     toast.success(
                         `Extension connected and synced ${syncedCount} Vinted session${syncedCount === 1 ? "" : "s"}`,
                     );
                 } else {
-                    toast.success("Extension connected");
+                    const issue = getSyncIssue(payload.results);
+                    toast.warning(
+                        payload.error ||
+                            issue?.error ||
+                            issue?.reason ||
+                            "Extension connected, but no fresh Vinted browser session was found.",
+                    );
                 }
 
                 void getAccountStatus().then((updated) => {
@@ -573,8 +580,8 @@ export function AccountClient({
                                 </p>
                                 <p className="text-muted-foreground mt-1 text-xs">
                                     Sign in to Vinted in this same browser. The
-                                    extension syncs only the session token and the
-                                    selected Vinted domain.
+                                    extension syncs only the session token and
+                                    the selected Vinted domain.
                                 </p>
                             </div>
                             <Button

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
+    ArrowLeft,
     ChevronLeft,
     ChevronRight,
     HandCoins,
@@ -16,13 +17,6 @@ import {
     XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CardDescription,
-} from "@/components/ui/card";
 import { useVintedAccount } from "@/components/account-provider";
 import { cn } from "@/lib/utils";
 
@@ -281,6 +275,7 @@ export function ChatsClient() {
     const [sending, setSending] = useState(false);
     const [message, setMessage] = useState("");
     const [threadMeta, setThreadMeta] = useState<ThreadMeta | null>(null);
+    const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
     const selectedConversationIdRef = useRef<number | null>(null);
 
     const selectedConversation = useMemo(
@@ -334,6 +329,7 @@ export function ChatsClient() {
 
                 if (nextConversations.length === 0) {
                     setSelectedConversationId(null);
+                    setMobileThreadOpen(false);
                     setReplies([]);
                     return;
                 }
@@ -456,11 +452,37 @@ export function ChatsClient() {
         }
     }
 
+    const unreadCount = conversations.filter(
+        (conversation) => conversation.unread,
+    ).length;
+    const selectedImageUrl =
+        selectedConversation?.item_photos?.[0]?.url ||
+        selectedConversation?.opposite_user?.photo?.url ||
+        null;
+
     if (accountLoading) {
         return (
-            <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-                <div className="bg-muted h-165 animate-pulse rounded-3xl" />
-                <div className="bg-muted h-165 animate-pulse rounded-3xl" />
+            <div className="space-y-5">
+                <div className="space-y-2">
+                    <div className="bg-muted h-8 w-28 animate-pulse rounded-md" />
+                    <div className="bg-muted h-4 w-72 animate-pulse rounded-md" />
+                </div>
+                <div className="border-border/80 bg-card grid h-[calc(100dvh-11.5rem)] min-h-144 overflow-hidden rounded-xl border lg:grid-cols-[21rem_minmax(0,1fr)]">
+                    <div className="border-border/70 border-r">
+                        <div className="border-border/70 h-16 border-b" />
+                        <div className="space-y-1 p-2">
+                            {Array.from({ length: 6 }).map((_, index) => (
+                                <div
+                                    key={index}
+                                    className="bg-muted h-17 animate-pulse rounded-lg"
+                                />
+                            ))}
+                        </div>
+                    </div>
+                    <div className="hidden lg:block">
+                        <div className="border-border/70 h-16 border-b" />
+                    </div>
+                </div>
             </div>
         );
     }
@@ -486,475 +508,451 @@ export function ChatsClient() {
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-5">
+            <div className="flex items-start justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Chats</h1>
                     <p className="text-muted-foreground mt-0.5 text-sm">
                         {pagination
-                            ? `${pagination.total_entries} conversations in your linked Vinted inbox.`
-                            : "Review your linked Vinted conversations and reply from one place."}
+                            ? `${pagination.total_entries} conversation${pagination.total_entries === 1 ? "" : "s"} in your Vinted inbox${unreadCount > 0 ? ` · ${unreadCount} unread` : ""}.`
+                            : "Read and reply to your Vinted conversations."}
                     </p>
                 </div>
-
-                <div className="flex items-center gap-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void fetchInbox(page)}
-                        disabled={inboxLoading}
-                        className="h-9 gap-1.5"
-                    >
-                        <RefreshCw
-                            className={cn(
-                                "h-3.5 w-3.5",
-                                inboxLoading && "animate-spin",
-                            )}
-                        />
-                        Refresh Inbox
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                            selectedConversationId &&
-                            void fetchConversation(selectedConversationId)
-                        }
-                        disabled={!selectedConversationId || threadLoading}
-                        className="h-9 gap-1.5"
-                    >
-                        <RefreshCw
-                            className={cn(
-                                "h-3.5 w-3.5",
-                                threadLoading && "animate-spin",
-                            )}
-                        />
-                        Refresh Thread
-                    </Button>
-                </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void fetchInbox(page)}
+                    disabled={inboxLoading}
+                    className="shrink-0 gap-1.5"
+                >
+                    <RefreshCw
+                        className={cn(
+                            "h-3.5 w-3.5",
+                            inboxLoading && "animate-spin",
+                        )}
+                    />
+                    <span className="hidden sm:inline">Refresh</span>
+                </Button>
             </div>
 
-            <div className="grid gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
-                <Card className="border-border/70 bg-card flex h-165 overflow-hidden rounded-3xl py-0 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                    <CardHeader className="border-border/60 bg-card border-b px-5 py-4">
-                        <CardTitle className="text-base">Inbox</CardTitle>
-                        <CardDescription>
-                            Select a conversation to inspect the full message
-                            thread.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="flex min-h-0 flex-1 flex-col px-0">
+            <div className="border-border/80 bg-card grid h-[calc(100dvh-11.5rem)] max-h-192 min-h-144 overflow-hidden rounded-xl border lg:grid-cols-[21rem_minmax(0,1fr)]">
+                <aside
+                    className={cn(
+                        "min-h-0 flex-col lg:flex lg:border-r",
+                        mobileThreadOpen ? "hidden" : "flex",
+                    )}
+                >
+                    <div className="border-border/70 flex h-16 shrink-0 items-center justify-between border-b px-4">
+                        <div>
+                            <p className="text-sm font-semibold">Inbox</p>
+                            <p className="text-muted-foreground text-xs">
+                                {pagination?.total_entries ??
+                                    conversations.length}{" "}
+                                total
+                            </p>
+                        </div>
+                        {unreadCount > 0 && (
+                            <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-[11px] font-semibold">
+                                {unreadCount} new
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto">
                         {inboxLoading && conversations.length === 0 ? (
-                            <div className="space-y-3 p-4">
+                            <div className="space-y-1 p-2">
                                 {Array.from({ length: 6 }).map((_, index) => (
                                     <div
                                         key={index}
-                                        className="bg-muted h-20 animate-pulse rounded-2xl"
+                                        className="bg-muted h-17 animate-pulse rounded-lg"
                                     />
                                 ))}
                             </div>
                         ) : conversations.length > 0 ? (
-                            <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
-                                <div className="space-y-2 pb-1">
-                                    {conversations.map((conversation) => {
-                                        const active =
-                                            conversation.id ===
-                                            selectedConversationId;
-                                        const imageUrl =
-                                            conversation.item_photos?.[0]
-                                                ?.url || null;
-                                        const avatarUrl =
-                                            conversation.opposite_user?.photo
-                                                ?.url || null;
+                            <div className="divide-border/60 divide-y">
+                                {conversations.map((conversation) => {
+                                    const active =
+                                        conversation.id ===
+                                        selectedConversationId;
+                                    const imageUrl =
+                                        conversation.item_photos?.[0]?.url ||
+                                        conversation.opposite_user?.photo
+                                            ?.url ||
+                                        null;
 
-                                        return (
-                                            <button
-                                                key={conversation.id}
-                                                type="button"
-                                                onClick={() =>
-                                                    setSelectedConversationId(
-                                                        conversation.id,
-                                                    )
-                                                }
-                                                className={cn(
-                                                    "w-full rounded-2xl border p-3 text-left transition-all duration-200",
-                                                    active
-                                                        ? "border-border bg-accent text-accent-foreground shadow-none"
-                                                        : "border-border/70 bg-background hover:border-border hover:bg-muted/40",
+                                    return (
+                                        <button
+                                            key={conversation.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setSelectedConversationId(
+                                                    conversation.id,
+                                                );
+                                                setMobileThreadOpen(true);
+                                            }}
+                                            className={cn(
+                                                "hover:bg-muted/60 focus-visible:bg-muted flex w-full gap-3 px-4 py-3 text-left transition-colors outline-none",
+                                                active && "bg-accent/70",
+                                            )}
+                                        >
+                                            <div className="bg-muted relative h-12 w-12 shrink-0 overflow-hidden rounded-lg">
+                                                {imageUrl ? (
+                                                    <img
+                                                        src={imageUrl}
+                                                        alt={
+                                                            conversation.description ||
+                                                            conversation
+                                                                .opposite_user
+                                                                ?.login ||
+                                                            "Conversation"
+                                                        }
+                                                        className="h-full w-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <div className="text-muted-foreground flex h-full w-full items-center justify-center">
+                                                        <Inbox className="h-4 w-4" />
+                                                    </div>
                                                 )}
-                                            >
-                                                <div className="flex gap-3">
-                                                    <div className="bg-muted relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl">
-                                                        {imageUrl ? (
-                                                            <img
-                                                                src={imageUrl}
-                                                                alt={
-                                                                    conversation.description ||
-                                                                    conversation
-                                                                        .opposite_user
-                                                                        ?.login ||
-                                                                    "Conversation"
-                                                                }
-                                                                className="h-full w-full object-cover"
-                                                            />
-                                                        ) : avatarUrl ? (
-                                                            <img
-                                                                src={avatarUrl}
-                                                                alt={
-                                                                    conversation
-                                                                        .opposite_user
-                                                                        ?.login ||
-                                                                    "User"
-                                                                }
-                                                                className="h-full w-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <div className="flex h-full w-full items-center justify-center">
-                                                                <Inbox className="h-5 w-5 opacity-50" />
-                                                            </div>
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <p
+                                                        className={cn(
+                                                            "min-w-0 flex-1 truncate text-sm",
+                                                            conversation.unread
+                                                                ? "font-semibold"
+                                                                : "font-medium",
                                                         )}
-                                                    </div>
-
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="flex items-start justify-between gap-3">
-                                                            <div className="min-w-0">
-                                                                <p className="truncate text-sm font-semibold">
-                                                                    @
-                                                                    {conversation
-                                                                        .opposite_user
-                                                                        ?.login ||
-                                                                        "unknown"}
-                                                                </p>
-                                                                <p
-                                                                    className={cn(
-                                                                        "mt-1 truncate text-xs",
-                                                                        active
-                                                                            ? "text-accent-foreground/70"
-                                                                            : "text-muted-foreground",
-                                                                    )}
-                                                                >
-                                                                    {conversation.description ||
-                                                                        "Open conversation"}
-                                                                </p>
-                                                            </div>
-
-                                                            {conversation.unread && (
-                                                                <span
-                                                                    className={cn(
-                                                                        "rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase",
-                                                                        active
-                                                                            ? "bg-background/80 text-foreground"
-                                                                            : "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-                                                                    )}
-                                                                >
-                                                                    Unread
-                                                                </span>
-                                                            )}
-                                                        </div>
-
-                                                        <div
-                                                            className={cn(
-                                                                "mt-2 flex items-center justify-between text-[11px]",
-                                                                active
-                                                                    ? "text-accent-foreground/65"
-                                                                    : "text-muted-foreground",
-                                                            )}
-                                                        >
-                                                            <span>
-                                                                {conversation.item_count ||
-                                                                    0}{" "}
-                                                                item
-                                                            </span>
-                                                            <span>
-                                                                {formatConversationTime(
-                                                                    conversation.updated_at,
-                                                                )}
-                                                            </span>
-                                                        </div>
-                                                    </div>
+                                                    >
+                                                        @
+                                                        {conversation
+                                                            .opposite_user
+                                                            ?.login ||
+                                                            "unknown"}
+                                                    </p>
+                                                    <span className="text-muted-foreground shrink-0 text-[10px]">
+                                                        {formatConversationTime(
+                                                            conversation.updated_at,
+                                                        )}
+                                                    </span>
                                                 </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
+                                                <div className="mt-1 flex items-center gap-2">
+                                                    <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
+                                                        {conversation.description ||
+                                                            "Open conversation"}
+                                                    </p>
+                                                    {conversation.unread && (
+                                                        <span className="bg-primary h-2 w-2 shrink-0 rounded-full" />
+                                                    )}
+                                                </div>
+                                                <p className="text-muted-foreground/70 mt-1 text-[10px]">
+                                                    {conversation.item_count ||
+                                                        0}{" "}
+                                                    {conversation.item_count ===
+                                                    1
+                                                        ? "item"
+                                                        : "items"}
+                                                </p>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         ) : (
-                            <div className="flex h-120 flex-col items-center justify-center px-6 text-center">
-                                <div className="bg-muted mb-4 rounded-full p-4">
-                                    <Inbox className="text-muted-foreground h-7 w-7" />
-                                </div>
+                            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                                <Inbox className="text-muted-foreground/50 mb-3 h-7 w-7" />
                                 <p className="text-sm font-medium">
                                     No chats found
                                 </p>
-                                <p className="text-muted-foreground mt-1 max-w-xs text-sm">
-                                    Your Vinted inbox is empty or could not
-                                    return any conversations yet.
+                                <p className="text-muted-foreground mt-1 max-w-xs text-xs leading-5">
+                                    Your Vinted conversations will appear here.
                                 </p>
                             </div>
                         )}
+                    </div>
 
-                        {pagination && pagination.total_pages > 1 && (
-                            <div className="border-border/60 bg-card flex items-center justify-between border-t px-4 py-3">
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() =>
-                                        setPage((current) =>
-                                            Math.max(1, current - 1),
-                                        )
-                                    }
-                                    disabled={page <= 1 || inboxLoading}
-                                >
-                                    <ChevronLeft className="h-4 w-4" />
-                                </Button>
-                                <span className="text-muted-foreground text-xs font-medium">
-                                    Page {page} of {pagination.total_pages}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() =>
-                                        setPage((current) =>
-                                            Math.min(
-                                                pagination.total_pages,
-                                                current + 1,
-                                            ),
-                                        )
-                                    }
-                                    disabled={
-                                        page >= pagination.total_pages ||
-                                        inboxLoading
-                                    }
-                                >
-                                    <ChevronRight className="h-4 w-4" />
-                                </Button>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+                    {pagination && pagination.total_pages > 1 && (
+                        <div className="border-border/70 flex h-14 shrink-0 items-center justify-between border-t px-3">
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label="Previous inbox page"
+                                onClick={() =>
+                                    setPage((current) =>
+                                        Math.max(1, current - 1),
+                                    )
+                                }
+                                disabled={page <= 1 || inboxLoading}
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <span className="text-muted-foreground text-xs">
+                                {page} / {pagination.total_pages}
+                            </span>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label="Next inbox page"
+                                onClick={() =>
+                                    setPage((current) =>
+                                        Math.min(
+                                            pagination.total_pages,
+                                            current + 1,
+                                        ),
+                                    )
+                                }
+                                disabled={
+                                    page >= pagination.total_pages ||
+                                    inboxLoading
+                                }
+                            >
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    )}
+                </aside>
 
-                <Card className="border-border/70 bg-card flex h-165 overflow-hidden rounded-3xl py-0 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                    <CardHeader className="border-border/60 bg-card border-b px-6 py-4">
-                        <CardTitle className="text-base">
-                            {selectedConversation
-                                ? `@${selectedConversation.opposite_user?.login || "unknown"}`
-                                : "Conversation"}
-                        </CardTitle>
-                        <CardDescription>
-                            {selectedConversation?.description ||
-                                "Select a conversation from the inbox."}
-                        </CardDescription>
-                    </CardHeader>
+                <section
+                    className={cn(
+                        "min-h-0 flex-col lg:flex",
+                        mobileThreadOpen ? "flex" : "hidden",
+                    )}
+                >
+                    <div className="border-border/70 flex h-16 shrink-0 items-center gap-3 border-b px-3 sm:px-4">
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="lg:hidden"
+                            aria-label="Back to inbox"
+                            onClick={() => setMobileThreadOpen(false)}
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                        <div className="bg-muted h-10 w-10 shrink-0 overflow-hidden rounded-lg">
+                            {selectedImageUrl ? (
+                                <img
+                                    src={selectedImageUrl}
+                                    alt={
+                                        selectedConversation?.opposite_user
+                                            ?.login || "Conversation"
+                                    }
+                                    className="h-full w-full object-cover"
+                                />
+                            ) : (
+                                <div className="text-muted-foreground flex h-full w-full items-center justify-center">
+                                    <MessageCircle className="h-4 w-4" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold">
+                                {selectedConversation
+                                    ? `@${selectedConversation.opposite_user?.login || "unknown"}`
+                                    : "Conversation"}
+                            </p>
+                            <p className="text-muted-foreground truncate text-xs">
+                                {selectedConversation?.description ||
+                                    "Select a conversation from the inbox."}
+                            </p>
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Refresh conversation"
+                            onClick={() =>
+                                selectedConversationId &&
+                                void fetchConversation(selectedConversationId)
+                            }
+                            disabled={!selectedConversationId || threadLoading}
+                        >
+                            <RefreshCw
+                                className={cn(
+                                    "h-4 w-4",
+                                    threadLoading && "animate-spin",
+                                )}
+                            />
+                        </Button>
+                    </div>
 
                     {selectedConversation ? (
                         <>
-                            <CardContent className="flex min-h-0 flex-1 flex-col px-0">
-                                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-2">
-                                    {threadMeta && (
+                            <div className="bg-muted/15 min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5">
+                                {threadMeta && (
+                                    <div className="border-border/70 bg-background mx-auto flex max-w-2xl items-start gap-3 rounded-lg border px-3 py-3">
                                         <div
                                             className={cn(
-                                                "rounded-[22px] border px-4 py-3",
+                                                "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
                                                 threadMeta.kind === "declined"
-                                                    ? "border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-100"
+                                                    ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
                                                     : threadMeta.kind ===
                                                         "accepted"
-                                                      ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100"
+                                                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                                                       : threadMeta.kind ===
                                                           "counter"
-                                                        ? "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100"
-                                                        : "border-sky-200 bg-sky-50 text-sky-950 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-100",
+                                                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                                        : "bg-sky-500/10 text-sky-600 dark:text-sky-400",
                                             )}
                                         >
-                                            <div className="flex items-start gap-3">
-                                                <div
-                                                    className={cn(
-                                                        "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
-                                                        threadMeta.kind ===
-                                                            "declined"
-                                                            ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-                                                            : threadMeta.kind ===
-                                                                "accepted"
-                                                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                                                              : threadMeta.kind ===
-                                                                  "counter"
-                                                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
-                                                                : "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200",
-                                                    )}
-                                                >
-                                                    {threadMeta.kind ===
-                                                    "declined" ? (
-                                                        <XCircle className="h-4 w-4" />
-                                                    ) : threadMeta.kind ===
-                                                      "accepted" ? (
-                                                        <ReceiptText className="h-4 w-4" />
-                                                    ) : (
-                                                        <HandCoins className="h-4 w-4" />
-                                                    )}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex flex-wrap items-center gap-2">
-                                                        <p className="text-sm font-semibold">
-                                                            {threadMeta.title}
-                                                        </p>
-                                                        {threadMeta.amount && (
-                                                            <span className="rounded-full border border-current/15 px-2 py-0.5 text-[11px] font-semibold">
-                                                                {
-                                                                    threadMeta.amount
-                                                                }
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <p className="mt-1 text-sm opacity-80">
-                                                        {threadMeta.description}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {threadLoading && replies.length === 0 ? (
-                                        <div className="space-y-3">
-                                            {Array.from({ length: 5 }).map(
-                                                (_, index) => (
-                                                    <div
-                                                        key={index}
-                                                        className={cn(
-                                                            "bg-muted h-20 animate-pulse rounded-2xl",
-                                                            index % 2 === 0
-                                                                ? "mr-16"
-                                                                : "ml-16",
-                                                        )}
-                                                    />
-                                                ),
+                                            {threadMeta.kind === "declined" ? (
+                                                <XCircle className="h-4 w-4" />
+                                            ) : threadMeta.kind ===
+                                              "accepted" ? (
+                                                <ReceiptText className="h-4 w-4" />
+                                            ) : (
+                                                <HandCoins className="h-4 w-4" />
                                             )}
                                         </div>
-                                    ) : replies.length > 0 ? (
-                                        replies.map((reply) => (
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <p className="text-sm font-medium">
+                                                    {threadMeta.title}
+                                                </p>
+                                                {threadMeta.amount && (
+                                                    <span className="bg-muted rounded-md px-1.5 py-0.5 text-[11px] font-medium">
+                                                        {threadMeta.amount}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-muted-foreground mt-0.5 text-xs leading-5">
+                                                {threadMeta.description}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {threadLoading && replies.length === 0 ? (
+                                    <div className="space-y-3">
+                                        {Array.from({ length: 5 }).map(
+                                            (_, index) => (
+                                                <div
+                                                    key={index}
+                                                    className={cn(
+                                                        "bg-muted h-16 max-w-[75%] animate-pulse rounded-2xl",
+                                                        index % 2 === 0
+                                                            ? "mr-auto"
+                                                            : "ml-auto",
+                                                    )}
+                                                />
+                                            ),
+                                        )}
+                                    </div>
+                                ) : replies.length > 0 ? (
+                                    replies.map((reply) => (
+                                        <div
+                                            key={reply.id}
+                                            className={cn(
+                                                "flex",
+                                                reply.isOwn
+                                                    ? "justify-end"
+                                                    : "justify-start",
+                                            )}
+                                        >
                                             <div
-                                                key={reply.id}
                                                 className={cn(
-                                                    "flex first:pt-0 last:pb-1",
-                                                    reply.isOwn
-                                                        ? "justify-end"
-                                                        : "justify-start",
+                                                    "max-w-[88%] sm:max-w-[75%]",
+                                                    reply.isSystem &&
+                                                        "mx-auto max-w-[90%] text-center",
                                                 )}
                                             >
-                                                <div
-                                                    className={cn(
-                                                        "max-w-[85%] rounded-[22px] px-4 py-3 shadow-none",
-                                                        reply.isSystem
-                                                            ? "bg-muted text-muted-foreground"
-                                                            : reply.isOwn
-                                                              ? "bg-foreground text-background dark:bg-white dark:text-slate-900"
-                                                              : "border-border/70 bg-background border",
-                                                    )}
-                                                >
-                                                    <div className="mb-1 flex items-center gap-2 text-[11px]">
-                                                        <span
-                                                            className={cn(
-                                                                "font-semibold",
-                                                                reply.isOwn &&
-                                                                    !reply.isSystem
-                                                                    ? "text-background/90 dark:text-slate-900"
-                                                                    : "",
-                                                            )}
-                                                        >
-                                                            {reply.login}
+                                                {!reply.isSystem && (
+                                                    <div
+                                                        className={cn(
+                                                            "mb-1 flex items-center gap-2 px-1 text-[10px]",
+                                                            reply.isOwn &&
+                                                                "justify-end",
+                                                        )}
+                                                    >
+                                                        <span className="text-muted-foreground font-medium">
+                                                            {reply.isOwn
+                                                                ? "You"
+                                                                : reply.login}
                                                         </span>
                                                         {reply.createdAt && (
-                                                            <span
-                                                                className={cn(
-                                                                    reply.isOwn &&
-                                                                        !reply.isSystem
-                                                                        ? "text-background/60 dark:text-slate-500"
-                                                                        : "text-muted-foreground",
-                                                                )}
-                                                            >
+                                                            <span className="text-muted-foreground/70">
                                                                 {formatThreadTime(
                                                                     reply.createdAt,
                                                                 )}
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <p className="wrap-break-words text-sm leading-6 whitespace-pre-wrap">
+                                                )}
+                                                <div
+                                                    className={cn(
+                                                        "px-3.5 py-2.5 text-sm leading-6",
+                                                        reply.isSystem
+                                                            ? "bg-muted text-muted-foreground rounded-lg text-xs"
+                                                            : reply.isOwn
+                                                              ? "bg-primary text-primary-foreground rounded-2xl rounded-br-md"
+                                                              : "border-border/70 bg-background rounded-2xl rounded-bl-md border",
+                                                    )}
+                                                >
+                                                    <p className="wrap-break-words whitespace-pre-wrap">
                                                         {reply.body}
                                                     </p>
                                                 </div>
                                             </div>
-                                        ))
-                                    ) : (
-                                        <div className="flex h-full min-h-90 flex-col items-center justify-center text-center">
-                                            <div className="bg-muted mb-4 rounded-full p-4">
-                                                <MessageCircle className="text-muted-foreground h-7 w-7" />
-                                            </div>
-                                            <p className="text-sm font-medium">
-                                                No messages loaded
-                                            </p>
-                                            <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-                                                The conversation opened, but
-                                                Vintrack could not extract any
-                                                replies from the Vinted response
-                                                yet.
-                                            </p>
                                         </div>
-                                    )}
-                                </div>
-                            </CardContent>
-
-                            <div className="border-border/60 bg-card border-t px-5 py-4">
-                                <div className="border-border/70 bg-muted/20 rounded-[24px] border p-3">
-                                    <textarea
-                                        value={message}
-                                        onChange={(event) =>
-                                            setMessage(event.target.value)
-                                        }
-                                        placeholder="Write your reply..."
-                                        rows={3}
-                                        className="placeholder:text-muted-foreground w-full resize-none border-0 bg-transparent text-sm outline-none"
-                                        maxLength={2000}
-                                    />
-                                    <div className="mt-3 flex items-center justify-between gap-3">
-                                        <p className="text-muted-foreground text-xs">
-                                            {message.trim().length}/2000
-                                            characters
+                                    ))
+                                ) : (
+                                    <div className="flex h-full min-h-64 flex-col items-center justify-center text-center">
+                                        <MessageCircle className="text-muted-foreground/40 mb-3 h-7 w-7" />
+                                        <p className="text-sm font-medium">
+                                            No messages loaded
                                         </p>
-                                        <Button
-                                            onClick={() =>
-                                                void handleSendReply()
-                                            }
-                                            disabled={
-                                                sending || !message.trim()
-                                            }
-                                            className="gap-2"
-                                        >
-                                            {sending ? (
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                            ) : (
-                                                <Send className="h-4 w-4" />
-                                            )}
-                                            Send Reply
-                                        </Button>
+                                        <p className="text-muted-foreground mt-1 max-w-sm text-xs leading-5">
+                                            This Vinted conversation did not
+                                            return any readable messages yet.
+                                        </p>
                                     </div>
+                                )}
+                            </div>
+
+                            <div className="border-border/70 bg-card shrink-0 border-t p-3 sm:p-4">
+                                <textarea
+                                    value={message}
+                                    onChange={(event) =>
+                                        setMessage(event.target.value)
+                                    }
+                                    placeholder="Write a reply..."
+                                    rows={2}
+                                    className="border-input bg-background placeholder:text-muted-foreground focus:border-ring focus:ring-ring/20 min-h-18 w-full resize-none rounded-lg border px-3 py-2.5 text-sm transition outline-none focus:ring-2"
+                                    maxLength={2000}
+                                />
+                                <div className="mt-2 flex items-center justify-between gap-3">
+                                    <p className="text-muted-foreground text-[11px]">
+                                        {message.trim().length}/2000
+                                    </p>
+                                    <Button
+                                        size="sm"
+                                        onClick={() => void handleSendReply()}
+                                        disabled={sending || !message.trim()}
+                                        className="gap-1.5"
+                                    >
+                                        {sending ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                            <Send className="h-3.5 w-3.5" />
+                                        )}
+                                        Send
+                                    </Button>
                                 </div>
                             </div>
                         </>
                     ) : (
-                        <CardContent className="flex min-h-0 flex-1 items-center justify-center px-6">
+                        <div className="flex min-h-0 flex-1 items-center justify-center px-6">
                             <div className="max-w-sm text-center">
-                                <div className="bg-muted mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full">
-                                    <MessageCircle className="text-muted-foreground h-8 w-8" />
-                                </div>
-                                <p className="text-base font-semibold">
+                                <MessageCircle className="text-muted-foreground/40 mx-auto mb-3 h-8 w-8" />
+                                <p className="text-sm font-medium">
                                     Choose a conversation
                                 </p>
-                                <p className="text-muted-foreground mt-1 text-sm">
-                                    Pick a chat from the left side to inspect
-                                    the full Vinted thread and reply directly.
+                                <p className="text-muted-foreground mt-1 text-xs leading-5">
+                                    Select a chat from the inbox to view the
+                                    thread and send a reply.
                                 </p>
                             </div>
-                        </CardContent>
+                        </div>
                     )}
-                </Card>
+                </section>
             </div>
         </div>
     );
