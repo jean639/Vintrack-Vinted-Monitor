@@ -372,6 +372,7 @@ function formatRuntimeState(storage) {
 
   return {
     installed: true,
+    version: extensionApi.runtime.getManifest().version || "",
     configured: Boolean(storage.browserLinkToken && storage.vintrackAppOrigin),
     theme,
     syncedDomains: Array.isArray(storage.vintrackSyncedDomains)

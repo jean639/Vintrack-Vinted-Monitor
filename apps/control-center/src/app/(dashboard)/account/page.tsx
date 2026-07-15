@@ -9,6 +9,17 @@ export default async function AccountPage() {
     if (!session?.user) redirect("/login");
 
     const status: AccountStatus = await getAccountStatus();
+    const latestExtensionVersion =
+        process.env.BROWSER_EXTENSION_LATEST_VERSION?.trim() || "0.1.3";
+    const minimumExtensionVersion =
+        process.env.BROWSER_EXTENSION_MIN_VERSION?.trim() ||
+        latestExtensionVersion;
 
-    return <AccountClient initialStatus={status} />;
+    return (
+        <AccountClient
+            initialStatus={status}
+            latestExtensionVersion={latestExtensionVersion}
+            minimumExtensionVersion={minimumExtensionVersion}
+        />
+    );
 }
