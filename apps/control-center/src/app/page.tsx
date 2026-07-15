@@ -17,15 +17,16 @@ import {
     Pencil,
     Radio,
     Send,
+    Server,
     ShieldCheck,
     ShoppingCart,
     SlidersHorizontal,
-    Sparkles,
     Star,
     Timer,
     User,
     Webhook,
     Zap,
+    RefreshCw,
     type LucideIcon,
 } from "lucide-react";
 import type { Metadata } from "next";
@@ -36,7 +37,7 @@ import type { ReactNode } from "react";
 export const metadata: Metadata = {
     title: "Vintrack | Vinted monitoring control center",
     description:
-        "A focused dashboard for Vinted monitors, live feeds, Discord and Telegram alerts, proxy groups, and linked-account actions.",
+        "Start Vinted monitors with health-checked free proxy pools in available regions, live feeds, Discord and Telegram alerts, and linked-account actions.",
 };
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION;
@@ -89,6 +90,11 @@ const features: Array<{
         icon: Radio,
         title: "Fast monitors",
         copy: "Per-monitor delay, region, proxy group, filters, and notification channels are controlled from one place.",
+    },
+    {
+        icon: Globe2,
+        title: "Free starter pools",
+        copy: "Try monitoring in ready regions before paying for proxies. Vintrack continuously validates and rotates the shared pool.",
     },
     {
         icon: PackageSearch,
@@ -782,6 +788,117 @@ function AccountActionIllustration() {
     );
 }
 
+function FreeProxyPoolIllustration() {
+    const regions = [
+        { code: "DE", label: "Germany", status: "Ready", tone: "ready" },
+        { code: "FR", label: "France", status: "Ready", tone: "ready" },
+        { code: "NL", label: "Netherlands", status: "Ready", tone: "ready" },
+        {
+            code: "UK",
+            label: "United Kingdom",
+            status: "Checking",
+            tone: "checking",
+        },
+        { code: "PL", label: "Poland", status: "Checking", tone: "checking" },
+    ];
+    const validationStages: {
+        icon: LucideIcon;
+        title: string;
+        detail: string;
+    }[] = [
+        { icon: Server, title: "Import", detail: "Candidates" },
+        { icon: RefreshCw, title: "Validate", detail: "Against Vinted" },
+        { icon: ShieldCheck, title: "Rotate", detail: "Healthy only" },
+    ];
+
+    return (
+        <IllustrationFrame minHeightClass="min-h-[430px]">
+            <div className="flex h-full flex-col gap-5">
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <p className="text-muted-foreground text-[11px] font-semibold uppercase">
+                            Shared infrastructure
+                        </p>
+                        <h3 className="mt-2 text-lg font-semibold">
+                            Free Proxy Pool
+                        </h3>
+                    </div>
+                    <span className="border-border bg-background flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[10px] font-semibold uppercase">
+                        <span className="size-1.5 rounded-full bg-emerald-500" />
+                        Health managed
+                    </span>
+                </div>
+
+                <div className="border-border bg-background/75 overflow-hidden rounded-lg border">
+                    <div className="border-border bg-muted/30 grid grid-cols-[1fr_auto] border-b px-4 py-3 text-[10px] font-semibold uppercase">
+                        <span className="text-muted-foreground">
+                            Region pool
+                        </span>
+                        <span className="text-muted-foreground">Status</span>
+                    </div>
+                    <div className="divide-border/60 divide-y">
+                        {regions.map((region) => (
+                            <div
+                                key={region.code}
+                                className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-2.5"
+                            >
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <span className="border-border bg-muted/40 flex h-7 w-9 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold">
+                                        {region.code}
+                                    </span>
+                                    <span className="truncate text-xs font-medium">
+                                        {region.label}
+                                    </span>
+                                </div>
+                                <span
+                                    className={`flex items-center gap-1.5 text-[10px] font-semibold ${
+                                        region.tone === "ready"
+                                            ? "text-emerald-600 dark:text-emerald-400"
+                                            : "text-amber-600 dark:text-amber-400"
+                                    }`}
+                                >
+                                    <span
+                                        className={`size-1.5 rounded-full ${
+                                            region.tone === "ready"
+                                                ? "bg-emerald-500"
+                                                : "bg-amber-500"
+                                        }`}
+                                    />
+                                    {region.status}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="mt-auto grid grid-cols-3 gap-2">
+                    {validationStages.map((stage) => {
+                        const StepIcon = stage.icon;
+                        return (
+                            <div
+                                key={stage.title}
+                                className="border-border bg-background/70 min-w-0 rounded-md border p-3"
+                            >
+                                <StepIcon className="text-muted-foreground size-4" />
+                                <p className="mt-2 truncate text-xs font-semibold">
+                                    {stage.title}
+                                </p>
+                                <p className="text-muted-foreground mt-0.5 truncate text-[10px]">
+                                    {stage.detail}
+                                </p>
+                            </div>
+                        );
+                    })}
+                </div>
+                <p className="text-muted-foreground text-[10px] leading-4">
+                    Example health view. Live availability changes as proxies
+                    pass or fail regional checks.
+                </p>
+            </div>
+        </IllustrationFrame>
+    );
+}
+
 function ProductSystemCard({
     icon: Icon,
     kicker,
@@ -843,6 +960,12 @@ export default async function Home() {
                     <nav className="text-muted-foreground absolute left-1/2 hidden -translate-x-1/2 items-center gap-7 text-sm md:flex">
                         <a
                             className="hover:text-foreground transition-colors"
+                            href="#free-proxies"
+                        >
+                            Free proxies
+                        </a>
+                        <a
+                            className="hover:text-foreground transition-colors"
                             href="#product"
                         >
                             Product
@@ -901,17 +1024,18 @@ export default async function Home() {
 
                 <div className="mx-auto flex min-h-170 max-w-7xl items-start px-4 py-10 sm:px-6 sm:py-24 lg:px-8">
                     <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 w-full max-w-md motion-safe:duration-700">
-                        <div className="border-border bg-background/75 text-muted-foreground mb-5 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm backdrop-blur">
-                            <Sparkles className="text-foreground size-3.5" />
-                            Self-hostable Vinted monitoring
+                        <div className="border-border bg-background/80 text-foreground mb-5 inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-semibold shadow-sm backdrop-blur">
+                            <Globe2 className="size-3.5 text-emerald-600" />
+                            Free proxy pools in available regions
                         </div>
                         <h1 className="text-foreground text-5xl leading-none font-semibold sm:text-7xl">
                             Vintrack
                         </h1>
                         <p className="text-muted-foreground mt-6 max-w-md text-base leading-8 sm:text-lg">
-                            A cleaner control center for Vinted monitors, live
-                            product feeds, proxy health, Discord alerts,
-                            Telegram alerts, and linked-account actions.
+                            Monitor Vinted from one focused control center.
+                            Start with health-checked shared proxies in ready
+                            regions, then receive live dashboard, Discord, and
+                            Telegram alerts.
                         </p>
                         <div className="mt-7 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
                             <Button asChild size="lg">
@@ -931,6 +1055,16 @@ export default async function Home() {
                                 </a>
                             </Button>
                         </div>
+                        <div className="text-muted-foreground mt-6 flex flex-wrap gap-x-5 gap-y-2 text-xs">
+                            <span className="flex items-center gap-1.5">
+                                <CheckCircle2 className="size-3.5 text-emerald-600" />
+                                No proxy purchase for ready regions
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                                <ShieldCheck className="size-3.5 text-sky-600" />
+                                Bring your own proxies anytime
+                            </span>
+                        </div>
                         <div className="mt-8 md:hidden">
                             <MobileHeroMockup />
                         </div>
@@ -938,8 +1072,59 @@ export default async function Home() {
                 </div>
             </section>
 
+            <section
+                id="free-proxies"
+                className="border-border bg-muted/18 scroll-mt-16 border-b px-4 py-20 sm:px-6 lg:px-8"
+            >
+                <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+                    <div className="landing-reveal">
+                        <SectionHeader
+                            kicker="Free starter access"
+                            title="Run your first monitor before buying proxies."
+                            copy="Vintrack imports public proxy candidates, validates them directly against each Vinted region, and rotates only healthy proxies into the shared starter pool."
+                        />
+                        <div className="mt-7 space-y-3">
+                            {[
+                                "Ready regions appear directly in the monitor proxy selector.",
+                                "Failing proxies move to cooldown or leave rotation automatically.",
+                                "Free pools handle catalog monitoring only; account actions stay isolated.",
+                            ].map((benefit) => (
+                                <div
+                                    key={benefit}
+                                    className="flex items-start gap-3 text-sm"
+                                >
+                                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+                                    <span className="text-muted-foreground leading-6">
+                                        {benefit}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-7 flex flex-wrap gap-2">
+                            <Button asChild>
+                                <Link href="/login">
+                                    Start with the Free Pool
+                                    <ArrowRight />
+                                </Link>
+                            </Button>
+                            <Button asChild variant="outline">
+                                <Link href="#workflow">See how it works</Link>
+                            </Button>
+                        </div>
+                        <p className="text-muted-foreground mt-4 text-xs leading-5">
+                            Shared free proxies are best-effort infrastructure.
+                            Availability and speed vary by region and current
+                            pool health.
+                        </p>
+                    </div>
+                    <div className="landing-reveal">
+                        <FreeProxyPoolIllustration />
+                    </div>
+                </div>
+            </section>
+
             <section className="border-border border-b px-4 py-16 sm:px-6 lg:px-8">
-                <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+                <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
                     <div className="landing-reveal">
                         <SectionHeader
                             kicker="Built for the workflow"
@@ -947,7 +1132,7 @@ export default async function Home() {
                             copy="Vintrack keeps setup, monitoring, alerting, and Vinted actions in a single interface instead of spreading them across scripts and chat messages."
                         />
                     </div>
-                    <div className="landing-reveal grid gap-4 sm:grid-cols-3">
+                    <div className="landing-reveal grid gap-4 sm:grid-cols-2">
                         {features.map((feature) => (
                             <article
                                 key={feature.title}

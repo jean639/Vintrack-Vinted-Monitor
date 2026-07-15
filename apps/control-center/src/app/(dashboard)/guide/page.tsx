@@ -1,24 +1,23 @@
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-    LayoutDashboard,
-    Globe,
-    PlusCircle,
-    Search,
     Bell,
-    Zap,
-    Heart,
-    ExternalLink,
-    Settings,
-    Link as LinkIcon,
+    Check,
     CheckCircle2,
-    Info,
-    MessageSquare,
-    Tag,
-    Sparkles,
-    Smartphone,
-    User,
+    Chrome,
+    CircleGauge,
     Download,
+    ExternalLink,
+    Globe2,
+    Heart,
+    Link as LinkIcon,
+    ListFilter,
+    MessageCircle,
+    MonitorDot,
+    Send,
+    ShieldCheck,
+    ShoppingCart,
+    Tag,
+    UserRound,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -27,432 +26,479 @@ const CHROME_EXTENSION_DOWNLOAD_URL =
 const FIREFOX_EXTENSION_DOWNLOAD_URL =
     "https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor/releases/latest/download/vintrack-browser-sync-extension-firefox.xpi";
 
+const STEPS = [
+    {
+        number: "01",
+        title: "Choose a proxy source",
+        detail: "Use a ready Free Pool region or add your own proxy group.",
+        href: "#proxies",
+        icon: Globe2,
+    },
+    {
+        number: "02",
+        title: "Create the monitor",
+        detail: "Set the query, region, filters, alerts, and proxy source.",
+        href: "#monitors",
+        icon: MonitorDot,
+    },
+    {
+        number: "03",
+        title: "Connect alerts",
+        detail: "Add Discord, Telegram, or both notification channels.",
+        href: "#alerts",
+        icon: Bell,
+    },
+    {
+        number: "04",
+        title: "Link your account",
+        detail: "Enable likes, messages, offers, and browser checkout.",
+        href: "#account",
+        icon: UserRound,
+    },
+];
+
+const MONITOR_SECTIONS = [
+    {
+        title: "Basics",
+        detail: "Name, search query, Vinted region, and polling delay.",
+        icon: MonitorDot,
+    },
+    {
+        title: "Filters",
+        detail: "Price, brand, size, condition, color, and seller countries.",
+        icon: ListFilter,
+    },
+    {
+        title: "Notifications",
+        detail: "Discord webhook and Telegram delivery settings.",
+        icon: Bell,
+    },
+    {
+        title: "Proxy Source",
+        detail: "Free Pool, shared server proxies, or a personal group.",
+        icon: ShieldCheck,
+    },
+];
+
+const ITEM_ACTIONS = [
+    { label: "Like", icon: Heart, className: "text-rose-500" },
+    { label: "Checkout", icon: ShoppingCart, className: "text-amber-500" },
+    { label: "Offer", icon: Tag, className: "text-emerald-500" },
+    { label: "Message", icon: MessageCircle, className: "text-sky-500" },
+];
+
+function StepList({ steps }: { steps: string[] }) {
+    return (
+        <ol className="mt-4 space-y-3">
+            {steps.map((step, index) => (
+                <li
+                    key={step}
+                    className="grid grid-cols-[32px_1fr] items-start gap-4 text-sm"
+                >
+                    <span className="border-border bg-muted/40 flex h-8 w-8 items-center justify-center rounded-md border text-xs font-semibold tabular-nums">
+                        {index + 1}
+                    </span>
+                    <span className="text-muted-foreground pt-1 leading-6">
+                        {step}
+                    </span>
+                </li>
+            ))}
+        </ol>
+    );
+}
+
+function SectionHeading({
+    number,
+    title,
+    description,
+}: {
+    number: string;
+    title: string;
+    description: string;
+}) {
+    return (
+        <div className="lg:sticky lg:top-8 lg:self-start">
+            <p className="text-muted-foreground text-[11px] font-semibold uppercase">
+                Step {number}
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold">{title}</h2>
+            <p className="text-muted-foreground mt-3 max-w-sm text-sm leading-7">
+                {description}
+            </p>
+        </div>
+    );
+}
+
 export default function GuidePage() {
     return (
-        <div className="mx-auto max-w-4xl space-y-6">
-            <div className="border-border flex flex-col gap-4 border-b pb-10">
-                <div className="flex items-center gap-2 text-sm font-bold tracking-wide text-blue-600 uppercase dark:text-blue-400">
-                    <Sparkles className="h-4 w-4" />
-                    Documentation
-                </div>
-                <h1 className="text-foreground text-4xl font-extrabold tracking-tight">
-                    Getting Started with Vintrack
-                </h1>
-                <p className="text-muted-foreground max-w-3xl text-[17px] leading-relaxed">
-                    Set up proxies, monitors, alerts, and the browser extension
-                    for linked Vinted actions.
-                </p>
-            </div>
-
-            <div className="space-y-16">
-                <section className="space-y-6">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-lg font-bold text-emerald-700 shadow-sm dark:bg-emerald-500/20 dark:text-emerald-400">
-                            1
-                        </div>
-                        <h2 className="text-foreground text-2xl font-bold">
-                            Configuring Proxies (IPv4 & IPv6)
-                        </h2>
+        <div className="mx-auto max-w-6xl space-y-12">
+            <header className="border-border/60 flex flex-col gap-6 border-b pb-8 md:flex-row md:items-end md:justify-between">
+                <div>
+                    <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium uppercase">
+                        <CircleGauge className="h-4 w-4" />
+                        Vintrack workflow
                     </div>
-
-                    <Card className="overflow-hidden shadow-sm">
-                        <CardContent className="space-y-8 p-8">
-                            <div className="grid gap-12 md:grid-cols-2">
-                                <div className="space-y-5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="shrink-0 rounded-xl bg-emerald-50 p-2.5 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
-                                            <Globe className="h-6 w-6" />
-                                        </div>
-                                        <h3 className="text-foreground text-lg font-bold">
-                                            The Basics
-                                        </h3>
-                                    </div>
-                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
-                                        Vinted has strict limits on requests
-                                        from a single IP. Proxies rotate traffic
-                                        through multiple identities to keep
-                                        monitoring stable.
-                                    </p>
-                                    <div className="space-y-3 pt-2">
-                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
-                                            <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-500" />
-                                            <span>
-                                                <strong>IPv4 Support:</strong>{" "}
-                                                Stable and universal.
-                                            </span>
-                                        </div>
-                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
-                                            <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-500" />
-                                            <span>
-                                                <strong>IPv6 Support:</strong>{" "}
-                                                Fast and cost-efficient.
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
-                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
-                                        <Settings className="text-muted-foreground h-5 w-5" />
-                                        How to Setup
-                                    </h3>
-                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
-                                        <li>
-                                            Go to{" "}
-                                            <Link
-                                                href="/proxies"
-                                                className="font-bold text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
-                                            >
-                                                Proxy Groups
-                                            </Link>
-                                            .
-                                        </li>
-                                        <li>
-                                            Click <strong>New Group</strong> and
-                                            give it a name.
-                                        </li>
-                                        <li>
-                                            Paste your proxies in the format:
-                                            <br />
-                                            <code className="bg-background border-border mt-2 inline-block rounded border px-2 py-1 font-mono text-xs text-emerald-700 dark:text-emerald-400">
-                                                ip:port:user:pass
-                                            </code>
-                                        </li>
-                                        <li>
-                                            Vintrack automatically detects both
-                                            formats.
-                                        </li>
-                                    </ol>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </section>
-
-                <section className="space-y-6">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-lg font-bold text-blue-700 shadow-sm dark:bg-blue-500/20 dark:text-blue-400">
-                            2
-                        </div>
-                        <h2 className="text-foreground text-2xl font-bold">
-                            Setting Up Monitors
-                        </h2>
-                    </div>
-
-                    <Card className="overflow-hidden shadow-sm">
-                        <CardContent className="space-y-8 p-8">
-                            <div className="grid gap-12 md:grid-cols-2">
-                                <div className="space-y-5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="shrink-0 rounded-xl bg-blue-50 p-2.5 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-                                            <LayoutDashboard className="h-6 w-6" />
-                                        </div>
-                                        <h3 className="text-foreground text-lg font-bold">
-                                            Create Search Tasks
-                                        </h3>
-                                    </div>
-                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
-                                        A monitor is your personal search agent.
-                                        Define exactly what you want to find,
-                                        and Vintrack will notify you the moment
-                                        it hits Vinted.
-                                    </p>
-                                    <div className="space-y-3 pt-2">
-                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
-                                            <Search className="mt-1 h-4 w-4 shrink-0 text-blue-500" />
-                                            <span>
-                                                <strong>Queries:</strong> Use
-                                                specific keywords for better
-                                                results.
-                                            </span>
-                                        </div>
-                                        <div className="text-muted-foreground flex items-start gap-3 text-[14px]">
-                                            <Zap className="mt-1 h-4 w-4 shrink-0 text-amber-500" />
-                                            <span>
-                                                <strong>Filters:</strong> Set
-                                                price, brand, and size limits.
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
-                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
-                                        <PlusCircle className="text-muted-foreground h-5 w-5" />
-                                        How to Setup
-                                    </h3>
-                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
-                                        <li>
-                                            Go to{" "}
-                                            <Link
-                                                href="/monitors/new"
-                                                className="font-bold text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
-                                            >
-                                                New Monitor
-                                            </Link>
-                                            .
-                                        </li>
-                                        <li>
-                                            Enter your <strong>Keywords</strong>
-                                            , for example Stone Island.
-                                        </li>
-                                        <li>
-                                            Select the <strong>Region</strong>{" "}
-                                            (e.g., FR, UK, DE).
-                                        </li>
-                                        <li>
-                                            Assign your{" "}
-                                            <strong>Proxy Group</strong> and
-                                            save.
-                                        </li>
-                                    </ol>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </section>
-
-                <section className="space-y-6">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-100 text-lg font-bold text-purple-700 shadow-sm dark:bg-purple-500/20 dark:text-purple-400">
-                            3
-                        </div>
-                        <h2 className="text-foreground text-2xl font-bold">
-                            Discord and Telegram Notifications
-                        </h2>
-                    </div>
-
-                    <Card className="overflow-hidden shadow-sm">
-                        <CardContent className="space-y-8 p-8">
-                            <div className="grid gap-12 md:grid-cols-2">
-                                <div className="space-y-5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="shrink-0 rounded-xl bg-purple-50 p-2.5 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400">
-                                            <Bell className="h-6 w-6" />
-                                        </div>
-                                        <h3 className="text-foreground text-lg font-bold">
-                                            Stay Alert
-                                        </h3>
-                                    </div>
-                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
-                                        Use Discord webhooks or connect the
-                                        Vintrack Telegram bot to receive instant
-                                        item cards.
-                                    </p>
-                                    <div className="flex items-center gap-3 rounded-xl border border-purple-100 bg-purple-50 p-4 dark:border-purple-500/20 dark:bg-purple-500/10">
-                                        <Smartphone className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                                        <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
-                                            Perfect for push notifications on
-                                            your phone!
-                                        </span>
-                                    </div>
-                                </div>
-                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
-                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
-                                        <LinkIcon className="text-muted-foreground h-5 w-5" />
-                                        How to Setup
-                                    </h3>
-                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
-                                        <li>
-                                            In Discord:{" "}
-                                            <strong>Channel Settings</strong>{" "}
-                                            &gt; <strong>Integrations</strong>.
-                                        </li>
-                                        <li>
-                                            Click{" "}
-                                            <strong>Create Webhook</strong> and
-                                            copy the URL.
-                                        </li>
-                                        <li>
-                                            Paste the URL into your monitor
-                                            notification settings.
-                                        </li>
-                                        <li>
-                                            For Telegram: open the monitor
-                                            notification dialog and click{" "}
-                                            <strong>Connect Telegram</strong>.
-                                        </li>
-                                        <li>
-                                            Send the generated code to the bot,
-                                            then enable Telegram for the
-                                            monitor.
-                                        </li>
-                                    </ol>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </section>
-
-                <section className="space-y-6">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-lg font-bold text-amber-700 shadow-sm dark:bg-amber-500/20 dark:text-amber-400">
-                            4
-                        </div>
-                        <h2 className="text-foreground text-2xl font-bold">
-                            Vinted Account Integration
-                        </h2>
-                    </div>
-
-                    <Card className="overflow-hidden shadow-sm">
-                        <CardContent className="space-y-8 p-8">
-                            <div className="grid gap-12 md:grid-cols-2">
-                                <div className="space-y-5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="shrink-0 rounded-xl bg-amber-50 p-2.5 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
-                                            <User className="h-6 w-6" />
-                                        </div>
-                                        <h3 className="text-foreground text-lg font-bold">
-                                            Account Actions
-                                        </h3>
-                                    </div>
-                                    <p className="text-muted-foreground text-[15px] leading-relaxed">
-                                        Link your Vinted account with the
-                                        Vintrack extension. It keeps the browser
-                                        session fresh without making you copy
-                                        tokens manually.
-                                    </p>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <div className="bg-card border-border space-y-2 rounded-xl border p-3 text-center shadow-sm">
-                                            <Heart className="mx-auto h-4 w-4 fill-red-500 text-red-500" />
-                                            <span className="text-foreground block text-[11px] font-bold">
-                                                Like
-                                            </span>
-                                        </div>
-                                        <div className="bg-card border-border space-y-2 rounded-xl border p-3 text-center shadow-sm">
-                                            <MessageSquare className="mx-auto h-4 w-4 text-blue-500" />
-                                            <span className="text-foreground block text-[11px] font-bold">
-                                                Message
-                                            </span>
-                                        </div>
-                                        <div className="bg-card border-border space-y-2 rounded-xl border p-3 text-center shadow-sm">
-                                            <Tag className="mx-auto h-4 w-4 text-emerald-500" />
-                                            <span className="text-foreground block text-[11px] font-bold">
-                                                Offer
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <p className="text-muted-foreground text-[13px] leading-relaxed">
-                                        The extension syncs only the Vinted
-                                        session tokens, domain, browser user
-                                        agent, and Vintrack theme. It does not
-                                        send a full cookie header.
-                                    </p>
-                                </div>
-                                <div className="bg-muted/50 border-border/50 space-y-5 rounded-2xl border p-6">
-                                    <h3 className="text-md text-foreground flex items-center gap-2 font-bold">
-                                        <Settings className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                                        How to Setup
-                                    </h3>
-                                    <ol className="text-muted-foreground list-decimal space-y-4 pl-5 text-[15px]">
-                                        <li>
-                                            Download the Vintrack extension for
-                                            Chrome or Firefox.
-                                        </li>
-                                        <li>
-                                            Chrome: unzip the package, open{" "}
-                                            <strong>chrome://extensions</strong>
-                                            , enable{" "}
-                                            <strong>Developer mode</strong>,
-                                            then click{" "}
-                                            <strong>Load unpacked</strong>.
-                                        </li>
-                                        <li>
-                                            Firefox: install the signed XPI, or
-                                            use <strong>about:debugging</strong>{" "}
-                                            for a temporary development install.
-                                        </li>
-                                        <li>
-                                            Sign in to Vinted in the same
-                                            browser.
-                                        </li>
-                                        <li>
-                                            Go to{" "}
-                                            <Link
-                                                href="/account"
-                                                className="font-bold text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
-                                            >
-                                                Account
-                                            </Link>{" "}
-                                            and click{" "}
-                                            <strong>
-                                                Link With Installed Extension
-                                            </strong>
-                                            .
-                                        </li>
-                                    </ol>
-                                    <div className="grid gap-2 pt-1 sm:grid-cols-2">
-                                        <Button
-                                            asChild
-                                            variant="outline"
-                                            size="sm"
-                                            className="justify-start gap-2 border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
-                                        >
-                                            <a
-                                                href={
-                                                    CHROME_EXTENSION_DOWNLOAD_URL
-                                                }
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                            >
-                                                <Download className="h-3.5 w-3.5" />
-                                                Chrome Extension
-                                            </a>
-                                        </Button>
-                                        <Button
-                                            asChild
-                                            variant="outline"
-                                            size="sm"
-                                            className="justify-start gap-2 border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
-                                        >
-                                            <a
-                                                href={
-                                                    FIREFOX_EXTENSION_DOWNLOAD_URL
-                                                }
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                            >
-                                                <Download className="h-3.5 w-3.5" />
-                                                Firefox Extension
-                                            </a>
-                                        </Button>
-                                        <Button
-                                            asChild
-                                            size="sm"
-                                            className="justify-start gap-2 sm:col-span-2"
-                                        >
-                                            <Link href="/account">
-                                                <LinkIcon className="h-3.5 w-3.5" />
-                                                Connect on Account page
-                                            </Link>
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </section>
-            </div>
-
-            <div className="flex flex-col items-center gap-8 rounded-[2rem] bg-slate-900 p-10 shadow-xl md:flex-row">
-                <div className="bg-background/10 rounded-2xl border border-white/10 p-5 backdrop-blur-sm">
-                    <Info className="h-9 w-9 text-blue-400" />
-                </div>
-                <div className="space-y-2">
-                    <h3 className="text-xl font-bold text-white">
-                        Still have questions?
-                    </h3>
-                    <p className="text-[15px] text-slate-400">
-                        Check out our community or visit the GitHub repository
-                        for technical support, feature requests, and updates.
+                    <h1 className="mt-4 text-3xl font-bold">Setup Guide</h1>
+                    <p className="text-muted-foreground mt-3 max-w-2xl text-sm leading-7">
+                        Go from a new account to a running monitor with clean
+                        alerts and optional Vinted account actions.
                     </p>
                 </div>
-                <a
-                    href="https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor"
-                    target="_blank"
-                    className="bg-background text-foreground hover:bg-muted ml-auto flex items-center gap-2.5 rounded-2xl px-8 py-3.5 font-bold shadow-lg transition-all active:scale-95"
+                <Button asChild className="self-start md:self-auto">
+                    <Link href="/monitors/new">
+                        <MonitorDot className="h-4 w-4" />
+                        Create monitor
+                    </Link>
+                </Button>
+            </header>
+
+            <nav
+                aria-label="Guide sections"
+                className="border-border/60 bg-border/60 grid gap-px overflow-hidden rounded-lg border sm:grid-cols-2 xl:grid-cols-4"
+            >
+                {STEPS.map((step) => {
+                    const Icon = step.icon;
+                    return (
+                        <a
+                            key={step.number}
+                            href={step.href}
+                            className="bg-card hover:bg-muted/35 group min-w-0 p-5 transition-colors"
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <span className="text-muted-foreground text-[11px] font-semibold tabular-nums">
+                                    {step.number}
+                                </span>
+                                <Icon className="text-muted-foreground group-hover:text-foreground h-4 w-4 transition-colors" />
+                            </div>
+                            <p className="mt-4 text-sm font-semibold">
+                                {step.title}
+                            </p>
+                            <p className="text-muted-foreground mt-2 text-sm leading-6">
+                                {step.detail}
+                            </p>
+                        </a>
+                    );
+                })}
+            </nav>
+
+            <main className="divide-border/60 divide-y">
+                <section
+                    id="proxies"
+                    className="scroll-mt-8 py-16 first:pt-4 lg:grid lg:grid-cols-[240px_1fr] lg:gap-16"
                 >
-                    View GitHub <ExternalLink className="h-5 w-5" />
-                </a>
-            </div>
+                    <SectionHeading
+                        number="01"
+                        title="Proxy source"
+                        description="Every monitor needs a stable route to its selected Vinted region. Start free, then move to a personal group when you need dedicated capacity."
+                    />
+                    <div className="mt-8 space-y-8 lg:mt-0">
+                        <div className="grid gap-5 md:grid-cols-2">
+                            <div className="border-border/60 rounded-lg border p-5 sm:p-6">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <Globe2 className="h-4 w-4 text-emerald-600" />
+                                        <h3 className="text-sm font-semibold">
+                                            Free Proxy Pool
+                                        </h3>
+                                    </div>
+                                    <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 uppercase dark:text-emerald-300">
+                                        Start here
+                                    </span>
+                                </div>
+                                <p className="text-muted-foreground mt-4 text-sm leading-6">
+                                    Available without buying proxies. In the
+                                    monitor form, choose a region marked Ready.
+                                    Regions marked Checking are visible but stay
+                                    out of rotation until enough proxies pass
+                                    validation.
+                                </p>
+                            </div>
+                            <div className="border-border/60 rounded-lg border p-5 sm:p-6">
+                                <div className="flex items-center gap-2">
+                                    <ShieldCheck className="h-4 w-4 text-sky-600" />
+                                    <h3 className="text-sm font-semibold">
+                                        Personal Proxy Group
+                                    </h3>
+                                </div>
+                                <p className="text-muted-foreground mt-4 text-sm leading-6">
+                                    Dedicated proxies give you predictable
+                                    capacity. Add one proxy per line using URL,
+                                    host:port, or authenticated formats. This is
+                                    the better option for sustained use or many
+                                    monitors.
+                                </p>
+                                <code className="bg-muted/50 mt-4 block rounded-md px-3 py-2.5 text-xs">
+                                    host:port:user:password
+                                </code>
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button asChild variant="outline" size="sm">
+                                <Link href="/proxies">
+                                    <Globe2 className="h-4 w-4" />
+                                    Open proxy overview
+                                </Link>
+                            </Button>
+                            <span className="text-muted-foreground flex items-center gap-2 px-2 text-sm">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                Live region health is visible here and in the
+                                monitor form.
+                            </span>
+                        </div>
+                        <p className="text-muted-foreground max-w-3xl text-sm leading-7">
+                            The Free Pool is shared, best-effort infrastructure
+                            for catalog monitoring. Availability can change as
+                            public proxies pass or fail validation. Linked
+                            account actions never use this pool.
+                        </p>
+                    </div>
+                </section>
+
+                <section
+                    id="monitors"
+                    className="scroll-mt-8 py-16 lg:grid lg:grid-cols-[240px_1fr] lg:gap-16"
+                >
+                    <SectionHeading
+                        number="02"
+                        title="Build the monitor"
+                        description="Start with a precise query and region. Open the collapsible sections only when you need more control."
+                    />
+                    <div className="mt-8 space-y-8 lg:mt-0">
+                        <div className="border-border/60 overflow-hidden rounded-lg border">
+                            {MONITOR_SECTIONS.map((section, index) => {
+                                const Icon = section.icon;
+                                return (
+                                    <div
+                                        key={section.title}
+                                        className="border-border/60 flex items-start gap-4 border-b px-5 py-4 last:border-b-0"
+                                    >
+                                        <div className="bg-muted/50 flex h-8 w-8 shrink-0 items-center justify-center rounded-md">
+                                            <Icon className="text-muted-foreground h-4 w-4" />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <p className="text-sm font-medium">
+                                                    {section.title}
+                                                </p>
+                                                <span className="text-muted-foreground text-[10px] tabular-nums">
+                                                    0{index + 1}
+                                                </span>
+                                            </div>
+                                            <p className="text-muted-foreground mt-1 text-sm leading-6">
+                                                {section.detail}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="grid gap-8 md:grid-cols-2">
+                            <div>
+                                <h3 className="text-sm font-semibold">
+                                    Recommended first monitor
+                                </h3>
+                                <StepList
+                                    steps={[
+                                        "Use a specific query such as Nike Dunk Low instead of Shoes.",
+                                        "Choose the Vinted region where you want to receive listings.",
+                                        "Add only filters that materially improve the results.",
+                                        "Select a Ready Free Pool region or your own proxy group.",
+                                    ]}
+                                />
+                            </div>
+                            <div className="border-border/60 bg-muted/20 rounded-lg border p-5 sm:p-6">
+                                <p className="text-sm font-semibold">
+                                    Cleaner searches win
+                                </p>
+                                <p className="text-muted-foreground mt-3 text-sm leading-6">
+                                    Use anti-keywords for recurring unwanted
+                                    results. Keep the query readable and let
+                                    category, brand, size, and condition filters
+                                    do the precise work.
+                                </p>
+                                <Button asChild size="sm" className="mt-5">
+                                    <Link href="/monitors/new">
+                                        Create monitor
+                                    </Link>
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section
+                    id="alerts"
+                    className="scroll-mt-8 py-16 lg:grid lg:grid-cols-[240px_1fr] lg:gap-16"
+                >
+                    <SectionHeading
+                        number="03"
+                        title="Notifications"
+                        description="Discord and Telegram receive the same match data. Use both when you want a channel archive and fast mobile delivery."
+                    />
+                    <div className="mt-8 space-y-8 lg:mt-0">
+                        <div className="grid gap-10 md:grid-cols-2">
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <Send className="h-4 w-4 text-sky-600" />
+                                    <h3 className="text-sm font-semibold">
+                                        Discord webhook
+                                    </h3>
+                                </div>
+                                <StepList
+                                    steps={[
+                                        "Open Discord Channel Settings, then Integrations and Webhooks.",
+                                        "Create a webhook and copy its URL.",
+                                        "Paste it into the monitor's Notifications section.",
+                                        "Use Test before saving to verify delivery.",
+                                    ]}
+                                />
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <MessageCircle className="h-4 w-4 text-emerald-600" />
+                                    <h3 className="text-sm font-semibold">
+                                        Telegram
+                                    </h3>
+                                </div>
+                                <StepList
+                                    steps={[
+                                        "Open the monitor's Notifications section.",
+                                        "Generate a Telegram connection code.",
+                                        "Send the code to the Vintrack bot.",
+                                        "Enable Telegram and save the monitor.",
+                                    ]}
+                                />
+                            </div>
+                        </div>
+                        <div className="border-border/60 rounded-lg border p-5 sm:p-6">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold">
+                                        Match cards keep actions close
+                                    </p>
+                                    <p className="text-muted-foreground mt-2 text-sm leading-6">
+                                        Open the listing, inspect the seller, or
+                                        act through a linked account.
+                                    </p>
+                                </div>
+                                <div className="flex gap-1">
+                                    {ITEM_ACTIONS.map((action) => {
+                                        const Icon = action.icon;
+                                        return (
+                                            <div
+                                                key={action.label}
+                                                className="border-border/60 flex h-9 items-center gap-2 rounded-md border px-2.5"
+                                                title={action.label}
+                                            >
+                                                <Icon
+                                                    className={`h-4 w-4 ${action.className}`}
+                                                />
+                                                <span className="hidden text-xs font-medium lg:inline">
+                                                    {action.label}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section
+                    id="account"
+                    className="scroll-mt-8 py-16 lg:grid lg:grid-cols-[240px_1fr] lg:gap-16"
+                >
+                    <SectionHeading
+                        number="04"
+                        title="Account actions"
+                        description="The browser extension links your existing Vinted session so Vintrack can perform user actions without asking for raw credentials."
+                    />
+                    <div className="mt-8 space-y-8 lg:mt-0">
+                        <div className="grid gap-8 md:grid-cols-[1fr_300px]">
+                            <div>
+                                <h3 className="text-sm font-semibold">
+                                    Connect the browser session
+                                </h3>
+                                <StepList
+                                    steps={[
+                                        "Install the Chrome or Firefox extension.",
+                                        "Sign in to Vinted in the same browser.",
+                                        "Open Account and choose Link With Installed Extension.",
+                                        "Confirm the linked domain before using item actions.",
+                                    ]}
+                                />
+                            </div>
+                            <div className="border-border/60 bg-muted/20 rounded-lg border p-5 sm:p-6">
+                                <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                                <p className="mt-3 text-sm font-semibold">
+                                    Session-based connection
+                                </p>
+                                <p className="text-muted-foreground mt-3 text-sm leading-6">
+                                    Vintrack syncs the session data, Vinted
+                                    domain, browser user agent, and theme needed
+                                    for linked actions. It does not require your
+                                    Vinted password.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button asChild variant="outline" size="sm">
+                                <a
+                                    href={CHROME_EXTENSION_DOWNLOAD_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    <Chrome className="h-4 w-4" />
+                                    Chrome extension
+                                    <Download className="h-3.5 w-3.5" />
+                                </a>
+                            </Button>
+                            <Button asChild variant="outline" size="sm">
+                                <a
+                                    href={FIREFOX_EXTENSION_DOWNLOAD_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    Firefox extension
+                                    <Download className="h-3.5 w-3.5" />
+                                </a>
+                            </Button>
+                            <Button asChild size="sm">
+                                <Link href="/account">
+                                    <LinkIcon className="h-4 w-4" />
+                                    Connect account
+                                </Link>
+                            </Button>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <footer className="border-border/60 flex flex-col gap-6 border-t py-10 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                    <div className="bg-muted/50 flex h-9 w-9 shrink-0 items-center justify-center rounded-md">
+                        <Check className="text-muted-foreground h-4 w-4" />
+                    </div>
+                    <div>
+                        <p className="text-sm font-semibold">Setup complete?</p>
+                        <p className="text-muted-foreground mt-1 text-sm leading-6">
+                            Your monitor should now appear as Running and begin
+                            filling the Live Feed.
+                        </p>
+                    </div>
+                </div>
+                <Button asChild variant="outline" size="sm">
+                    <a
+                        href="https://github.com/JakobAIOdev/Vintrack-Vinted-Monitor"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        GitHub support
+                        <ExternalLink className="h-4 w-4" />
+                    </a>
+                </Button>
+            </footer>
         </div>
     );
 }

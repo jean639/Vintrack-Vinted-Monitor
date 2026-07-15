@@ -28,6 +28,7 @@ const (
 type Engine struct {
 	db           *database.Store
 	serverProxy  *proxy.Manager
+	freeProxy    *proxy.RegionPools
 	fetcher      CatalogFetcher
 	enrichSeller bool
 	poolSize     int
@@ -37,7 +38,7 @@ type Engine struct {
 	enrichersMu  sync.RWMutex
 }
 
-func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
+func NewEngine(db *database.Store, pm *proxy.Manager, freePM *proxy.RegionPools) *Engine {
 	fetcher := NewCatalogFetcherFromEnv()
 	enrich := os.Getenv("ENRICH_SELLER_INFO") != "false"
 	if !fetcher.RequiresNetwork() {
@@ -48,6 +49,7 @@ func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
 	return &Engine{
 		db:           db,
 		serverProxy:  pm,
+		freeProxy:    freePM,
 		fetcher:      fetcher,
 		enrichSeller: enrich,
 		poolSize:     poolSize,
@@ -58,6 +60,14 @@ func NewEngine(db *database.Store, pm *proxy.Manager) *Engine {
 
 func (e *Engine) ServerProxyVersion() uint64 {
 	return e.serverProxy.Version()
+}
+
+func (e *Engine) FreeProxyVersion() uint64 {
+	return e.freeProxy.Version("de")
+}
+
+func (e *Engine) FreeProxyRegionVersion(region string) uint64 {
+	return e.freeProxy.Version(region)
 }
 
 func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxyKey string, trafficRecorder func(txBytes int64, rxBytes int64), proxyLabel string) *SellerEnricher {
@@ -113,6 +123,9 @@ func (e *Engine) getProxyManager(m model.Monitor) *proxy.Manager {
 	if m.Proxies.Valid && m.Proxies.String != "" {
 		return proxy.FromString(m.Proxies.String)
 	}
+	if m.ProxySource == "free" {
+		return e.freeProxy.Manager(m.Region)
+	}
 	return e.serverProxy
 }
 
@@ -132,6 +145,11 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 		trafficRecorder = func(txBytes int64, rxBytes int64) {
 			e.db.RecordProxyGroupBandwidth(groupID, txBytes, rxBytes)
 		}
+	} else if m.ProxySource == "free" {
+		proxySource = "free"
+		proxyKey = "free"
+	} else {
+		proxyKey = fmt.Sprintf("server:%d", e.ServerProxyVersion())
 	}
 
 	if e.fetcher.RequiresNetwork() && pm.Count() == 0 {
@@ -155,6 +173,16 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			Severity:  "error",
 			Message:   "No valid proxies available for monitor",
 		})
+		if proxySource == "free" {
+			e.db.SetMonitorStatus(m.ID, "paused")
+			e.db.RecordMonitorEvent(model.MonitorEvent{
+				MonitorID: m.ID,
+				EventType: "free_proxy_pool_degraded",
+				Severity:  "warning",
+				Message:   fmt.Sprintf("Free proxy pool for region %s is below the active quality threshold; monitor was paused", m.Region),
+			})
+			return
+		}
 		if m.WebhookActive && m.DiscordWebhook.String != "" {
 			discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, -1)
 		}
@@ -266,7 +294,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 					log.Printf("[%d] paused via dashboard", m.ID)
 					return
 				}
-				if updated.ProxyGroupID == nil {
+				if updated.ProxySource != "free" && updated.ProxyGroupID == nil {
 					updated.ServerProxyVersion = e.ServerProxyVersion()
 				}
 				if monitorConfigFingerprint(updated) != monitorConfigFingerprint(m) {
@@ -327,6 +355,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				}
 				if r.err != nil {
 					if pool != nil && r.client != nil {
+						e.recordFreeProxyFailure(proxySource, r.client, m.Region, 0, r.err.Error())
 						pool.Replace(r.client)
 					}
 					if checks <= 3 || checks%5 == 0 {
@@ -337,6 +366,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				if r.status == 200 && !gotSuccess {
 					items = r.items
 					gotSuccess = true
+					e.recordFreeProxySuccess(proxySource, r.client, m.Region, int(time.Since(cycleStart).Milliseconds()))
 					if remaining > 0 {
 						go func(ch chan fetchResult, n int, p *ClientPool) {
 							drain := time.NewTimer(10 * time.Second)
@@ -345,6 +375,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 								select {
 								case r := <-ch:
 									if r.client != nil && shouldReplaceClientForStatus(r.status) {
+										e.recordFreeProxyFailure(proxySource, r.client, m.Region, r.status, fmt.Sprintf("status %d", r.status))
 										r.client.ResetWarm(domain)
 										p.Replace(r.client)
 									}
@@ -356,6 +387,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 					}
 					break collectLoop
 				} else if pool != nil && r.client != nil && shouldReplaceClientForStatus(r.status) {
+					e.recordFreeProxyFailure(proxySource, r.client, m.Region, r.status, fmt.Sprintf("status %d", r.status))
 					r.client.ResetWarm(domain)
 					pool.Replace(r.client)
 				} else if r.status != 0 && (checks <= 3 || checks%5 == 0) {
@@ -370,6 +402,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 							select {
 							case r := <-ch:
 								if r.client != nil && shouldReplaceClientForStatus(r.status) {
+									e.recordFreeProxyFailure(proxySource, r.client, m.Region, r.status, fmt.Sprintf("status %d", r.status))
 									r.client.ResetWarm(domain)
 									p.Replace(r.client)
 								}
@@ -612,6 +645,45 @@ func (e *Engine) isProxyGroupBandwidthLimitReached(m model.Monitor) bool {
 	}
 
 	return txBytes+rxBytes >= *m.ProxyGroupLimitBytes
+}
+
+func (e *Engine) recordFreeProxySuccess(proxySource string, client *Client, region string, latencyMs int) {
+	if proxySource != "free" || client == nil {
+		return
+	}
+	e.db.RecordFreeProxySuccess(client.ProxyURL, region, latencyMs)
+}
+
+func (e *Engine) recordFreeProxyFailure(proxySource string, client *Client, region string, statusCode int, message string) {
+	if proxySource != "free" || client == nil {
+		return
+	}
+	e.db.RecordFreeProxyFailure(
+		client.ProxyURL,
+		region,
+		statusCode,
+		message,
+		e.freeProxyFailureThreshold(),
+		e.freeProxyQuarantineMinutes(),
+	)
+}
+
+func (e *Engine) freeProxyFailureThreshold() int {
+	if value, ok, err := e.db.GetSettingValue("free_proxy_failure_threshold"); err == nil && ok {
+		if parsed, parseErr := strconv.Atoi(strings.TrimSpace(value)); parseErr == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 3
+}
+
+func (e *Engine) freeProxyQuarantineMinutes() int {
+	if value, ok, err := e.db.GetSettingValue("free_proxy_quarantine_minutes"); err == nil && ok {
+		if parsed, parseErr := strconv.Atoi(strings.TrimSpace(value)); parseErr == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 30
 }
 
 func clientProxyLabel(client *Client, fallback string) string {

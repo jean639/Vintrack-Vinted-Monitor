@@ -10,7 +10,7 @@ import (
 
 func monitorConfigFingerprint(mon model.Monitor) string {
 	return fmt.Sprintf(
-		"query=%s|anti=%s|queryDelayMs=%d|priceMin=%s|priceMax=%s|size=%s|catalog=%s|brand=%s|color=%s|status=%s|region=%s|allowed=%s|bannedSellers=%s|proxies=%s",
+		"query=%s|anti=%s|queryDelayMs=%d|priceMin=%s|priceMax=%s|size=%s|catalog=%s|brand=%s|color=%s|status=%s|region=%s|allowed=%s|bannedSellers=%s|proxySource=%s|proxies=%s",
 		mon.Query,
 		nullableString(mon.AntiKeywords),
 		mon.QueryDelayMs,
@@ -24,6 +24,7 @@ func monitorConfigFingerprint(mon model.Monitor) string {
 		mon.Region,
 		nullableString(mon.AllowedCountries),
 		int64ListFingerprint(mon.BannedSellerIDs),
+		mon.ProxySource,
 		proxyFingerprint(mon),
 	)
 }
@@ -31,6 +32,9 @@ func monitorConfigFingerprint(mon model.Monitor) string {
 func proxyFingerprint(mon model.Monitor) string {
 	if mon.Proxies.Valid && mon.Proxies.String != "" {
 		return nullString(mon.Proxies)
+	}
+	if mon.ProxySource == "free" {
+		return "free"
 	}
 	if mon.ProxyGroupID == nil {
 		return fmt.Sprintf("server:%d", mon.ServerProxyVersion)

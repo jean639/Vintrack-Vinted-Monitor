@@ -14,7 +14,134 @@ import {
 } from "@/lib/monitor-limits";
 
 const SERVER_PROXIES_SETTING_KEY = "server_proxies";
+const FREE_PROXY_ENABLED_KEY = "free_proxy_enabled";
+const FREE_PROXY_AUTO_IMPORT_ENABLED_KEY = "free_proxy_auto_import_enabled";
+const FREE_PROXY_IMPORT_SOURCE_KEY = "free_proxy_import_source";
+const FREE_PROXY_IMPORT_URL_KEY = "free_proxy_import_url";
+const FREE_PROXY_MAX_POOL_SIZE_KEY = "free_proxy_max_pool_size";
+const FREE_PROXY_FAILURE_THRESHOLD_KEY = "free_proxy_failure_threshold";
+const FREE_PROXY_QUARANTINE_MINUTES_KEY = "free_proxy_quarantine_minutes";
+const FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY = "free_proxy_min_active_per_region";
+const FREE_PROXY_MAX_LATENCY_MS_KEY = "free_proxy_max_latency_ms";
+const FREE_PROXY_STARTER_REGIONS_KEY = "free_proxy_starter_regions";
+const DEFAULT_FREE_PROXY_IMPORT_URL =
+    "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt";
+const DEFAULT_FREE_PROXY_IMPORT_SOURCE = "iplocate_all";
+const DEFAULT_FREE_PROXY_STARTER_REGIONS = "de,fr,it,es,nl,be,at";
+const DEFAULT_FREE_PROXY_MAX_POOL_SIZE = 5000;
+const DEFAULT_FREE_PROXY_FAILURE_THRESHOLD = 3;
+const DEFAULT_FREE_PROXY_QUARANTINE_MINUTES = 30;
+const DEFAULT_FREE_PROXY_MIN_ACTIVE_PER_REGION = 25;
+const DEFAULT_FREE_PROXY_MAX_LATENCY_MS = 2500;
 const VALID_PROXY_SCHEMES = ["http", "https", "socks4", "socks5"];
+const FREE_PROXY_SOURCE_URLS: Record<string, string> = {
+    iplocate_all:
+        "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt",
+    iplocate_http:
+        "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt",
+    iplocate_https:
+        "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/https.txt",
+    iplocate_socks4:
+        "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks4.txt",
+    iplocate_socks5:
+        "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks5.txt",
+    proxyscrape:
+        "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text",
+};
+const IPLocateSupportedCountryRegions = new Set([
+    "ar",
+    "bd",
+    "br",
+    "ca",
+    "ch",
+    "cn",
+    "co",
+    "cz",
+    "de",
+    "ec",
+    "ee",
+    "fi",
+    "fr",
+    "gb",
+    "gh",
+    "hk",
+    "hu",
+    "id",
+    "in",
+    "iq",
+    "jp",
+    "ke",
+    "kh",
+    "kr",
+    "lv",
+    "md",
+    "me",
+    "my",
+    "nl",
+    "pk",
+    "ps",
+    "ru",
+    "se",
+    "sg",
+    "sy",
+    "tr",
+    "ua",
+    "us",
+    "uz",
+    "ve",
+    "vn",
+    "za",
+    "zw",
+]);
+const IPLocateCountryAliases: Record<string, string> = {
+    uk: "gb",
+};
+
+type AlertIssueSummaryRow = {
+    channel: string;
+    status: string;
+    failure_reason: string | null;
+    event_count: bigint;
+    last_seen_at: Date;
+};
+
+type FreeProxyStatusCountRow = {
+    status: string;
+    proxy_count: bigint;
+};
+
+type FreeProxySettings = {
+    enabled: boolean;
+    autoImportEnabled: boolean;
+    importSource: string;
+    importUrl: string;
+    maxPoolSize: number;
+    failureThreshold: number;
+    quarantineMinutes: number;
+    minActivePerRegion: number;
+    maxLatencyMs: number;
+    starterRegions: string;
+};
+
+type FreeProxyRegionRow = {
+    region: string;
+    active_count: bigint;
+    warming_count: bigint;
+    pending_count: bigint;
+    cooldown_count: bigint;
+    dead_count: bigint;
+    success_count: bigint;
+    failure_count: bigint;
+    median_latency_ms: number | null;
+    last_checked_at: Date | null;
+};
+
+type ParsedProxy = {
+    proxyUrl: string;
+    protocol: string;
+    host: string;
+    port: number;
+};
 
 async function requireAdmin() {
     const session = await auth();
@@ -29,7 +156,10 @@ async function requireAdmin() {
     return session.user.id;
 }
 
-function validateProxyLine(line: string): string | null {
+function validateProxyLine(
+    line: string,
+    defaultScheme = "http",
+): string | null {
     line = line.trim();
     if (!line) return null;
 
@@ -59,10 +189,42 @@ function validateProxyLine(line: string): string | null {
     }
 
     if (parts.length === 2 && /^\d{1,5}$/.test(parts[1])) {
-        return `http://${line}`;
+        return `${defaultScheme}://${line}`;
     }
 
     return null;
+}
+
+function parseProxyLine(
+    line: string,
+    defaultScheme = "http",
+): ParsedProxy | null {
+    const normalized = validateProxyLine(line, defaultScheme);
+    if (!normalized) return null;
+
+    try {
+        const url = new URL(normalized);
+        const protocol = url.protocol.replace(":", "");
+        const port = Number(url.port);
+        if (!VALID_PROXY_SCHEMES.includes(protocol)) return null;
+        if (
+            !url.hostname ||
+            !Number.isInteger(port) ||
+            port < 1 ||
+            port > 65535
+        ) {
+            return null;
+        }
+
+        return {
+            proxyUrl: url.toString(),
+            protocol,
+            host: url.hostname,
+            port,
+        };
+    } catch {
+        return null;
+    }
 }
 
 function validateProxies(text: string) {
@@ -80,6 +242,206 @@ function validateProxies(text: string) {
     }
 
     return { valid, invalid, total: lines.length };
+}
+
+function parseBooleanSetting(value: string | undefined, fallback = false) {
+    if (value === undefined) return fallback;
+    return value === "true";
+}
+
+function parsePositiveIntSetting(
+    value: string | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+}
+
+async function getFreeProxySettings(): Promise<FreeProxySettings> {
+    const keys = [
+        FREE_PROXY_ENABLED_KEY,
+        FREE_PROXY_AUTO_IMPORT_ENABLED_KEY,
+        FREE_PROXY_IMPORT_SOURCE_KEY,
+        FREE_PROXY_IMPORT_URL_KEY,
+        FREE_PROXY_MAX_POOL_SIZE_KEY,
+        FREE_PROXY_FAILURE_THRESHOLD_KEY,
+        FREE_PROXY_QUARANTINE_MINUTES_KEY,
+        FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY,
+        FREE_PROXY_MAX_LATENCY_MS_KEY,
+        FREE_PROXY_STARTER_REGIONS_KEY,
+    ];
+    const rows = await db.app_settings.findMany({
+        where: { key: { in: keys } },
+        select: { key: true, value: true },
+    });
+    const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+
+    const importSource =
+        values[FREE_PROXY_IMPORT_SOURCE_KEY] ??
+        DEFAULT_FREE_PROXY_IMPORT_SOURCE;
+    const importUrl =
+        importSource === "custom"
+            ? (values[FREE_PROXY_IMPORT_URL_KEY] ??
+              DEFAULT_FREE_PROXY_IMPORT_URL)
+            : (FREE_PROXY_SOURCE_URLS[importSource] ??
+              values[FREE_PROXY_IMPORT_URL_KEY] ??
+              DEFAULT_FREE_PROXY_IMPORT_URL);
+
+    return {
+        enabled: parseBooleanSetting(values[FREE_PROXY_ENABLED_KEY], false),
+        autoImportEnabled: parseBooleanSetting(
+            values[FREE_PROXY_AUTO_IMPORT_ENABLED_KEY],
+            false,
+        ),
+        importSource,
+        importUrl,
+        maxPoolSize: parsePositiveIntSetting(
+            values[FREE_PROXY_MAX_POOL_SIZE_KEY],
+            DEFAULT_FREE_PROXY_MAX_POOL_SIZE,
+            1,
+            20000,
+        ),
+        failureThreshold: parsePositiveIntSetting(
+            values[FREE_PROXY_FAILURE_THRESHOLD_KEY],
+            DEFAULT_FREE_PROXY_FAILURE_THRESHOLD,
+            1,
+            20,
+        ),
+        quarantineMinutes: parsePositiveIntSetting(
+            values[FREE_PROXY_QUARANTINE_MINUTES_KEY],
+            DEFAULT_FREE_PROXY_QUARANTINE_MINUTES,
+            1,
+            1440,
+        ),
+        minActivePerRegion: parsePositiveIntSetting(
+            values[FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY],
+            DEFAULT_FREE_PROXY_MIN_ACTIVE_PER_REGION,
+            1,
+            1000,
+        ),
+        maxLatencyMs: parsePositiveIntSetting(
+            values[FREE_PROXY_MAX_LATENCY_MS_KEY],
+            DEFAULT_FREE_PROXY_MAX_LATENCY_MS,
+            500,
+            15000,
+        ),
+        starterRegions:
+            values[FREE_PROXY_STARTER_REGIONS_KEY] ??
+            DEFAULT_FREE_PROXY_STARTER_REGIONS,
+    };
+}
+
+async function setAppSetting(key: string, value: string) {
+    await db.app_settings.upsert({
+        where: { key },
+        create: { key, value },
+        update: { value },
+    });
+}
+
+async function upsertFreeProxies(proxies: ParsedProxy[], source: string) {
+    if (proxies.length === 0) return 0;
+
+    const unique = Array.from(
+        new Map(proxies.map((proxy) => [proxy.proxyUrl, proxy])).values(),
+    );
+
+    for (const proxy of unique) {
+        await db.free_proxies.upsert({
+            where: { proxy_url: proxy.proxyUrl },
+            create: {
+                proxy_url: proxy.proxyUrl,
+                protocol: proxy.protocol,
+                host: proxy.host,
+                port: proxy.port,
+                source,
+                status: "pending",
+                failure_count: 0,
+                last_error: null,
+                quarantined_until: null,
+            },
+            update: {
+                protocol: proxy.protocol,
+                host: proxy.host,
+                port: proxy.port,
+                source,
+                last_error: null,
+                quarantined_until: null,
+            },
+        });
+    }
+
+    return unique.length;
+}
+
+function sourceLabelForImport(source: string, importUrl: string) {
+    const country = iplocateCountryFromImportUrl(importUrl);
+    if (country) return `iplocate:${country}`;
+    if (source.startsWith("iplocate") || importUrl.includes("iplocate")) {
+        return "iplocate";
+    }
+    if (source.startsWith("proxyscrape") || importUrl.includes("proxyscrape")) {
+        return "proxyscrape";
+    }
+    return "manual";
+}
+
+function iplocateCountryFromImportUrl(importUrl: string) {
+    const match = importUrl.match(/\/countries\/([a-z]{2})\//i);
+    const country = match?.[1]?.toLowerCase();
+    if (!country) return null;
+    return country === "gb" ? "uk" : country;
+}
+
+function defaultSchemeForImport(source: string, importUrl: string) {
+    if (
+        source === "iplocate_socks4" ||
+        importUrl.includes("/protocols/socks4")
+    ) {
+        return "socks4";
+    }
+    if (
+        source === "iplocate_socks5" ||
+        importUrl.includes("/protocols/socks5")
+    ) {
+        return "socks5";
+    }
+    if (source === "iplocate_https" || importUrl.includes("/protocols/https")) {
+        return "https";
+    }
+    return "http";
+}
+
+function freeProxyImportUrls(settings: FreeProxySettings) {
+    if (
+        !settings.importUrl.includes(
+            "raw.githubusercontent.com/iplocate/free-proxy-list/main",
+        )
+    ) {
+        return [settings.importUrl];
+    }
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    for (const region of settings.starterRegions.split(",")) {
+        const normalizedRegion = region.trim().toLowerCase();
+        const countryRegion =
+            IPLocateCountryAliases[normalizedRegion] ?? normalizedRegion;
+        if (!IPLocateSupportedCountryRegions.has(countryRegion)) continue;
+
+        const country = countryRegion.toUpperCase();
+        const countryUrl = `https://raw.githubusercontent.com/iplocate/free-proxy-list/main/countries/${country}/proxies.txt`;
+        if (seen.has(countryUrl)) continue;
+        seen.add(countryUrl);
+        urls.push(countryUrl);
+    }
+
+    if (!seen.has(settings.importUrl)) urls.push(settings.importUrl);
+
+    return urls;
 }
 
 export async function getServerProxies() {
@@ -143,6 +505,331 @@ export async function updateServerProxies(formData: FormData) {
     };
 }
 
+export async function getFreeProxyAdminState() {
+    await requireAdmin();
+
+    const [settings, counts, regionRows, recent] = await Promise.all([
+        getFreeProxySettings(),
+        db.$queryRaw<FreeProxyStatusCountRow[]>`
+            SELECT status, COUNT(*)::bigint AS proxy_count
+            FROM free_proxies
+            GROUP BY status
+        `,
+        db.$queryRaw<FreeProxyRegionRow[]>`
+            SELECT
+                region,
+                COUNT(*) FILTER (WHERE status = 'active')::bigint AS active_count,
+                COUNT(*) FILTER (WHERE status = 'pending' AND success_streak > 0)::bigint AS warming_count,
+                COUNT(*) FILTER (WHERE status = 'pending' AND success_streak = 0)::bigint AS pending_count,
+                COUNT(*) FILTER (WHERE status = 'cooldown')::bigint AS cooldown_count,
+                COUNT(*) FILTER (WHERE status = 'dead')::bigint AS dead_count,
+                COALESCE(SUM(success_count), 0)::bigint AS success_count,
+                COALESCE(SUM(failure_count), 0)::bigint AS failure_count,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)
+                    FILTER (WHERE latency_ms IS NOT NULL) AS median_latency_ms,
+                MAX(last_checked_at) AS last_checked_at
+            FROM free_proxy_health
+            GROUP BY region
+            ORDER BY region
+        `,
+        db.free_proxies.findMany({
+            orderBy: [{ updated_at: "desc" }],
+            take: 20,
+            select: {
+                id: true,
+                proxy_url: true,
+                protocol: true,
+                source: true,
+                status: true,
+                success_count: true,
+                failure_count: true,
+                last_checked_at: true,
+                last_success_at: true,
+                last_failure_at: true,
+                quarantined_until: true,
+                last_error: true,
+            },
+        }),
+    ]);
+
+    const countsByStatus = Object.fromEntries(
+        counts.map((row) => [row.status, Number(row.proxy_count)]),
+    );
+    const activeHealthCount = regionRows.reduce(
+        (sum, row) => sum + Number(row.active_count),
+        0,
+    );
+    const pendingHealthCount = regionRows.reduce(
+        (sum, row) => sum + Number(row.pending_count),
+        0,
+    );
+    const cooldownHealthCount = regionRows.reduce(
+        (sum, row) => sum + Number(row.cooldown_count),
+        0,
+    );
+
+    return {
+        settings,
+        counts: {
+            active: activeHealthCount,
+            pending: pendingHealthCount || (countsByStatus.pending ?? 0),
+            quarantined:
+                cooldownHealthCount + (countsByStatus.quarantined ?? 0),
+            disabled: countsByStatus.disabled ?? 0,
+            total: Object.values(countsByStatus).reduce(
+                (sum, count) => sum + count,
+                0,
+            ),
+        },
+        regions: regionRows.map((row) => {
+            const successCount = Number(row.success_count);
+            const failureCount = Number(row.failure_count);
+            const totalChecks = successCount + failureCount;
+
+            return {
+                region: row.region,
+                active: Number(row.active_count),
+                warming: Number(row.warming_count),
+                pending: Number(row.pending_count),
+                cooldown: Number(row.cooldown_count),
+                dead: Number(row.dead_count),
+                successRate:
+                    totalChecks > 0
+                        ? Math.round((successCount / totalChecks) * 100)
+                        : null,
+                medianLatencyMs:
+                    row.median_latency_ms === null
+                        ? null
+                        : Math.round(row.median_latency_ms),
+                lastCheckedAt: row.last_checked_at,
+                healthy:
+                    Number(row.active_count) + Number(row.warming_count) >=
+                    settings.minActivePerRegion,
+            };
+        }),
+        recent,
+    };
+}
+
+export async function updateFreeProxySettings(formData: FormData) {
+    await requireAdmin();
+
+    const enabled = formData.get("enabled") === "true";
+    const autoImportEnabled = formData.get("autoImportEnabled") === "true";
+    const importSource =
+        (formData.get("importSource") as string | null)?.trim() ||
+        DEFAULT_FREE_PROXY_IMPORT_SOURCE;
+    const requestedImportUrl =
+        (formData.get("importUrl") as string | null)?.trim() ||
+        DEFAULT_FREE_PROXY_IMPORT_URL;
+    const importUrl =
+        importSource === "custom"
+            ? requestedImportUrl
+            : (FREE_PROXY_SOURCE_URLS[importSource] ?? requestedImportUrl);
+    const maxPoolSize = parsePositiveIntSetting(
+        formData.get("maxPoolSize") as string | undefined,
+        DEFAULT_FREE_PROXY_MAX_POOL_SIZE,
+        1,
+        20000,
+    );
+    const failureThreshold = parsePositiveIntSetting(
+        formData.get("failureThreshold") as string | undefined,
+        DEFAULT_FREE_PROXY_FAILURE_THRESHOLD,
+        1,
+        20,
+    );
+    const quarantineMinutes = parsePositiveIntSetting(
+        formData.get("quarantineMinutes") as string | undefined,
+        DEFAULT_FREE_PROXY_QUARANTINE_MINUTES,
+        1,
+        1440,
+    );
+    const minActivePerRegion = parsePositiveIntSetting(
+        formData.get("minActivePerRegion") as string | undefined,
+        DEFAULT_FREE_PROXY_MIN_ACTIVE_PER_REGION,
+        1,
+        1000,
+    );
+    const maxLatencyMs = parsePositiveIntSetting(
+        formData.get("maxLatencyMs") as string | undefined,
+        DEFAULT_FREE_PROXY_MAX_LATENCY_MS,
+        500,
+        15000,
+    );
+    const starterRegions = (
+        (formData.get("starterRegions") as string | null)?.trim() ||
+        DEFAULT_FREE_PROXY_STARTER_REGIONS
+    )
+        .split(",")
+        .map((region) => region.trim().toLowerCase())
+        .filter(Boolean)
+        .join(",");
+
+    try {
+        new URL(importUrl);
+    } catch {
+        return { success: false, error: "Invalid import URL" };
+    }
+
+    await Promise.all([
+        setAppSetting(FREE_PROXY_ENABLED_KEY, String(enabled)),
+        setAppSetting(
+            FREE_PROXY_AUTO_IMPORT_ENABLED_KEY,
+            String(autoImportEnabled),
+        ),
+        setAppSetting(FREE_PROXY_IMPORT_SOURCE_KEY, importSource),
+        setAppSetting(FREE_PROXY_IMPORT_URL_KEY, importUrl),
+        setAppSetting(FREE_PROXY_MAX_POOL_SIZE_KEY, String(maxPoolSize)),
+        setAppSetting(
+            FREE_PROXY_FAILURE_THRESHOLD_KEY,
+            String(failureThreshold),
+        ),
+        setAppSetting(
+            FREE_PROXY_QUARANTINE_MINUTES_KEY,
+            String(quarantineMinutes),
+        ),
+        setAppSetting(
+            FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY,
+            String(minActivePerRegion),
+        ),
+        setAppSetting(FREE_PROXY_MAX_LATENCY_MS_KEY, String(maxLatencyMs)),
+        setAppSetting(FREE_PROXY_STARTER_REGIONS_KEY, starterRegions),
+    ]);
+
+    revalidatePath("/admin");
+    return { success: true };
+}
+
+export async function addFreeProxies(formData: FormData) {
+    await requireAdmin();
+
+    const text = (formData.get("proxies") as string | null) ?? "";
+    const lines = text.split("\n").filter((line) => line.trim().length > 0);
+    const parsed: ParsedProxy[] = [];
+    let invalidCount = 0;
+
+    for (const line of lines) {
+        const proxy = parseProxyLine(line);
+        if (proxy) {
+            parsed.push(proxy);
+        } else {
+            invalidCount++;
+        }
+    }
+
+    if (lines.length > 0 && parsed.length === 0) {
+        return { success: false, error: "No valid proxies found" };
+    }
+
+    const addedCount = await upsertFreeProxies(parsed, "manual");
+
+    revalidatePath("/admin");
+    return { success: true, addedCount, skippedCount: invalidCount };
+}
+
+export async function importFreeProxiesNow() {
+    await requireAdmin();
+
+    const settings = await getFreeProxySettings();
+    let skippedCount = 0;
+    let fetchedCount = 0;
+    let addedCount = 0;
+    const importUrls = freeProxyImportUrls(settings);
+    const perSourceLimit = Math.ceil(
+        settings.maxPoolSize / Math.max(1, importUrls.length),
+    );
+    const seenProxyUrls = new Set<string>();
+
+    for (const importUrl of importUrls) {
+        if (seenProxyUrls.size >= settings.maxPoolSize) break;
+        let response: Response;
+        try {
+            response = await fetch(importUrl, {
+                headers: { Accept: "text/plain,*/*" },
+                cache: "no-store",
+            });
+        } catch (error) {
+            console.error("[admin] failed to import free proxies", error);
+            continue;
+        }
+
+        if (!response.ok) continue;
+        fetchedCount++;
+
+        const text = await response.text();
+        const sourceProxies: ParsedProxy[] = [];
+        const defaultScheme = defaultSchemeForImport(
+            settings.importSource,
+            importUrl,
+        );
+        for (const line of text.split("\n")) {
+            if (
+                seenProxyUrls.size >= settings.maxPoolSize ||
+                sourceProxies.length >= perSourceLimit
+            ) {
+                break;
+            }
+            if (!line.trim()) continue;
+            const proxy = parseProxyLine(line, defaultScheme);
+            if (proxy) {
+                if (seenProxyUrls.has(proxy.proxyUrl)) continue;
+                seenProxyUrls.add(proxy.proxyUrl);
+                sourceProxies.push(proxy);
+            } else {
+                skippedCount++;
+            }
+        }
+
+        addedCount += await upsertFreeProxies(
+            sourceProxies,
+            sourceLabelForImport(settings.importSource, importUrl),
+        );
+    }
+
+    if (fetchedCount === 0) {
+        return { success: false, error: "Failed to fetch proxy list" };
+    }
+
+    revalidatePath("/admin");
+    return {
+        success: true,
+        addedCount,
+        skippedCount,
+        limitReached: seenProxyUrls.size >= settings.maxPoolSize,
+    };
+}
+
+export async function clearFreeProxyQuarantine() {
+    await requireAdmin();
+
+    const [proxyResult, healthResult] = await Promise.all([
+        db.free_proxies.updateMany({
+            where: { status: "quarantined" },
+            data: {
+                status: "pending",
+                failure_count: 0,
+                last_error: null,
+                quarantined_until: null,
+            },
+        }),
+        db.free_proxy_health.updateMany({
+            where: { status: "cooldown" },
+            data: {
+                status: "pending",
+                failure_streak: 0,
+                last_error: null,
+                next_check_at: new Date(),
+            },
+        }),
+    ]);
+
+    revalidatePath("/admin");
+    return {
+        success: true,
+        restoredCount: proxyResult.count + healthResult.count,
+    };
+}
+
 export async function getUsers() {
     await requireAdmin();
 
@@ -164,6 +851,170 @@ export async function getUsers() {
     });
 
     return users;
+}
+
+export async function getAdminUserDetails(userId: string) {
+    await requireAdmin();
+
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+            id: true,
+            monitors: {
+                orderBy: [{ status: "asc" }, { created_at: "desc" }],
+                select: {
+                    id: true,
+                    name: true,
+                    query: true,
+                    query_delay_ms: true,
+                    status: true,
+                    region: true,
+                    created_at: true,
+                    price_min: true,
+                    price_max: true,
+                    discord_webhook: true,
+                    webhook_active: true,
+                    telegram_active: true,
+                    proxy_group: {
+                        select: {
+                            name: true,
+                        },
+                    },
+                    _count: {
+                        select: {
+                            items: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    if (!user) throw new Error("User not found");
+
+    return user.monitors;
+}
+
+export async function getAdminLogs() {
+    await requireAdmin();
+
+    const logs: {
+        id: string;
+        type: "audit" | "monitor" | "alert";
+        title: string;
+        detail: string | null;
+        status: string;
+        subject: string | null;
+        actor: string | null;
+        createdAt: Date;
+    }[] = [];
+
+    try {
+        const auditRows = await db.audit_events.findMany({
+            orderBy: { created_at: "desc" },
+            take: 60,
+            select: {
+                id: true,
+                action: true,
+                target_type: true,
+                target_id: true,
+                status: true,
+                created_at: true,
+                user: { select: { name: true, email: true } },
+            },
+        });
+
+        logs.push(
+            ...auditRows.map((row) => ({
+                id: `audit-${row.id.toString()}`,
+                type: "audit" as const,
+                title: row.action,
+                detail: row.target_type
+                    ? `${row.target_type}${row.target_id ? ` #${row.target_id}` : ""}`
+                    : null,
+                status: row.status,
+                subject: row.target_id,
+                actor: row.user?.name ?? row.user?.email ?? null,
+                createdAt: row.created_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load audit logs", error);
+    }
+
+    try {
+        const monitorRows = await db.monitor_events.findMany({
+            orderBy: { created_at: "desc" },
+            take: 60,
+            select: {
+                id: true,
+                event_type: true,
+                severity: true,
+                message: true,
+                created_at: true,
+                monitor: {
+                    select: {
+                        name: true,
+                        user: { select: { name: true, email: true } },
+                    },
+                },
+            },
+        });
+
+        logs.push(
+            ...monitorRows.map((row) => ({
+                id: `monitor-${row.id.toString()}`,
+                type: "monitor" as const,
+                title: row.event_type,
+                detail: row.message,
+                status: row.severity,
+                subject: row.monitor.name,
+                actor: row.monitor.user.name ?? row.monitor.user.email ?? null,
+                createdAt: row.created_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load monitor logs", error);
+    }
+
+    try {
+        const alertRows = await db.$queryRaw<AlertIssueSummaryRow[]>`
+            SELECT
+                channel,
+                status,
+                failure_reason,
+                COUNT(*)::bigint AS event_count,
+                MAX(created_at) AS last_seen_at
+            FROM alert_events
+            WHERE created_at >= NOW() - INTERVAL '24 hours'
+              AND (
+                status <> 'success'
+                OR failure_reason IS NOT NULL
+              )
+            GROUP BY channel, status, failure_reason
+            ORDER BY event_count DESC, last_seen_at DESC
+            LIMIT 20
+        `;
+
+        logs.push(
+            ...alertRows.map((row) => ({
+                id: `alert-${row.channel}-${row.status}-${row.failure_reason ?? "unknown"}`,
+                type: "alert" as const,
+                title: `${row.channel} alert issues`,
+                detail: `${Number(row.event_count)} event${Number(row.event_count) === 1 ? "" : "s"} in 24h${row.failure_reason ? ` · ${row.failure_reason}` : ""}`,
+                status: row.status,
+                subject: "24h summary",
+                actor: null,
+                createdAt: row.last_seen_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load alert logs", error);
+    }
+
+    return logs
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, 100);
 }
 
 async function sendPausedWebhook(
@@ -257,7 +1108,10 @@ export async function setRoleActiveMonitorLimit(role: string, value: string) {
     const validRoles = ["free", "premium"];
     if (!validRoles.includes(role)) throw new Error("Invalid role");
 
-    await setMonitorLimit(roleLimitScope(role), normalizeMonitorLimitInput(value));
+    await setMonitorLimit(
+        roleLimitScope(role),
+        normalizeMonitorLimitInput(value),
+    );
 
     revalidatePath("/admin");
 }
@@ -274,7 +1128,10 @@ export async function setUserActiveMonitorLimit(userId: string, value: string) {
         throw new Error("Admins are always unlimited");
     }
 
-    await setMonitorLimit(userLimitScope(userId), normalizeMonitorLimitInput(value));
+    await setMonitorLimit(
+        userLimitScope(userId),
+        normalizeMonitorLimitInput(value),
+    );
 
     revalidatePath("/admin");
 }

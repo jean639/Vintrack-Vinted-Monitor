@@ -106,10 +106,60 @@ model monitors {
   telegram_active  Boolean  @default(false)
 
   proxy_group_id Int?
+  proxy_source   String    @default("server") @db.VarChar(20)
   proxy_group    proxy_groups? @relation(fields: [proxy_group_id], references: [id], onDelete: SetNull)
   monitor_runs   monitor_runs[]
   monitor_events monitor_events[]
   alert_events   alert_events[]
+}
+
+model free_proxies {
+  id                  Int       @id @default(autoincrement())
+  proxy_url           String    @unique @db.VarChar(500)
+  protocol            String    @db.VarChar(20)
+  host                String    @db.VarChar(255)
+  port                Int
+  source              String    @default("manual") @db.VarChar(50)
+  status              String    @default("active") @db.VarChar(30)
+  success_count       Int       @default(0)
+  failure_count       Int       @default(0)
+  last_checked_at     DateTime? @db.Timestamp(6)
+  last_success_at     DateTime? @db.Timestamp(6)
+  last_failure_at     DateTime? @db.Timestamp(6)
+  quarantined_until   DateTime? @db.Timestamp(6)
+  last_error          String?   @db.Text
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+  updated_at          DateTime  @updatedAt @db.Timestamp(6)
+  health              free_proxy_health[]
+
+  @@index([status, quarantined_until])
+  @@index([source])
+}
+
+model free_proxy_health {
+  id                  Int       @id @default(autoincrement())
+  proxy_id            Int
+  proxy               free_proxies @relation(fields: [proxy_id], references: [id], onDelete: Cascade)
+  region              String    @db.VarChar(10)
+  status              String    @default("pending") @db.VarChar(30)
+  success_streak      Int       @default(0)
+  failure_streak      Int       @default(0)
+  success_count       Int       @default(0)
+  failure_count       Int       @default(0)
+  latency_ms          Int?
+  last_status_code    Int?
+  last_error          String?   @db.Text
+  last_checked_at     DateTime? @db.Timestamp(6)
+  last_success_at     DateTime? @db.Timestamp(6)
+  last_failure_at     DateTime? @db.Timestamp(6)
+  next_check_at       DateTime? @db.Timestamp(6)
+  score               Int       @default(0)
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+  updated_at          DateTime  @updatedAt @db.Timestamp(6)
+
+  @@unique([proxy_id, region])
+  @@index([region, status, next_check_at])
+  @@index([status, score])
 }
 
 model monitor_runs {

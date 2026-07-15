@@ -15,6 +15,10 @@ import {
     Tag,
     ShoppingCart,
     UserX,
+    Images,
+    MapPin,
+    Clock3,
+    UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import { useVintedAccount } from "@/components/account-provider";
@@ -398,114 +402,68 @@ function ItemCardComponent({
     return (
         <div
             data-testid="item-card"
-            className={`group border-border/75 bg-card/92 hover:border-border relative flex flex-col overflow-hidden rounded-2xl border transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_20px_50px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_20px_50px_rgba(0,0,0,0.28)] ${
+            className={`group border-border/70 bg-card hover:border-border relative flex flex-col overflow-hidden rounded-lg border transition-colors ${
                 item.isLive
-                    ? "animate-in slide-in-from-top-2 fade-in shadow-md ring-2 shadow-emerald-500/10 ring-emerald-500/30 duration-500"
+                    ? "animate-in slide-in-from-top-2 fade-in ring-1 ring-emerald-500/50 duration-500"
                     : ""
             }`}
         >
             <div className="bg-muted relative aspect-4/5 overflow-hidden">
                 {item.image_url ? (
-                    item.extra_images && item.extra_images.length > 0 ? (
-                        <div className="flex h-full w-full gap-0.5">
-                            <div
-                                className="h-full flex-2 cursor-pointer overflow-hidden"
-                                onClick={() => setSelectedImgIndex(0)}
-                            >
-                                <img
-                                    src={item.image_url}
-                                    alt={item.title || "Item"}
-                                    className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                                    loading="lazy"
-                                />
-                            </div>
-                            <div className="flex h-full flex-1 flex-col gap-0.5">
-                                {item.extra_images
-                                    .slice(0, 2)
-                                    .map((img, idx) => (
-                                        <div
-                                            key={idx}
-                                            className="bg-muted-foreground/10 flex-1 cursor-pointer overflow-hidden"
-                                            onClick={() =>
-                                                setSelectedImgIndex(idx + 1)
-                                            }
-                                        >
-                                            <img
-                                                src={img}
-                                                alt={`${item.title} ${idx + 1}`}
-                                                className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                                                loading="lazy"
-                                            />
-                                        </div>
-                                    ))}
-                            </div>
-                        </div>
-                    ) : (
-                        <div
-                            className="h-full w-full cursor-pointer"
-                            onClick={() => setSelectedImgIndex(0)}
-                        >
-                            <img
-                                src={item.image_url}
-                                alt={item.title || "Item"}
-                                className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                                loading="lazy"
-                            />
-                        </div>
-                    )
+                    <button
+                        type="button"
+                        className="block h-full w-full cursor-zoom-in overflow-hidden"
+                        onClick={() => setSelectedImgIndex(0)}
+                        aria-label={`Open photos for ${item.title || "item"}`}
+                    >
+                        <img
+                            src={item.image_url}
+                            alt={item.title || "Item"}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
+                            loading="lazy"
+                        />
+                    </button>
                 ) : (
                     <div className="text-muted-foreground/45 flex h-full w-full items-center justify-center">
                         <ImageOff className="h-8 w-8" />
                     </div>
                 )}
 
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-linear-to-t from-slate-950/82 via-slate-950/34 to-transparent" />
-
-                <div className="absolute right-3 bottom-3 left-3 flex items-end justify-between gap-2">
-                    <div className="rounded-xl bg-slate-950/66 px-3 py-2 text-white shadow-lg backdrop-blur-md">
-                        <div className="text-lg font-semibold tracking-tight text-white">
-                            {item.price}
-                        </div>
-                        {hasDifferentTotalPrice && (
-                            <div className="mt-0.5 text-[11px] font-medium text-white/72">
-                                {item.total_price} total
-                            </div>
-                        )}
-                    </div>
-
-                    {allImages.length > 1 && (
-                        <div className="rounded-full border border-white/14 bg-black/30 px-2.5 py-1 text-[11px] font-medium text-white/88 backdrop-blur-sm">
-                            {allImages.length} photos
-                        </div>
-                    )}
-                </div>
-
                 {item.isLive && (
-                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-full bg-emerald-500 px-2.5 py-1 text-[10px] font-semibold text-white shadow-lg">
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm">
                         <span className="relative flex h-1.5 w-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/50 opacity-75 dark:bg-emerald-400/50" />
-                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/60 opacity-75" />
+                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
                         </span>
                         NEW
                     </div>
                 )}
 
-                <div className="absolute top-2.5 right-2.5 z-10 flex gap-1 opacity-0 transition-opacity max-sm:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 md:group-hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
+                {allImages.length > 1 && (
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white backdrop-blur-sm">
+                        <Images className="h-3 w-3" />
+                        {allImages.length}
+                    </div>
+                )}
+
+                <div className="absolute right-2 bottom-2 z-10 flex gap-1 rounded-lg bg-black/55 p-1 opacity-100 backdrop-blur-md transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
                     {linked && (
                         <button
+                            type="button"
                             onClick={handleLike}
                             disabled={liking}
                             className={cn(
-                                "flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-white/12 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors sm:h-7 sm:w-7",
+                                "flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-white transition-colors",
                                 liked
-                                    ? "border-red-400/30 bg-red-500 text-white"
-                                    : "hover:bg-slate-950/80 hover:text-red-300",
+                                    ? "bg-red-500 text-white"
+                                    : "hover:bg-white/15 hover:text-red-300",
                             )}
                             title={liked ? "Unlike" : "Like"}
+                            aria-label={liked ? "Unlike item" : "Like item"}
                         >
                             <Heart
                                 className={cn(
-                                    "h-4 w-4 sm:h-3.5 sm:w-3.5",
+                                    "h-4 w-4",
                                     liked && "fill-current",
                                 )}
                             />
@@ -514,107 +472,103 @@ function ItemCardComponent({
                     {linked && item.seller_id && (
                         <>
                             <button
+                                type="button"
                                 onClick={handleBuy}
                                 disabled={buying}
-                                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-amber-400/25 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-70 sm:h-7 sm:w-7"
+                                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-white transition-colors hover:bg-white/15 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-70"
                                 title="Open Vinted checkout"
+                                aria-label="Open Vinted checkout"
                             >
                                 {buying ? (
-                                    <Loader2 className="h-4 w-4 animate-spin sm:h-3.5 sm:w-3.5" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
-                                    <ShoppingCart className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                                    <ShoppingCart className="h-4 w-4" />
                                 )}
                             </button>
                             <button
+                                type="button"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
                                     setOfferOpen(true);
                                 }}
-                                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-white/12 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-emerald-300 sm:h-7 sm:w-7"
+                                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-white transition-colors hover:bg-white/15 hover:text-emerald-300"
                                 title="Make an offer"
+                                aria-label="Make an offer"
                             >
-                                <Tag className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                                <Tag className="h-4 w-4" />
                             </button>
                             <button
+                                type="button"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
                                     setMsgOpen(true);
                                 }}
-                                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-white/12 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-slate-950/80 hover:text-sky-300 sm:h-7 sm:w-7"
+                                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-white transition-colors hover:bg-white/15 hover:text-sky-300"
                                 title="Send message to seller"
+                                aria-label="Send message to seller"
                             >
-                                <MessageCircle className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                                <MessageCircle className="h-4 w-4" />
                             </button>
                         </>
                     )}
                     {item.seller_id && (
                         <button
+                            type="button"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 setBanDialogOpen(true);
                             }}
                             disabled={banningSeller}
-                            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-red-400/25 bg-slate-950/62 text-white shadow-md backdrop-blur-md transition-colors hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-70 sm:h-7 sm:w-7"
+                            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-white transition-colors hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
                             title="Ban seller"
+                            aria-label="Ban seller"
                         >
                             {banningSeller ? (
-                                <Loader2 className="h-4 w-4 animate-spin sm:h-3.5 sm:w-3.5" />
+                                <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                                <UserX className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                                <UserX className="h-4 w-4" />
                             )}
                         </button>
                     )}
                 </div>
             </div>
 
-            <div className="flex flex-1 flex-col gap-1.5 p-3.5">
-                <h3
-                    className="text-foreground line-clamp-2 min-h-10 text-[13px] leading-snug font-semibold"
-                    title={item.title || ""}
-                >
-                    {item.title || "Untitled"}
-                </h3>
-
-                {sellerProfileUrl && sellerLabel && (
-                    <a
-                        href={sellerProfileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-muted-foreground hover:text-foreground -mt-0.5 inline-flex max-w-full items-center gap-1 text-[10px] leading-none font-medium transition-colors"
-                        title={sellerLabel}
+            <div className="flex flex-1 flex-col p-3.5">
+                <div className="flex min-h-12 items-start justify-between gap-3">
+                    <h3
+                        className="text-foreground line-clamp-2 min-w-0 text-sm leading-snug font-semibold"
+                        title={item.title || ""}
                     >
-                        <span className="truncate">{sellerLabel}</span>
-                        <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                    </a>
-                )}
+                        {item.title || "Untitled"}
+                    </h3>
+                    <div className="shrink-0 text-right">
+                        <p className="text-foreground text-base font-bold tabular-nums">
+                            {item.price || "—"}
+                        </p>
+                        {hasDifferentTotalPrice && (
+                            <p className="text-muted-foreground text-[10px] tabular-nums">
+                                {item.total_price} total
+                            </p>
+                        )}
+                    </div>
+                </div>
 
-                <div className="mt-auto flex flex-wrap gap-1.5 pt-0.5">
+                <div className="mt-2 flex min-h-12 flex-wrap content-start gap-1.5">
                     {item.brand && (
-                        <span className="border-border/60 bg-muted/40 text-muted-foreground flex h-5 items-center rounded-md border px-1.5 text-[10px] font-medium">
+                        <span className="border-border/60 bg-muted/40 text-foreground flex h-5 max-w-full items-center truncate rounded-md border px-1.5 text-[10px] font-medium">
                             {item.brand}
                         </span>
                     )}
                     {item.size && (
                         <Badge
                             variant="secondary"
-                            className="h-5 rounded-md border border-blue-200 bg-blue-50 px-1.5 text-[10px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+                            className="h-5 rounded-md border border-sky-200 bg-sky-50 px-1.5 text-[10px] font-medium text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300"
                         >
                             {item.size}
                         </Badge>
-                    )}
-                    {item.location && (
-                        <span className="border-border/60 bg-muted/40 text-muted-foreground flex h-5 items-center rounded-md border px-1.5 text-[10px]">
-                            {item.location}
-                        </span>
-                    )}
-                    {item.rating && (
-                        <span className="flex h-5 items-center rounded-md border border-amber-200/70 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-700 dark:border-amber-500/20 dark:bg-amber-900/20 dark:text-amber-300">
-                            {item.rating}
-                        </span>
                     )}
                     {item.condition && (
                         <span className="border-border/60 bg-muted/40 text-muted-foreground flex h-5 items-center rounded-md border px-1.5 text-[10px]">
@@ -623,23 +577,54 @@ function ItemCardComponent({
                     )}
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-1">
-                    {showMonitor ? (
-                        <Link
-                            href={`/monitors/${item.monitor_id}`}
-                            className="z-10 max-w-[calc(100%-4.5rem)] min-w-0"
-                        >
-                            <span className="text-muted-foreground inline-flex max-w-full truncate text-[11px] font-medium transition-colors duration-200 hover:text-blue-400">
-                                {getMonitorLabel(item)}
+                <div className="border-border/60 mt-2 space-y-1.5 border-t pt-2">
+                    <div className="text-muted-foreground flex min-w-0 items-center gap-3 text-[10px]">
+                        {sellerProfileUrl && sellerLabel ? (
+                            <a
+                                href={sellerProfileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-foreground flex min-w-0 items-center gap-1 transition-colors"
+                                title={sellerLabel}
+                            >
+                                <UserRound className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{sellerLabel}</span>
+                            </a>
+                        ) : null}
+                        {item.location ? (
+                            <span className="flex min-w-0 items-center gap-1">
+                                <MapPin className="h-3 w-3 shrink-0" />
+                                <span className="truncate">
+                                    {item.location}
+                                </span>
                             </span>
-                        </Link>
-                    ) : (
-                        <span />
-                    )}
+                        ) : null}
+                        {item.rating ? (
+                            <span className="ml-auto shrink-0 font-medium text-amber-600 dark:text-amber-400">
+                                {item.rating}
+                            </span>
+                        ) : null}
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                        {showMonitor ? (
+                            <Link
+                                href={`/monitors/${item.monitor_id}`}
+                                className="z-10 max-w-[calc(100%-4.5rem)] min-w-0"
+                            >
+                                <span className="text-muted-foreground inline-flex max-w-full truncate text-[11px] font-medium transition-colors duration-200 hover:text-blue-400">
+                                    {getMonitorLabel(item)}
+                                </span>
+                            </Link>
+                        ) : (
+                            <span />
+                        )}
 
-                    <span className="text-muted-foreground shrink-0 font-mono text-[10px] tracking-[0.16em] uppercase">
-                        {timeStr}
-                    </span>
+                        <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
+                            <Clock3 className="h-3 w-3" />
+                            {timeStr}
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -647,9 +632,9 @@ function ItemCardComponent({
                 href={item.url || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium tracking-wide transition-colors"
+                className="border-border/60 bg-muted/25 text-foreground hover:bg-muted flex h-10 items-center justify-center gap-1.5 border-t text-xs font-medium transition-colors"
             >
-                View on Vinted
+                Open listing
                 <ExternalLink className="h-3 w-3" />
             </a>
 
@@ -1046,18 +1031,26 @@ ItemCard.displayName = "ItemCard";
 
 export function ItemCardSkeleton() {
     return (
-        <div className="border-border/75 bg-card/85 flex flex-col overflow-hidden rounded-xl border">
+        <div className="border-border/70 bg-card flex flex-col overflow-hidden rounded-lg border">
             <div className="bg-muted aspect-4/5 animate-pulse" />
-            <div className="space-y-2.5 p-3.5">
-                <div className="bg-muted h-3 w-1/3 animate-pulse rounded" />
-                <div className="bg-muted h-4 w-3/4 animate-pulse rounded" />
-                <div className="bg-muted h-4 w-1/2 animate-pulse rounded" />
+            <div className="space-y-3 p-3.5">
+                <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-2">
+                        <div className="bg-muted h-4 w-32 animate-pulse rounded" />
+                        <div className="bg-muted h-4 w-24 animate-pulse rounded" />
+                    </div>
+                    <div className="bg-muted h-5 w-12 animate-pulse rounded" />
+                </div>
                 <div className="flex gap-1.5 pt-1">
                     <div className="bg-muted h-5 w-10 animate-pulse rounded" />
                     <div className="bg-muted h-5 w-14 animate-pulse rounded" />
                 </div>
+                <div className="border-border/60 flex justify-between border-t pt-3">
+                    <div className="bg-muted h-3 w-20 animate-pulse rounded" />
+                    <div className="bg-muted h-3 w-10 animate-pulse rounded" />
+                </div>
             </div>
-            <div className="bg-muted-foreground/15 h-10 animate-pulse" />
+            <div className="bg-muted/60 h-10 animate-pulse border-t" />
         </div>
     );
 }

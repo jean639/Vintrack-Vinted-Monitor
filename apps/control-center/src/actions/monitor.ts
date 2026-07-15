@@ -9,6 +9,7 @@ import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 import { normalizeQueryDelayMs } from "@/lib/monitor-delay";
 import { getMonitorActivationState } from "@/lib/monitor-limits";
+import { getFreeProxyPoolHealth } from "@/lib/free-proxy-health";
 
 function normalizeAntiKeywords(value: FormDataEntryValue | null) {
     const normalized = String(value ?? "").trim();
@@ -31,6 +32,57 @@ async function sendTelegramStatusIfConfigured(
     if ("error" in result) {
         console.error("Failed to send Telegram status message", result.error);
     }
+}
+
+async function isFreeProxyPoolAvailable(region: string) {
+    const health = await getFreeProxyPoolHealth();
+    return health.enabled && Boolean(health.regions[region]?.healthy);
+}
+
+async function resolveMonitorProxySelection(
+    userId: string,
+    rawValue: string,
+    region: string,
+) {
+    const proxyGroupRaw = rawValue?.trim() ?? "";
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+    });
+
+    if (proxyGroupRaw === "free") {
+        if (!(await isFreeProxyPoolAvailable(region))) {
+            throw new Error(
+                "Free proxy pool is not healthy for this region right now",
+            );
+        }
+        return { proxyGroupId: null, proxySource: "free" };
+    }
+
+    if (proxyGroupRaw === "server") {
+        if (user?.role !== "premium" && user?.role !== "admin") {
+            throw new Error("Server proxies require a premium account");
+        }
+        return { proxyGroupId: null, proxySource: "server" };
+    }
+
+    if (proxyGroupRaw) {
+        const pgId = parseInt(proxyGroupRaw);
+        if (!Number.isInteger(pgId)) throw new Error("Invalid proxy group");
+
+        const group = await db.proxy_groups.findFirst({
+            where: { id: pgId, userId },
+            select: { id: true },
+        });
+        if (!group) throw new Error("Invalid proxy group");
+        return { proxyGroupId: pgId, proxySource: "group" };
+    }
+
+    if (user?.role === "free") {
+        throw new Error("You must select a proxy group or free proxy pool");
+    }
+
+    return { proxyGroupId: null, proxySource: "server" };
 }
 
 export async function createMonitor(formData: FormData) {
@@ -68,35 +120,11 @@ export async function createMonitor(formData: FormData) {
     if (normalizedName.length > 255) throw new Error("Name is too long");
     if (normalizedQuery.length > 255) throw new Error("Keywords are too long");
 
-    let proxyGroupId: number | null = null;
-
-    if (proxyGroupRaw && proxyGroupRaw !== "server") {
-        const pgId = parseInt(proxyGroupRaw);
-        if (!isNaN(pgId)) {
-            const group = await db.proxy_groups.findFirst({
-                where: { id: pgId, userId: session.user.id },
-            });
-            if (!group) throw new Error("Invalid proxy group");
-            proxyGroupId = pgId;
-        }
-    } else if (proxyGroupRaw === "server") {
-        const user = await db.user.findUnique({
-            where: { id: session.user.id },
-            select: { role: true },
-        });
-        if (user?.role !== "premium" && user?.role !== "admin") {
-            throw new Error("Server proxies require a premium account");
-        }
-        proxyGroupId = null;
-    } else {
-        const user = await db.user.findUnique({
-            where: { id: session.user.id },
-            select: { role: true },
-        });
-        if (user?.role === "free") {
-            throw new Error("You must select a proxy group");
-        }
-    }
+    const { proxyGroupId, proxySource } = await resolveMonitorProxySelection(
+        session.user.id,
+        proxyGroupRaw,
+        region,
+    );
 
     const urlToSave = discordWebhook?.trim() || null;
     if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
@@ -128,6 +156,7 @@ export async function createMonitor(formData: FormData) {
             discord_webhook: urlToSave,
             telegram_active: Boolean(telegramConnection),
             proxy_group_id: proxyGroupId,
+            proxy_source: proxySource,
             status: initialStatus,
             webhook_active: urlToSave ? true : false,
         },
@@ -220,27 +249,11 @@ export async function updateMonitor(id: number, formData: FormData) {
     });
     if (!existing) throw new Error("Monitor not found");
 
-    let proxyGroupId: number | null = null;
-
-    if (proxyGroupRaw && proxyGroupRaw !== "server") {
-        const pgId = parseInt(proxyGroupRaw);
-        if (!isNaN(pgId)) {
-            const group = await db.proxy_groups.findFirst({
-                where: { id: pgId, userId: session.user.id },
-            });
-            if (!group) throw new Error("Invalid proxy group");
-            proxyGroupId = pgId;
-        }
-    } else if (proxyGroupRaw === "server") {
-        const user = await db.user.findUnique({
-            where: { id: session.user.id },
-            select: { role: true },
-        });
-        if (user?.role !== "premium" && user?.role !== "admin") {
-            throw new Error("Server proxies require a premium account");
-        }
-        proxyGroupId = null;
-    }
+    const { proxyGroupId, proxySource } = await resolveMonitorProxySelection(
+        session.user.id,
+        proxyGroupRaw,
+        region,
+    );
 
     const urlToSave = discordWebhook?.trim() || null;
     if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
@@ -268,6 +281,7 @@ export async function updateMonitor(id: number, formData: FormData) {
             allowed_countries: allowedCountries || null,
             discord_webhook: urlToSave,
             proxy_group_id: proxyGroupId,
+            proxy_source: proxySource,
             webhook_active: urlToSave ? true : false,
             telegram_active: Boolean(telegramConnection),
         },
@@ -323,27 +337,11 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
     });
     if (!existing) throw new Error("Monitor not found");
 
-    let proxyGroupId: number | null = null;
-
-    if (proxyGroupRaw && proxyGroupRaw !== "server") {
-        const pgId = parseInt(proxyGroupRaw);
-        if (!isNaN(pgId)) {
-            const group = await db.proxy_groups.findFirst({
-                where: { id: pgId, userId: session.user.id },
-            });
-            if (!group) throw new Error("Invalid proxy group");
-            proxyGroupId = pgId;
-        }
-    } else if (proxyGroupRaw === "server") {
-        const user = await db.user.findUnique({
-            where: { id: session.user.id },
-            select: { role: true },
-        });
-        if (user?.role !== "premium" && user?.role !== "admin") {
-            throw new Error("Server proxies require a premium account");
-        }
-        proxyGroupId = null;
-    }
+    const { proxyGroupId, proxySource } = await resolveMonitorProxySelection(
+        session.user.id,
+        proxyGroupRaw,
+        region,
+    );
 
     const urlToSave = discordWebhook?.trim() || null;
     if (urlToSave && !isValidDiscordWebhook(urlToSave)) {
@@ -371,6 +369,7 @@ export async function updateMonitorAndReturn(id: number, formData: FormData) {
             allowed_countries: allowedCountries || null,
             discord_webhook: urlToSave,
             proxy_group_id: proxyGroupId,
+            proxy_source: proxySource,
             webhook_active: urlToSave ? true : false,
             telegram_active: Boolean(telegramConnection),
         },
@@ -497,22 +496,27 @@ export async function testDiscordWebhook(url: string) {
                 "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
             embeds: [
                 {
-                    title: "🎉 Webhook Successfully Connected",
-                    description:
-                        "Your Discord webhook is configured correctly. You will now receive new items here as soon as they are found!",
-                    color: 1403248,
-                    thumbnail: {
-                        url: "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+                    author: {
+                        name: "Vintrack notification test",
                     },
+                    title: "Discord webhook connected",
+                    description:
+                        "New matches will arrive here with the listing image, price, size, condition, seller details, and direct links.",
+                    color: 0x007782,
                     fields: [
                         {
-                            name: "Status",
-                            value: "✅ Active",
+                            name: "Delivery",
+                            value: "**Ready**",
+                            inline: true,
+                        },
+                        {
+                            name: "Content",
+                            value: "Structured item cards",
                             inline: true,
                         },
                     ],
                     footer: {
-                        text: "Vintrack • Setup Complete",
+                        text: "Vintrack • Notifications",
                         icon_url:
                             "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
                     },

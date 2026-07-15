@@ -21,56 +21,7 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 		return nil
 	}
 
-	baseURL := os.Getenv("DASHBOARD_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:3000"
-	}
-
-	dashLink := fmt.Sprintf("%s/monitors/%d", baseURL, item.MonitorID)
-
-	locationPrefix := ""
-	if item.Location != "" {
-		locationPrefix = item.Location + " "
-	}
-
-	links := fmt.Sprintf("**[🛒 View on Vinted](%s)** | **[📊 View on Dashboard](%s)**", item.URL, dashLink)
-	if item.SellerURL != "" {
-		links = fmt.Sprintf("%s | **[👤 Seller](%s)**", links, item.SellerURL)
-	}
-	description := fmt.Sprintf("%s\n\n%s", item.Title, links)
-
-	embeds := []map[string]interface{}{
-		{
-			"title":       fmt.Sprintf("%s%s | %s", locationPrefix, item.Title, item.Price),
-			"url":         item.URL,
-			"color":       0x007782,
-			"description": description,
-			"image":       map[string]string{"url": absoluteDashboardURL(item.ImageURL)},
-			"fields":      buildFields(item),
-			"footer": map[string]string{
-				"text":     fmt.Sprintf("Vintrack • %s • %s", monitorName, proxySource),
-				"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-		},
-	}
-
-	for i, imgURL := range item.ExtraImages {
-		if i >= 2 {
-			break
-		}
-		embeds = append(embeds, map[string]interface{}{
-			"url":   item.URL,
-			"image": map[string]string{"url": absoluteDashboardURL(imgURL)},
-		})
-	}
-
-	payload := map[string]interface{}{
-		"username":   "Vintrack Monitor",
-		"avatar_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
-		"embeds":     embeds,
-	}
-
+	payload := buildItemWebhookPayload(item, monitorName, proxySource)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("webhook marshal error: %v", err)
@@ -111,6 +62,61 @@ func SendWebhook(webhookURL string, item model.Item, monitorName string, proxySo
 		}
 	}
 	return fmt.Errorf("discord webhook returned %d", resp.StatusCode)
+}
+
+func buildItemWebhookPayload(item model.Item, monitorName string, proxySource string) map[string]interface{} {
+	baseURL := os.Getenv("DASHBOARD_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:3000"
+	}
+	dashLink := fmt.Sprintf("%s/monitors/%d", baseURL, item.MonitorID)
+
+	links := fmt.Sprintf("**[View item](%s)**  •  [Dashboard](%s)", item.URL, dashLink)
+	if item.SellerURL != "" {
+		links = fmt.Sprintf("%s  •  [Seller](%s)", links, item.SellerURL)
+	}
+
+	detectedAt := item.FoundAt
+	if detectedAt.IsZero() {
+		detectedAt = time.Now()
+	}
+
+	embed := map[string]interface{}{
+		"author": map[string]string{
+			"name": fmt.Sprintf("New match • %s", monitorName),
+		},
+		"title":       fallbackText(item.Title, "New Vinted listing"),
+		"url":         item.URL,
+		"color":       0x007782,
+		"description": links,
+		"fields":      buildFields(item),
+		"footer": map[string]string{
+			"text":     fmt.Sprintf("Vintrack • %s", fallbackText(proxySource, "monitor")),
+			"icon_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+		},
+		"timestamp": detectedAt.Format(time.RFC3339),
+	}
+	if imageURL := absoluteDashboardURL(item.ImageURL); imageURL != "" {
+		embed["image"] = map[string]string{"url": imageURL}
+	}
+	embeds := []map[string]interface{}{embed}
+	seenImages := map[string]bool{item.ImageURL: item.ImageURL != ""}
+	for _, rawImageURL := range item.ExtraImages {
+		if len(embeds) >= 3 || rawImageURL == "" || seenImages[rawImageURL] {
+			continue
+		}
+		seenImages[rawImageURL] = true
+		embeds = append(embeds, map[string]interface{}{
+			"url":   item.URL,
+			"image": map[string]string{"url": absoluteDashboardURL(rawImageURL)},
+		})
+	}
+
+	return map[string]interface{}{
+		"username":   "Vintrack",
+		"avatar_url": "https://cdn-icons-png.flaticon.com/512/8266/8266540.png",
+		"embeds":     embeds,
+	}
 }
 
 func absoluteDashboardURL(rawURL string) string {
@@ -164,30 +170,52 @@ func SendStartupWebhook(webhookURL string, monitorName string) {
 }
 
 func buildFields(item model.Item) []map[string]interface{} {
-	priceValue := fmt.Sprintf("**%s**", item.Price)
-	if item.TotalPrice != "" {
-		priceValue = fmt.Sprintf("**%s** (%s)", item.Price, item.TotalPrice)
+	priceValue := fmt.Sprintf("**%s**", fallbackText(item.Price, "Unknown"))
+	if item.TotalPrice != "" && item.TotalPrice != item.Price {
+		priceValue = fmt.Sprintf("**%s**\n%s total", fallbackText(item.Price, "Unknown"), item.TotalPrice)
 	}
 
 	fields := []map[string]interface{}{
-		{"name": "💰 Price", "value": priceValue, "inline": true},
-		{"name": "🏷️ Brand", "value": fmt.Sprintf("**%s**", item.Brand), "inline": true},
-		{"name": "📏 Size", "value": fmt.Sprintf("**%s**", item.Size), "inline": true},
-		{"name": "✨ Condition", "value": fmt.Sprintf("**%s**", item.Condition), "inline": true},
-		{"name": "⌚ Published", "value": fmt.Sprintf("<t:%d:R>", item.FoundAt.Unix()), "inline": true},
+		{"name": "Price", "value": priceValue, "inline": true},
+		{"name": "Size", "value": fallbackText(item.Size, "Not specified"), "inline": true},
+		{"name": "Condition", "value": fallbackText(item.Condition, "Not specified"), "inline": true},
 	}
 
+	if item.Brand != "" {
+		fields = append(fields, map[string]interface{}{
+			"name": "Brand", "value": item.Brand, "inline": true,
+		})
+	}
+	if item.Location != "" {
+		fields = append(fields, map[string]interface{}{
+			"name": "Location", "value": item.Location, "inline": true,
+		})
+	}
 	if item.Rating != "" {
 		fields = append(fields, map[string]interface{}{
-			"name": "🌟 Reviews", "value": fmt.Sprintf("**%s**", item.Rating), "inline": true,
+			"name": "Seller rating", "value": item.Rating, "inline": true,
 		})
-	} else {
+	}
+	if item.SellerLogin != "" {
 		fields = append(fields, map[string]interface{}{
-			"name": "🌟 Reviews", "value": "**No ratings**", "inline": true,
+			"name": "Seller", "value": "@" + item.SellerLogin, "inline": true,
+		})
+	}
+	if !item.FoundAt.IsZero() {
+		fields = append(fields, map[string]interface{}{
+			"name": "Detected", "value": fmt.Sprintf("<t:%d:R>", item.FoundAt.Unix()), "inline": true,
 		})
 	}
 
 	return fields
+}
+
+func fallbackText(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func SendProxyWarningWebhook(webhookURL string, monitorName string, consecutiveErrors int) {
