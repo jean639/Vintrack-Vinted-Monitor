@@ -14,7 +14,6 @@ export const dynamic = "force-dynamic";
 
 type CountRow = {
     userId: string;
-    total_items?: bigint;
     new_items_24h?: bigint;
     checks_24h?: bigint;
     successful_checks_24h?: bigint;
@@ -65,11 +64,10 @@ async function getAdminUserMetrics(userIds: string[]) {
 
     if (userIds.length === 0) return metrics;
 
-    const [itemRows, runRows, errorRows] = await Promise.all([
-        db.$queryRaw<CountRow[]>`
+    try {
+        const itemRows = await db.$queryRaw<CountRow[]>`
             SELECT
                 m."userId",
-                COUNT(i.id)::bigint AS total_items,
                 COUNT(i.id) FILTER (
                     WHERE i.found_at >= NOW() - INTERVAL '24 hours'
                 )::bigint AS new_items_24h
@@ -77,8 +75,19 @@ async function getAdminUserMetrics(userIds: string[]) {
             LEFT JOIN items i ON i.monitor_id = m.id
             WHERE m."userId" IN (${Prisma.join(userIds)})
             GROUP BY m."userId"
-        `,
-        db.$queryRaw<CountRow[]>`
+        `;
+
+        for (const row of itemRows) {
+            const current = metrics.get(row.userId) ?? emptyMetrics();
+            current.newItems24h = Number(row.new_items_24h ?? 0);
+            metrics.set(row.userId, current);
+        }
+    } catch (error) {
+        console.error("[admin] failed to load 24h item metrics", error);
+    }
+
+    try {
+        const runRows = await db.$queryRaw<CountRow[]>`
             SELECT
                 m."userId",
                 COUNT(r.id)::bigint AS checks_24h,
@@ -92,8 +101,31 @@ async function getAdminUserMetrics(userIds: string[]) {
                 AND r.checked_at >= NOW() - INTERVAL '24 hours'
             WHERE m."userId" IN (${Prisma.join(userIds)})
             GROUP BY m."userId"
-        `,
-        db.$queryRaw<LatestErrorRow[]>`
+        `;
+
+        for (const row of runRows) {
+            const current = metrics.get(row.userId) ?? emptyMetrics();
+            const checks = Number(row.checks_24h ?? 0);
+            const successful = Number(row.successful_checks_24h ?? 0);
+            current.checks24h = checks;
+            current.successfulChecks24h = successful;
+            current.failedChecks24h = Number(row.failed_checks_24h ?? 0);
+            current.successRate24h =
+                checks > 0 ? Math.round((successful / checks) * 100) : null;
+            current.avgDurationMs24h =
+                row.avg_duration_ms_24h === null ||
+                row.avg_duration_ms_24h === undefined
+                    ? null
+                    : Math.round(row.avg_duration_ms_24h);
+            current.lastCheckAt = row.last_check_at ?? null;
+            metrics.set(row.userId, current);
+        }
+    } catch (error) {
+        console.error("[admin] failed to load 24h run metrics", error);
+    }
+
+    try {
+        const errorRows = await db.$queryRaw<LatestErrorRow[]>`
             SELECT DISTINCT ON (m."userId")
                 m."userId",
                 r.error_message AS latest_error_24h
@@ -103,38 +135,15 @@ async function getAdminUserMetrics(userIds: string[]) {
               AND r.checked_at >= NOW() - INTERVAL '24 hours'
               AND r.error_message IS NOT NULL
             ORDER BY m."userId", r.checked_at DESC
-        `,
-    ]);
+        `;
 
-    for (const row of itemRows) {
-        const current = metrics.get(row.userId) ?? emptyMetrics();
-        current.totalItems = Number(row.total_items ?? 0);
-        current.newItems24h = Number(row.new_items_24h ?? 0);
-        metrics.set(row.userId, current);
-    }
-
-    for (const row of runRows) {
-        const current = metrics.get(row.userId) ?? emptyMetrics();
-        const checks = Number(row.checks_24h ?? 0);
-        const successful = Number(row.successful_checks_24h ?? 0);
-        current.checks24h = checks;
-        current.successfulChecks24h = successful;
-        current.failedChecks24h = Number(row.failed_checks_24h ?? 0);
-        current.successRate24h =
-            checks > 0 ? Math.round((successful / checks) * 100) : null;
-        current.avgDurationMs24h =
-            row.avg_duration_ms_24h === null ||
-            row.avg_duration_ms_24h === undefined
-                ? null
-                : Math.round(row.avg_duration_ms_24h);
-        current.lastCheckAt = row.last_check_at ?? null;
-        metrics.set(row.userId, current);
-    }
-
-    for (const row of errorRows) {
-        const current = metrics.get(row.userId) ?? emptyMetrics();
-        current.latestError24h = row.latest_error_24h;
-        metrics.set(row.userId, current);
+        for (const row of errorRows) {
+            const current = metrics.get(row.userId) ?? emptyMetrics();
+            current.latestError24h = row.latest_error_24h;
+            metrics.set(row.userId, current);
+        }
+    } catch (error) {
+        console.error("[admin] failed to load latest monitor errors", error);
     }
 
     return metrics;
@@ -200,6 +209,10 @@ export default async function AdminPage() {
         const runningMonitors = user.monitors.filter(
             (monitor) => monitor.status === "active",
         ).length;
+        const totalItems = user.monitors.reduce(
+            (sum, monitor) => sum + monitor._count.items,
+            0,
+        );
 
         return {
             ...user,
@@ -207,6 +220,7 @@ export default async function AdminPage() {
                 ...metrics,
                 runningMonitors,
                 pausedMonitors: user.monitors.length - runningMonitors,
+                totalItems,
             },
         };
     });
