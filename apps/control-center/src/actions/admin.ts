@@ -22,6 +22,8 @@ const FREE_PROXY_MAX_POOL_SIZE_KEY = "free_proxy_max_pool_size";
 const FREE_PROXY_FAILURE_THRESHOLD_KEY = "free_proxy_failure_threshold";
 const FREE_PROXY_QUARANTINE_MINUTES_KEY = "free_proxy_quarantine_minutes";
 const FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY = "free_proxy_min_active_per_region";
+const FREE_PROXY_TARGET_ACTIVE_PER_REGION_KEY =
+    "free_proxy_target_active_per_region";
 const FREE_PROXY_MAX_LATENCY_MS_KEY = "free_proxy_max_latency_ms";
 const FREE_PROXY_STARTER_REGIONS_KEY = "free_proxy_starter_regions";
 const DEFAULT_FREE_PROXY_IMPORT_URL =
@@ -32,6 +34,7 @@ const DEFAULT_FREE_PROXY_MAX_POOL_SIZE = 5000;
 const DEFAULT_FREE_PROXY_FAILURE_THRESHOLD = 3;
 const DEFAULT_FREE_PROXY_QUARANTINE_MINUTES = 30;
 const DEFAULT_FREE_PROXY_MIN_ACTIVE_PER_REGION = 25;
+const DEFAULT_FREE_PROXY_TARGET_ACTIVE_PER_REGION = 50;
 const DEFAULT_FREE_PROXY_MAX_LATENCY_MS = 2500;
 const VALID_PROXY_SCHEMES = ["http", "https", "socks4", "socks5"];
 const FREE_PROXY_SOURCE_URLS: Record<string, string> = {
@@ -119,6 +122,7 @@ type FreeProxySettings = {
     failureThreshold: number;
     quarantineMinutes: number;
     minActivePerRegion: number;
+    targetActivePerRegion: number;
     maxLatencyMs: number;
     starterRegions: string;
 };
@@ -264,6 +268,7 @@ async function getFreeProxySettings(): Promise<FreeProxySettings> {
         FREE_PROXY_FAILURE_THRESHOLD_KEY,
         FREE_PROXY_QUARANTINE_MINUTES_KEY,
         FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY,
+        FREE_PROXY_TARGET_ACTIVE_PER_REGION_KEY,
         FREE_PROXY_MAX_LATENCY_MS_KEY,
         FREE_PROXY_STARTER_REGIONS_KEY,
     ];
@@ -315,6 +320,12 @@ async function getFreeProxySettings(): Promise<FreeProxySettings> {
             DEFAULT_FREE_PROXY_MIN_ACTIVE_PER_REGION,
             1,
             1000,
+        ),
+        targetActivePerRegion: parsePositiveIntSetting(
+            values[FREE_PROXY_TARGET_ACTIVE_PER_REGION_KEY],
+            DEFAULT_FREE_PROXY_TARGET_ACTIVE_PER_REGION,
+            1,
+            2000,
         ),
         maxLatencyMs: parsePositiveIntSetting(
             values[FREE_PROXY_MAX_LATENCY_MS_KEY],
@@ -644,6 +655,18 @@ export async function updateFreeProxySettings(formData: FormData) {
         1,
         1000,
     );
+    const targetActivePerRegion = Math.min(
+        maxPoolSize,
+        Math.max(
+            minActivePerRegion,
+            parsePositiveIntSetting(
+                formData.get("targetActivePerRegion") as string | undefined,
+                DEFAULT_FREE_PROXY_TARGET_ACTIVE_PER_REGION,
+                1,
+                2000,
+            ),
+        ),
+    );
     const maxLatencyMs = parsePositiveIntSetting(
         formData.get("maxLatencyMs") as string | undefined,
         DEFAULT_FREE_PROXY_MAX_LATENCY_MS,
@@ -685,6 +708,10 @@ export async function updateFreeProxySettings(formData: FormData) {
         setAppSetting(
             FREE_PROXY_MIN_ACTIVE_PER_REGION_KEY,
             String(minActivePerRegion),
+        ),
+        setAppSetting(
+            FREE_PROXY_TARGET_ACTIVE_PER_REGION_KEY,
+            String(targetActivePerRegion),
         ),
         setAppSetting(FREE_PROXY_MAX_LATENCY_MS_KEY, String(maxLatencyMs)),
         setAppSetting(FREE_PROXY_STARTER_REGIONS_KEY, starterRegions),

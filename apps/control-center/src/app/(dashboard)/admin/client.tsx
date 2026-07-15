@@ -148,6 +148,7 @@ type FreeProxyState = {
         failureThreshold: number;
         quarantineMinutes: number;
         minActivePerRegion: number;
+        targetActivePerRegion: number;
         maxLatencyMs: number;
         starterRegions: string;
     };
@@ -979,6 +980,10 @@ export function AdminClient({
         formData.set(
             "minActivePerRegion",
             String(freeProxySettings.minActivePerRegion),
+        );
+        formData.set(
+            "targetActivePerRegion",
+            String(freeProxySettings.targetActivePerRegion),
         );
         formData.set("maxLatencyMs", String(freeProxySettings.maxLatencyMs));
         formData.set("starterRegions", freeProxySettings.starterRegions);
@@ -2307,7 +2312,7 @@ export function AdminClient({
                                         before a proxy enters rotation.
                                     </p>
                                 </div>
-                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                                     <div className="space-y-2">
                                         <Label htmlFor="free-proxy-failures">
                                             Failures
@@ -2360,7 +2365,7 @@ export function AdminClient({
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="free-proxy-min-active">
-                                            Min active
+                                            Min ready
                                         </Label>
                                         <Input
                                             id="free-proxy-min-active"
@@ -2374,6 +2379,33 @@ export function AdminClient({
                                                     (prev) => ({
                                                         ...prev,
                                                         minActivePerRegion:
+                                                            Number(
+                                                                event.target
+                                                                    .value,
+                                                            ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="free-proxy-target-active">
+                                            Target reserve
+                                        </Label>
+                                        <Input
+                                            id="free-proxy-target-active"
+                                            type="number"
+                                            min={
+                                                freeProxySettings.minActivePerRegion
+                                            }
+                                            value={
+                                                freeProxySettings.targetActivePerRegion
+                                            }
+                                            onChange={(event) =>
+                                                setFreeProxySettings(
+                                                    (prev) => ({
+                                                        ...prev,
+                                                        targetActivePerRegion:
                                                             Number(
                                                                 event.target
                                                                     .value,
@@ -2417,8 +2449,9 @@ export function AdminClient({
                                         Region Health
                                     </p>
                                     <p className="text-muted-foreground text-xs">
-                                        Free Pool is usable only when a region
-                                        has enough active validated proxies.
+                                        Regions become usable at Min ready and
+                                        keep validating until Target reserve is
+                                        reached.
                                     </p>
                                 </div>
                             </div>
@@ -2443,14 +2476,18 @@ export function AdminClient({
                                                 >
                                                     {region.initializing
                                                         ? "Waiting"
-                                                        : region.healthy
-                                                          ? "Healthy"
-                                                          : "Degraded"}
+                                                        : !region.healthy
+                                                          ? "Degraded"
+                                                          : region.active +
+                                                                  region.warming <
+                                                              freeProxySettings.targetActivePerRegion
+                                                            ? "Building"
+                                                            : "Ready"}
                                                 </Badge>
                                                 <span className="text-muted-foreground">
                                                     {region.initializing
                                                         ? "Waiting for the worker to assign candidates"
-                                                        : `${region.active + region.warming} usable / ${region.active} active / ${region.warming} warming / ${region.pending} pending / ${region.cooldown} cooldown / ${region.dead} dead`}
+                                                        : `${region.active + region.warming} usable / ${freeProxySettings.targetActivePerRegion} target / ${region.active} active / ${region.warming} warming / ${region.pending} pending / ${region.cooldown} cooldown / ${region.dead} dead`}
                                                 </span>
                                             </div>
                                             <div className="text-muted-foreground">
