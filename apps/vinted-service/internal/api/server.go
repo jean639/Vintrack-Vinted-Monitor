@@ -889,6 +889,7 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 				"status":         "ignored_domain",
 				"domain":         existingSession.Domain,
 				"ignored_domain": incomingDomain,
+				"error":          fmt.Sprintf("browser session domain %s does not match linked domain %s", incomingDomain, existingSession.Domain),
 			})
 			return
 		}
@@ -925,6 +926,7 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 				"status":         "ignored_invalid_browser_session",
 				"domain":         existingSession.Domain,
 				"ignored_domain": incomingDomain,
+				"error":          "Vinted rejected the browser session token",
 			})
 			return
 		}
@@ -941,6 +943,7 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 			"domain":            existingSession.Domain,
 			"ignored_domain":    incomingDomain,
 			"ignored_vinted_id": info.ID,
+			"error":             "browser is signed in to a different Vinted account",
 		})
 		return
 	}

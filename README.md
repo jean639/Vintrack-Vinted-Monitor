@@ -145,7 +145,7 @@ The extension is the easiest way to use linked Vinted accounts on the live demo 
 - Install in Chrome: open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the extracted extension folder
 - Install in Firefox: open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, and select the Firefox build during development. For normal users, publish a Mozilla-signed `.xpi`.
 - Connect in Vintrack: open **Account**, click **Download Extension** if needed, then **Link With Installed Extension**
-- What it syncs: `access_token_web`, `refresh_token_web`, Vinted domain, browser user agent, and the Vintrack light/dark theme
+- What it syncs: `access_token_web`, Vinted domain, browser user agent, and the Vintrack light/dark theme
 - What it does not sync: the full cookie header or full cookie jar
 
 For distribution, attach `vintrack-browser-sync-extension.zip` and the Mozilla-signed `vintrack-browser-sync-extension-firefox.xpi` to every GitHub release. The live demo and documentation can point to `/releases/latest/download/...`, so users do not need to browse the repo.
