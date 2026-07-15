@@ -59,7 +59,7 @@
       () => {
         // The background script ignores non-Vintrack origins.
         void chrome.runtime.lastError;
-      }
+      },
     );
   }
 
@@ -98,7 +98,10 @@
       }, timeoutMs);
 
       function handleReady(event) {
-        if (event.source !== window || event.data?.type !== "VINTRACK_PAGE_BRIDGE_READY") {
+        if (
+          event.source !== window ||
+          event.data?.type !== "VINTRACK_PAGE_BRIDGE_READY"
+        ) {
           return;
         }
 
@@ -145,7 +148,7 @@
           type: "VINTRACK_PAGE_BUY_REQUEST",
           payload: { ...payload, requestId },
         },
-        window.location.origin
+        window.location.origin,
       );
     });
   }
@@ -183,7 +186,7 @@
           type: "VINTRACK_PAGE_SESSION_REFRESH_REQUEST",
           payload: { ...payload, requestId },
         },
-        window.location.origin
+        window.location.origin,
       );
     });
   }
@@ -191,12 +194,15 @@
   ensurePageBridge();
   watchVintrackTheme();
 
-  chrome.runtime.sendMessage({ type: "VINTRACK_EXTENSION_PING" }, (response) => {
-    if (chrome.runtime.lastError) {
-      return;
-    }
-    post("VINTRACK_EXTENSION_READY", response || { installed: true });
-  });
+  chrome.runtime.sendMessage(
+    { type: "VINTRACK_EXTENSION_PING" },
+    (response) => {
+      if (chrome.runtime.lastError) {
+        return;
+      }
+      post("VINTRACK_EXTENSION_READY", response || { installed: true });
+    },
+  );
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || !event.data?.type) {
@@ -204,12 +210,15 @@
     }
 
     if (event.data.type === "VINTRACK_EXTENSION_PING") {
-      chrome.runtime.sendMessage({ type: "VINTRACK_EXTENSION_PING" }, (response) => {
-        if (chrome.runtime.lastError) {
-          return;
-        }
-        post("VINTRACK_EXTENSION_READY", response || { installed: true });
-      });
+      chrome.runtime.sendMessage(
+        { type: "VINTRACK_EXTENSION_PING" },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            return;
+          }
+          post("VINTRACK_EXTENSION_READY", response || { installed: true });
+        },
+      );
       return;
     }
 
@@ -220,9 +229,21 @@
           payload: event.data.payload,
         },
         (response) => {
-          post("VINTRACK_EXTENSION_CONNECT_RESULT", response || { ok: false });
+          const runtimeError = chrome.runtime.lastError;
+          post(
+            "VINTRACK_EXTENSION_CONNECT_RESULT",
+            runtimeError
+              ? {
+                  ok: false,
+                  error: runtimeError.message || "Extension connection failed",
+                }
+              : response || {
+                  ok: false,
+                  error: "Extension connection returned no result",
+                },
+          );
           syncVintrackTheme();
-        }
+        },
       );
       return;
     }
@@ -234,8 +255,20 @@
           payload: event.data.payload,
         },
         (response) => {
-          post("VINTRACK_EXTENSION_MANUAL_SYNC_RESULT", response || { ok: false });
-        }
+          const runtimeError = chrome.runtime.lastError;
+          post(
+            "VINTRACK_EXTENSION_MANUAL_SYNC_RESULT",
+            runtimeError
+              ? {
+                  ok: false,
+                  error: runtimeError.message || "Extension sync failed",
+                }
+              : response || {
+                  ok: false,
+                  error: "Extension sync returned no result",
+                },
+          );
+        },
       );
       return;
     }
@@ -248,14 +281,17 @@
         },
         (response) => {
           post("VINTRACK_EXTENSION_BUY_RESULT", response || { ok: false });
-        }
+        },
       );
     }
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "VINTRACK_TAB_PING") {
-      sendResponse({ ok: true, isVintedPage: isVintedHost(window.location.hostname) });
+      sendResponse({
+        ok: true,
+        isVintedPage: isVintedHost(window.location.hostname),
+      });
       return false;
     }
 
@@ -268,9 +304,12 @@
           sendResponse({
             ok: false,
             code: "page_bridge_error",
-            error: error instanceof Error ? error.message : "Unknown page bridge error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unknown page bridge error",
             requestId: message.payload?.requestId,
-          })
+          }),
         );
       return true;
     }
@@ -284,9 +323,12 @@
           sendResponse({
             ok: false,
             code: "page_bridge_error",
-            error: error instanceof Error ? error.message : "Unknown page bridge error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unknown page bridge error",
             requestId: message.payload?.requestId,
-          })
+          }),
         );
       return true;
     }

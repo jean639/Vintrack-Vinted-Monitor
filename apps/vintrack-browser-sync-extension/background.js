@@ -2,6 +2,7 @@ const STORAGE_KEYS = {
   token: "browserLinkToken",
   appOrigin: "vintrackAppOrigin",
   lastSyncAt: "vintrackLastSyncAt",
+  lastSyncAttemptAt: "vintrackLastSyncAttemptAt",
   lastSyncStatus: "vintrackLastSyncStatus",
   lastSyncError: "vintrackLastSyncError",
   syncedDomains: "vintrackSyncedDomains",
@@ -11,7 +12,11 @@ const STORAGE_KEYS = {
 const PERIODIC_SYNC_ALARM = "vintrackPeriodicSync";
 const PERIODIC_SYNC_MINUTES = 10;
 const BUY_TAB_READY_TIMEOUT_MS = 20000;
+const SYNC_REQUEST_TIMEOUT_MS = 15000;
+const PROACTIVE_BROWSER_REFRESH_MS = 2 * 60 * 1000;
+const COMPLETED_SYNC_STATUSES = new Set(["completed", "refreshed"]);
 const extensionApi = globalThis.browser || globalThis.chrome;
+const inFlightSyncs = new Map();
 
 function sanitizeDomain(domain) {
   return (domain || "").replace(/^\./, "").trim().toLowerCase();
@@ -49,10 +54,33 @@ function cookieSyncKey(domain, storeId) {
   return `${sanitizeDomain(domain)}|${storeId || ""}`;
 }
 
+function accessTokenExpiresSoon(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) {
+    return false;
+  }
+
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const claims = JSON.parse(atob(padded));
+    return (
+      typeof claims?.exp === "number" &&
+      claims.exp * 1000 - Date.now() <= PROACTIVE_BROWSER_REFRESH_MS
+    );
+  } catch {
+    return false;
+  }
+}
+
 function cookieDomainMatches(cookieDomain, targetDomain) {
   const cookieHost = sanitizeDomain(cookieDomain);
   const targetHost = sanitizeDomain(targetDomain);
-  return cookieHost === targetHost || targetHost.endsWith(`.${cookieHost}`) || cookieHost.endsWith(`.${targetHost}`);
+  return (
+    cookieHost === targetHost ||
+    targetHost.endsWith(`.${cookieHost}`) ||
+    cookieHost.endsWith(`.${targetHost}`)
+  );
 }
 
 function itemUrlForDomain(itemUrl, domain, itemId) {
@@ -84,8 +112,12 @@ async function clearLocalExtensionState() {
 }
 
 async function getStoredCheckoutLinks() {
-  const storage = await extensionApi.storage.local.get(STORAGE_KEYS.checkoutLinks);
-  return Array.isArray(storage[STORAGE_KEYS.checkoutLinks]) ? storage[STORAGE_KEYS.checkoutLinks] : [];
+  const storage = await extensionApi.storage.local.get(
+    STORAGE_KEYS.checkoutLinks,
+  );
+  return Array.isArray(storage[STORAGE_KEYS.checkoutLinks])
+    ? storage[STORAGE_KEYS.checkoutLinks]
+    : [];
 }
 
 async function storeCheckoutLink(entry) {
@@ -123,7 +155,9 @@ async function storeCheckoutLink(entry) {
     }),
   ].slice(0, 20);
 
-  await extensionApi.storage.local.set({ [STORAGE_KEYS.checkoutLinks]: nextLinks });
+  await extensionApi.storage.local.set({
+    [STORAGE_KEYS.checkoutLinks]: nextLinks,
+  });
 }
 
 async function findStoredCheckoutLink(match) {
@@ -134,14 +168,17 @@ async function findStoredCheckoutLink(match) {
   const sellerId = Number(match?.sellerId || 0);
 
   return (
-    links.find((link) => transactionId && Number(link?.transactionId || 0) === transactionId) ||
+    links.find(
+      (link) =>
+        transactionId && Number(link?.transactionId || 0) === transactionId,
+    ) ||
     links.find(
       (link) =>
         itemId &&
         sellerId &&
         Number(link?.itemId || 0) === itemId &&
         Number(link?.sellerId || 0) === sellerId &&
-        sanitizeDomain(link?.domain || "") === normalizedDomain
+        sanitizeDomain(link?.domain || "") === normalizedDomain,
     ) ||
     null
   );
@@ -149,7 +186,9 @@ async function findStoredCheckoutLink(match) {
 
 async function findExistingCheckoutTab(domain) {
   const normalizedDomain = sanitizeDomain(domain);
-  const matchingTabs = await extensionApi.tabs.query({ url: [`https://${normalizedDomain}/checkout*`] });
+  const matchingTabs = await extensionApi.tabs.query({
+    url: [`https://${normalizedDomain}/checkout*`],
+  });
   const existingTab = matchingTabs
     .filter((tab) => typeof tab.id === "number" && typeof tab.url === "string")
     .sort((a, b) => (b.id || 0) - (a.id || 0))[0];
@@ -158,8 +197,56 @@ async function findExistingCheckoutTab(domain) {
 
 function ensurePeriodicSyncAlarm() {
   extensionApi.alarms.create(PERIODIC_SYNC_ALARM, {
+    delayInMinutes: 1,
     periodInMinutes: PERIODIC_SYNC_MINUTES,
   });
+}
+
+function isCompletedSyncResult(result) {
+  return Boolean(
+    result?.ok &&
+    result.domain &&
+    (!result.status || COMPLETED_SYNC_STATUSES.has(result.status)),
+  );
+}
+
+function syncStatusError(
+  data,
+  fallback = "Vinted session sync was not accepted.",
+) {
+  if (typeof data?.error === "string" && data.error.trim()) {
+    return data.error.trim();
+  }
+
+  switch (data?.status) {
+    case "ignored_domain":
+      return `The open Vinted session is for ${data.ignored_domain || "another domain"}, but Vintrack is linked to ${data.domain || "a different domain"}.`;
+    case "ignored_account":
+      return "The open Vinted tab is signed in to a different account than the one linked to Vintrack.";
+    case "ignored_invalid_browser_session":
+      return "Vinted rejected the browser session token. Reload the logged-in Vinted tab and try again.";
+    default:
+      return fallback;
+  }
+}
+
+function syncResultError(result) {
+  if (typeof result?.error === "string" && result.error.trim()) {
+    return result.error.trim();
+  }
+
+  switch (result?.reason) {
+    case "missing-browser-token":
+      return "No active Vinted session token was found. Open a logged-in Vinted tab and sync again.";
+    case "no-open-vinted-tab":
+      return "Open a logged-in Vinted tab, then sync again.";
+    case "not-configured":
+      return "Connect the extension from the Vintrack account page first.";
+    case "unsupported-domain":
+      return "The selected site is not a supported Vinted domain.";
+    default:
+      return typeof result?.reason === "string" ? result.reason : "";
+  }
 }
 
 async function getOpenVintedTabs(preferredDomain = "") {
@@ -244,22 +331,36 @@ async function persistSyncState(results) {
             error: "Open or reload a logged-in Vinted tab, then sync again.",
           },
         ];
-  const successfulDomains = results
-    .filter((result) => result.ok && result.domain && (!result.status || result.status === "completed" || result.status === "refreshed"))
-    .map((result) => result.domain);
+  const successfulDomains = [
+    ...new Set(
+      results.filter(isCompletedSyncResult).map((result) => result.domain),
+    ),
+  ];
   const failedResult = normalizedResults.find((result) => !result.ok);
+  const now = new Date().toISOString();
+  const previous = await extensionApi.storage.local.get([
+    STORAGE_KEYS.lastSyncAt,
+    STORAGE_KEYS.syncedDomains,
+  ]);
+  const previousDomains = Array.isArray(previous[STORAGE_KEYS.syncedDomains])
+    ? previous[STORAGE_KEYS.syncedDomains]
+    : [];
+  const hasSuccessfulSync = successfulDomains.length > 0;
 
   await extensionApi.storage.local.set({
-    [STORAGE_KEYS.lastSyncAt]: new Date().toISOString(),
-    [STORAGE_KEYS.lastSyncStatus]:
-      successfulDomains.length > 0 ? "ok" : failedResult ? "error" : "idle",
-    [STORAGE_KEYS.lastSyncError]:
-      typeof failedResult?.error === "string"
-        ? failedResult.error
-        : typeof failedResult?.reason === "string"
-          ? failedResult.reason
-          : "",
-    [STORAGE_KEYS.syncedDomains]: successfulDomains,
+    [STORAGE_KEYS.lastSyncAt]: hasSuccessfulSync
+      ? now
+      : previous[STORAGE_KEYS.lastSyncAt] || "",
+    [STORAGE_KEYS.lastSyncAttemptAt]: now,
+    [STORAGE_KEYS.lastSyncStatus]: hasSuccessfulSync
+      ? "ok"
+      : failedResult
+        ? "error"
+        : "idle",
+    [STORAGE_KEYS.lastSyncError]: syncResultError(failedResult),
+    [STORAGE_KEYS.syncedDomains]: hasSuccessfulSync
+      ? successfulDomains
+      : previousDomains,
   });
 }
 
@@ -271,24 +372,32 @@ function formatRuntimeState(storage) {
 
   return {
     installed: true,
+    version: extensionApi.runtime.getManifest().version || "",
     configured: Boolean(storage.browserLinkToken && storage.vintrackAppOrigin),
     theme,
     syncedDomains: Array.isArray(storage.vintrackSyncedDomains)
       ? storage.vintrackSyncedDomains
       : [],
-    lastSyncAt: typeof storage.vintrackLastSyncAt === "string"
-      ? storage.vintrackLastSyncAt
-      : "",
-    lastSyncStatus: typeof storage.vintrackLastSyncStatus === "string"
-      ? storage.vintrackLastSyncStatus
-      : "idle",
-    lastSyncError: typeof storage.vintrackLastSyncError === "string"
-      ? storage.vintrackLastSyncError
-      : "",
+    lastSyncAt:
+      typeof storage.vintrackLastSyncAt === "string"
+        ? storage.vintrackLastSyncAt
+        : "",
+    lastSyncAttemptAt:
+      typeof storage.vintrackLastSyncAttemptAt === "string"
+        ? storage.vintrackLastSyncAttemptAt
+        : "",
+    lastSyncStatus:
+      typeof storage.vintrackLastSyncStatus === "string"
+        ? storage.vintrackLastSyncStatus
+        : "idle",
+    lastSyncError:
+      typeof storage.vintrackLastSyncError === "string"
+        ? storage.vintrackLastSyncError
+        : "",
   };
 }
 
-async function syncDomain(domain, options = {}) {
+async function performDomainSync(domain, options = {}) {
   const normalizedDomain = sanitizeDomain(domain);
   const storeId = typeof options.storeId === "string" ? options.storeId : "";
   if (!isVintedDomain(normalizedDomain)) {
@@ -301,47 +410,135 @@ async function syncDomain(domain, options = {}) {
   }
 
   const accessCookie = await extensionApi.cookies.get(
-    cookieLookupDetails(normalizedDomain, "access_token_web", storeId)
+    cookieLookupDetails(normalizedDomain, "access_token_web", storeId),
   );
 
   if (!accessCookie?.value) {
     return { ok: false, reason: "missing-browser-token" };
   }
-
-  const response = await fetch(
-    `${vintrackAppOrigin}/api/account/extension-sync/complete`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        link_token: browserLinkToken,
-        access_token: accessCookie?.value || "",
-        domain: normalizedDomain,
-        user_agent: navigator.userAgent,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(
-      typeof data.error === "string" ? data.error : `Sync failed (${response.status})`
-    );
+  if (accessTokenExpiresSoon(accessCookie.value)) {
+    return {
+      ok: false,
+      domain: normalizedDomain,
+      storeId,
+      reason: "browser-token-needs-refresh",
+      retryable: true,
+      error:
+        "The Vinted browser session token is expiring and needs to be refreshed.",
+    };
   }
 
-  const data = await response.json().catch(() => ({}));
+  const endpoint = `${vintrackAppOrigin}/api/account/extension-sync/complete`;
+  let response;
+  let data = {};
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      SYNC_REQUEST_TIMEOUT_MS,
+    );
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          link_token: browserLinkToken,
+          access_token: accessCookie?.value || "",
+          domain: normalizedDomain,
+          user_agent: navigator.userAgent,
+        }),
+        signal: controller.signal,
+      });
+      data = await response.json().catch(() => ({}));
+    } catch (error) {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        continue;
+      }
+      return {
+        ok: false,
+        domain: normalizedDomain,
+        storeId,
+        reason:
+          error?.name === "AbortError" ? "sync-timeout" : "sync-network-error",
+        retryable: true,
+        error:
+          error?.name === "AbortError"
+            ? "Vintrack did not answer the session sync request in time."
+            : error instanceof Error
+              ? error.message
+              : "Could not reach Vintrack for session sync.",
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.ok || (response.status < 500 && response.status !== 429)) {
+      break;
+    }
+    if (attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+  }
+
+  if (!response?.ok) {
+    return {
+      ok: false,
+      domain: normalizedDomain,
+      storeId,
+      reason: "server-sync-failed",
+      statusCode: response?.status || 0,
+      retryable:
+        response?.status === 401 ||
+        response?.status === 403 ||
+        response?.status >= 500,
+      error: syncStatusError(
+        data,
+        `Sync failed (${response?.status || "network error"})`,
+      ),
+    };
+  }
+
+  const status = typeof data.status === "string" ? data.status : "completed";
+  const completed = COMPLETED_SYNC_STATUSES.has(status);
   return {
-    ok: true,
+    ok: completed,
     domain: sanitizeDomain(data.domain || normalizedDomain),
-    status: typeof data.status === "string" ? data.status : "completed",
+    status,
     storeId,
+    reason: completed ? "" : status || "sync-not-completed",
+    retryable: status === "ignored_invalid_browser_session",
+    error: completed ? "" : syncStatusError(data),
   };
 }
 
+async function syncDomain(domain, options = {}) {
+  const normalizedDomain = sanitizeDomain(domain);
+  const storeId = typeof options.storeId === "string" ? options.storeId : "";
+  const key = cookieSyncKey(normalizedDomain, storeId);
+  const activeSync = inFlightSyncs.get(key);
+  if (activeSync) {
+    return activeSync;
+  }
+
+  const sync = performDomainSync(normalizedDomain, { storeId });
+  inFlightSyncs.set(key, sync);
+  try {
+    return await sync;
+  } finally {
+    if (inFlightSyncs.get(key) === sync) {
+      inFlightSyncs.delete(key);
+    }
+  }
+}
+
 async function syncAllVintedDomains() {
-  const accessCookies = await extensionApi.cookies.getAll({ name: "access_token_web" });
+  const accessCookies = await extensionApi.cookies.getAll({
+    name: "access_token_web",
+  });
   const candidates = new Map();
 
   for (const cookie of accessCookies) {
@@ -357,7 +554,9 @@ async function syncAllVintedDomains() {
 
   for (const candidate of candidates.values()) {
     try {
-      results.push(await syncDomain(candidate.domain, { storeId: candidate.storeId }));
+      results.push(
+        await syncDomain(candidate.domain, { storeId: candidate.storeId }),
+      );
     } catch (error) {
       results.push({
         ok: false,
@@ -374,12 +573,16 @@ async function syncAllVintedDomains() {
 async function syncPreferredOrAllDomains(preferredDomain) {
   const normalizedPreferredDomain = sanitizeDomain(preferredDomain);
   if (normalizedPreferredDomain && isVintedDomain(normalizedPreferredDomain)) {
-    const cookies = (await extensionApi.cookies.getAll({ name: "access_token_web" })).filter((cookie) =>
-      cookieDomainMatches(cookie.domain, normalizedPreferredDomain)
+    const cookies = (
+      await extensionApi.cookies.getAll({ name: "access_token_web" })
+    ).filter((cookie) =>
+      cookieDomainMatches(cookie.domain, normalizedPreferredDomain),
     );
     const storeIds = [
       ...new Set(
-        cookies.map((cookie) => (typeof cookie.storeId === "string" ? cookie.storeId : ""))
+        cookies.map((cookie) =>
+          typeof cookie.storeId === "string" ? cookie.storeId : "",
+        ),
       ),
     ];
     const targets = storeIds.length > 0 ? storeIds : [""];
@@ -398,7 +601,10 @@ async function syncPreferredOrAllDomains(preferredDomain) {
       }
     }
 
-    if (results.some((result) => result.ok)) {
+    if (results.some(isCompletedSyncResult)) {
+      return results;
+    }
+    if (results.some((result) => result.reason !== "missing-browser-token")) {
       return results;
     }
 
@@ -420,8 +626,14 @@ async function syncPreferredOrAllDomains(preferredDomain) {
 
 async function syncAndPersistPreferredOrAllDomains(preferredDomain) {
   let results = await syncPreferredOrAllDomains(preferredDomain);
-  if (!results.some((result) => result.ok)) {
-    const refreshResults = await refreshOpenVintedBrowserSessions(preferredDomain);
+  if (
+    !results.some(isCompletedSyncResult) &&
+    results.some(
+      (result) => result.retryable || result.reason === "missing-browser-token",
+    )
+  ) {
+    const refreshResults =
+      await refreshOpenVintedBrowserSessions(preferredDomain);
     if (refreshResults.some((result) => result.ok)) {
       results = await syncPreferredOrAllDomains(preferredDomain);
       if (results.length === 0) {
@@ -429,7 +641,8 @@ async function syncAndPersistPreferredOrAllDomains(preferredDomain) {
           {
             ok: false,
             reason: "missing-browser-token",
-            error: "Vinted did not expose a fresh browser access token after refresh.",
+            error:
+              "Vinted did not expose a fresh browser access token after refresh.",
           },
         ];
       }
@@ -443,7 +656,14 @@ async function syncAndPersistPreferredOrAllDomains(preferredDomain) {
 
 async function syncAndPersistAllDomains() {
   let results = await syncAllVintedDomains();
-  if (!results.some((result) => result.ok)) {
+  if (
+    !results.some(isCompletedSyncResult) &&
+    (results.length === 0 ||
+      results.some(
+        (result) =>
+          result.retryable || result.reason === "missing-browser-token",
+      ))
+  ) {
     const refreshResults = await refreshOpenVintedBrowserSessions();
     if (refreshResults.some((result) => result.ok)) {
       results = await syncAllVintedDomains();
@@ -452,7 +672,8 @@ async function syncAndPersistAllDomains() {
           {
             ok: false,
             reason: "missing-browser-token",
-            error: "Vinted did not expose a fresh browser access token after refresh.",
+            error:
+              "Vinted did not expose a fresh browser access token after refresh.",
           },
         ];
       }
@@ -462,28 +683,6 @@ async function syncAndPersistAllDomains() {
   }
   await persistSyncState(results);
   return results;
-}
-
-async function syncAndPersistDomain(domain, options = {}) {
-  let result;
-
-  try {
-    result = await syncDomain(domain, options);
-  } catch (error) {
-    result = {
-      ok: false,
-      domain: sanitizeDomain(domain),
-      storeId: typeof options.storeId === "string" ? options.storeId : "",
-      error: error instanceof Error ? error.message : "unknown-error",
-    };
-  }
-
-  await persistSyncState([result]);
-  if (!result.ok && result.error) {
-    throw new Error(result.error);
-  }
-
-  return result;
 }
 
 function waitForTabLoad(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
@@ -527,7 +726,9 @@ async function waitForTabBridge(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const response = await extensionApi.tabs.sendMessage(tabId, { type: "VINTRACK_TAB_PING" });
+      const response = await extensionApi.tabs.sendMessage(tabId, {
+        type: "VINTRACK_TAB_PING",
+      });
       if (response?.ok) {
         return;
       }
@@ -538,24 +739,34 @@ async function waitForTabBridge(tabId, timeoutMs = BUY_TAB_READY_TIMEOUT_MS) {
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
 
-  throw new Error("Vintrack extension bridge did not become ready on the Vinted tab");
+  throw new Error(
+    "Vintrack extension bridge did not become ready on the Vinted tab",
+  );
 }
 
 async function ensureVintedBuyTab(targetUrl) {
   const target = new URL(targetUrl);
-  const matchingTabs = await extensionApi.tabs.query({ url: [`https://${target.host}/*`] });
+  const matchingTabs = await extensionApi.tabs.query({
+    url: [`https://${target.host}/*`],
+  });
   const existingTab = matchingTabs.find((tab) => typeof tab.id === "number");
 
   if (existingTab?.id) {
     if (existingTab.url !== targetUrl) {
-      await extensionApi.tabs.update(existingTab.id, { url: targetUrl, active: false });
+      await extensionApi.tabs.update(existingTab.id, {
+        url: targetUrl,
+        active: false,
+      });
       await waitForTabLoad(existingTab.id);
     }
     await waitForTabBridge(existingTab.id);
     return { tabId: existingTab.id, created: false };
   }
 
-  const createdTab = await extensionApi.tabs.create({ url: targetUrl, active: false });
+  const createdTab = await extensionApi.tabs.create({
+    url: targetUrl,
+    active: false,
+  });
   if (typeof createdTab.id !== "number") {
     throw new Error("Failed to open Vinted tab for browser checkout");
   }
@@ -605,7 +816,9 @@ async function handleBrowserBuy(payload) {
         domain: checkoutDomain,
         itemUrl: targetUrl,
         phoneNumber: String(payload?.phoneNumber || "").trim(),
-        incogniaRequestToken: String(payload?.incogniaRequestToken || "").trim(),
+        incogniaRequestToken: String(
+          payload?.incogniaRequestToken || "",
+        ).trim(),
         browserInfo: payload?.browserInfo || {},
         paymentMethod: payload?.paymentMethod || {},
         pickupType: Number(payload?.pickupType || 1),
@@ -622,7 +835,9 @@ async function handleBrowserBuy(payload) {
   let checkoutDomain = attempt.domain;
 
   const fallbackDomain =
-    itemDomain && itemDomain !== checkoutDomain && isVintedDomain(itemDomain) ? itemDomain : "";
+    itemDomain && itemDomain !== checkoutDomain && isVintedDomain(itemDomain)
+      ? itemDomain
+      : "";
   if (
     fallbackDomain &&
     result &&
@@ -683,7 +898,10 @@ async function handleBrowserBuy(payload) {
       domain: checkoutDomain,
     });
     if (storedCheckout?.checkoutUrl) {
-      await extensionApi.tabs.create({ url: storedCheckout.checkoutUrl, active: true });
+      await extensionApi.tabs.create({
+        url: storedCheckout.checkoutUrl,
+        active: true,
+      });
       if (created) {
         await extensionApi.tabs.remove(tabId).catch(() => {});
       }
@@ -710,12 +928,14 @@ async function handleBrowserBuy(payload) {
     }
   }
 
-  return result || {
-    ok: false,
-    code: "empty_buy_result",
-    error: "Browser checkout did not return a result",
-    requestId,
-  };
+  return (
+    result || {
+      ok: false,
+      code: "empty_buy_result",
+      error: "Browser checkout did not return a result",
+      requestId,
+    }
+  );
 }
 
 const syncTimers = new Map();
@@ -736,7 +956,7 @@ function scheduleSync(domain, options = {}) {
   const timer = setTimeout(async () => {
     syncTimers.delete(key);
     try {
-      await syncAndPersistDomain(normalizedDomain, { storeId });
+      await syncAndPersistPreferredOrAllDomains(normalizedDomain);
     } catch (error) {
       console.warn("[vintrack-extension] sync failed", normalizedDomain, error);
     }
@@ -750,14 +970,18 @@ async function scheduleSyncForTab(tab) {
   if (!domain || !isVintedDomain(domain)) {
     return;
   }
-  scheduleSync(domain, { storeId: typeof tab?.cookieStoreId === "string" ? tab.cookieStoreId : "" });
+  scheduleSync(domain, {
+    storeId: typeof tab?.cookieStoreId === "string" ? tab.cookieStoreId : "",
+  });
 }
 
 extensionApi.cookies.onChanged.addListener(({ cookie }) => {
   if (!cookie || cookie.name !== "access_token_web") {
     return;
   }
-  scheduleSync(cookie.domain, { storeId: typeof cookie.storeId === "string" ? cookie.storeId : "" });
+  scheduleSync(cookie.domain, {
+    storeId: typeof cookie.storeId === "string" ? cookie.storeId : "",
+  });
 });
 
 extensionApi.tabs.onActivated.addListener(({ tabId }) => {
@@ -802,7 +1026,9 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "VINTRACK_EXTENSION_CONNECT") {
       const token = String(message?.payload?.token || "").trim();
       const appOrigin = String(message?.payload?.appOrigin || "").trim();
-      const preferredDomain = String(message?.payload?.preferredDomain || "").trim();
+      const preferredDomain = String(
+        message?.payload?.preferredDomain || "",
+      ).trim();
       if (!token || !appOrigin) {
         sendResponse({ ok: false, error: "Missing token or app origin" });
         return;
@@ -814,31 +1040,43 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       ensurePeriodicSyncAlarm();
 
-      const results = await syncAndPersistPreferredOrAllDomains(preferredDomain);
+      const results =
+        await syncAndPersistPreferredOrAllDomains(preferredDomain);
       const config = await getConfig();
+      const successful = results.some(isCompletedSyncResult);
+      const failedResult = results.find((result) => !result.ok);
       sendResponse({
         ok: true,
+        syncOk: successful,
         ...formatRuntimeState(config),
         syncedDomains: results
-          .filter((result) => result.ok && (!result.status || result.status === "completed" || result.status === "refreshed"))
+          .filter(isCompletedSyncResult)
           .map((result) => result.domain),
+        error: successful
+          ? ""
+          : syncResultError(failedResult) ||
+            "Open a logged-in Vinted tab, then sync again.",
         results,
       });
       return;
     }
 
     if (message?.type === "VINTRACK_EXTENSION_MANUAL_SYNC") {
-      const preferredDomain = String(message?.payload?.preferredDomain || "").trim();
-      const results = await syncAndPersistPreferredOrAllDomains(preferredDomain);
+      const preferredDomain = String(
+        message?.payload?.preferredDomain || "",
+      ).trim();
+      const results =
+        await syncAndPersistPreferredOrAllDomains(preferredDomain);
       const config = await getConfig();
-      const successful = results.some((result) => result.ok);
+      const successful = results.some(isCompletedSyncResult);
       const failedResult = results.find((result) => !result.ok);
       sendResponse({
         ok: successful,
         ...formatRuntimeState(config),
         error: successful
           ? ""
-          : failedResult?.error || failedResult?.reason || "Open a logged-in Vinted tab, then sync again.",
+          : syncResultError(failedResult) ||
+            "Open a logged-in Vinted tab, then sync again.",
         results,
       });
       return;
@@ -865,7 +1103,10 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
         senderOrigin = "";
       }
       const config = await getConfig();
-      if (!config.vintrackAppOrigin || senderOrigin !== config.vintrackAppOrigin) {
+      if (
+        !config.vintrackAppOrigin ||
+        senderOrigin !== config.vintrackAppOrigin
+      ) {
         sendResponse({ ok: false, ignored: true });
         return;
       }

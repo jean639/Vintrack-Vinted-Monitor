@@ -26,6 +26,8 @@ import (
 
 var freeProxyCheckRunning atomic.Bool
 
+const proxyScrapeFallbackURL = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
+
 func main() {
 	log.SetFlags(log.Ltime)
 	log.Println("Vintrack Worker starting...")
@@ -167,7 +169,8 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 		log.Printf("free proxy health region load failed: %v", err)
 		return
 	}
-	if err := store.EnsureFreeProxyHealthRows(regions, settingInt(store, "free_proxy_max_pool_size", 500)); err != nil {
+	maxPoolSize := settingInt(store, "free_proxy_max_pool_size", 500)
+	if err := store.EnsureFreeProxyHealthRows(regions, maxPoolSize); err != nil {
 		log.Printf("free proxy health row sync failed: %v", err)
 		return
 	}
@@ -175,12 +178,19 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 	perRegionBatch := settingInt(store, "FREE_PROXY_HEALTH_BATCH_PER_REGION", 40)
 	bootstrapBatch := settingInt(store, "FREE_PROXY_BOOTSTRAP_BATCH_PER_REGION", 120)
 	minActive := settingInt(store, "free_proxy_min_active_per_region", 25)
+	targetActive := settingInt(store, "free_proxy_target_active_per_region", max(50, minActive*2))
+	if targetActive < minActive {
+		targetActive = minActive
+	}
+	if targetActive > maxPoolSize {
+		targetActive = maxPoolSize
+	}
 	for _, region := range regions {
 		batchSize := perRegionBatch
 		activeCount, err := store.CountActiveFreeProxies(region)
 		if err != nil {
 			log.Printf("free proxy active count failed for %s: %v", region, err)
-		} else if activeCount < minActive {
+		} else if activeCount < targetActive {
 			batchSize = bootstrapBatch
 		}
 		regionProxies, err := store.GetFreeProxiesDueForCheck([]string{region}, batchSize)
@@ -202,6 +212,13 @@ func checkFreeProxies(ctx context.Context, store *database.Store) {
 	if concurrency < 1 {
 		concurrency = 1
 	}
+	log.Printf(
+		"free proxy check started: %d candidates across %d regions (concurrency %d, timeout %s)",
+		len(proxies),
+		len(regionBatches),
+		concurrency,
+		validationTimeout,
+	)
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	var passed atomic.Int64
@@ -290,7 +307,7 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 		importURL = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt"
 	}
 
-	added := 0
+	processed := 0
 	maxImport := settingInt(store, "free_proxy_max_pool_size", 5000)
 	importURLs := freeProxyImportURLs(store, importURL)
 	if len(importURLs) == 0 {
@@ -299,7 +316,7 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 	perSourceLimit := (maxImport + len(importURLs) - 1) / len(importURLs)
 	seenProxies := make(map[string]bool, maxImport)
 	for _, sourceURL := range importURLs {
-		if added >= maxImport {
+		if processed >= maxImport {
 			break
 		}
 		body, err := fetchFreeProxyList(ctx, sourceURL)
@@ -311,7 +328,7 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 		defaultScheme := defaultSchemeForImportURL(sourceURL)
 		sourceAdded := 0
 		for _, line := range strings.Split(string(body), "\n") {
-			if added >= maxImport || sourceAdded >= perSourceLimit {
+			if processed >= maxImport || sourceAdded >= perSourceLimit {
 				break
 			}
 			proxyURL, protocol, host, port, ok := normalizeFreeProxyLine(line, defaultScheme)
@@ -320,13 +337,13 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 			}
 			if err := store.UpsertFreeProxy(proxyURL, protocol, host, port, source); err == nil {
 				seenProxies[proxyURL] = true
-				added++
+				processed++
 				sourceAdded++
 			}
 		}
 	}
-	if added > 0 {
-		log.Printf("free proxy import upserted %d proxies", added)
+	if processed > 0 {
+		log.Printf("free proxy import refreshed %d candidates from %d sources", processed, len(importURLs))
 	}
 }
 
@@ -433,6 +450,9 @@ func freeProxyImportURLs(store *database.Store, importURL string) []string {
 	}
 	if !seen[importURL] {
 		urls = append(urls, importURL)
+	}
+	if !seen[proxyScrapeFallbackURL] {
+		urls = append(urls, proxyScrapeFallbackURL)
 	}
 	return urls
 }

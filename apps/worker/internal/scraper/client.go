@@ -1,11 +1,13 @@
 package scraper
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
@@ -83,8 +85,16 @@ type Client struct {
 }
 
 func NewClient(proxyURL string, trafficRecorder func(txBytes int64, rxBytes int64)) (*Client, error) {
+	return NewClientWithTimeout(proxyURL, trafficRecorder, 3*time.Second)
+}
+
+func NewClientWithTimeout(proxyURL string, trafficRecorder func(txBytes int64, rxBytes int64), requestTimeout time.Duration) (*Client, error) {
+	if requestTimeout <= 0 {
+		requestTimeout = 3 * time.Second
+	}
+	timeoutMs := max(1, int(requestTimeout.Milliseconds()))
 	options := []tls_client.HttpClientOption{
-		tls_client.WithTimeoutSeconds(3),
+		tls_client.WithTimeoutMilliseconds(timeoutMs),
 		tls_client.WithClientProfile(profiles.Chrome_131),
 		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
@@ -138,16 +148,20 @@ func (c *Client) ProxyLabel() string {
 }
 
 func (c *Client) WarmUp() error {
-	return c.WarmUpRegion("www.vinted.de")
+	return c.WarmUpRegionContext(context.Background(), "www.vinted.de")
 }
 
 func (c *Client) WarmUpRegion(domain string) error {
+	return c.WarmUpRegionContext(context.Background(), domain)
+}
+
+func (c *Client) WarmUpRegionContext(ctx context.Context, domain string) error {
 	currentURL := fmt.Sprintf("https://%s/", domain)
 
 	for redirects := 0; redirects < 3; redirects++ {
 		currentDomain := hostFromURL(currentURL, domain)
 
-		req, err := http.NewRequest("GET", currentURL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", currentURL, nil)
 		if err != nil {
 			return err
 		}
@@ -193,6 +207,10 @@ func (c *Client) WarmUpRegion(domain string) error {
 }
 
 func (c *Client) EnsureWarm(domain string) error {
+	return c.EnsureWarmContext(context.Background(), domain)
+}
+
+func (c *Client) EnsureWarmContext(ctx context.Context, domain string) error {
 	c.warmedMu.Lock()
 	if c.warmed[domain] {
 		c.warmedMu.Unlock()
@@ -200,7 +218,7 @@ func (c *Client) EnsureWarm(domain string) error {
 	}
 	c.warmedMu.Unlock()
 
-	if err := c.WarmUpRegion(domain); err != nil {
+	if err := c.WarmUpRegionContext(ctx, domain); err != nil {
 		return err
 	}
 

@@ -133,10 +133,30 @@ function getSyncIssue(results?: ExtensionSyncResult[]) {
     );
 }
 
+function compareExtensionVersions(current: string, target: string) {
+    const currentParts = current.split(".").map((part) => Number(part) || 0);
+    const targetParts = target.split(".").map((part) => Number(part) || 0);
+    const length = Math.max(currentParts.length, targetParts.length);
+
+    for (let index = 0; index < length; index += 1) {
+        const currentPart = currentParts[index] || 0;
+        const targetPart = targetParts[index] || 0;
+        if (currentPart !== targetPart) {
+            return currentPart > targetPart ? 1 : -1;
+        }
+    }
+
+    return 0;
+}
+
 export function AccountClient({
     initialStatus,
+    latestExtensionVersion,
+    minimumExtensionVersion,
 }: {
     initialStatus: AccountStatus;
+    latestExtensionVersion: string;
+    minimumExtensionVersion: string;
 }) {
     const [status, setStatus] = useState<AccountStatus>(initialStatus);
     const [accessToken, setAccessToken] = useState("");
@@ -148,6 +168,9 @@ export function AccountClient({
     );
     const [extensionInstalled, setExtensionInstalled] = useState(false);
     const [extensionConfigured, setExtensionConfigured] = useState(false);
+    const [extensionVersion, setExtensionVersion] = useState<string | null>(
+        null,
+    );
     const [selectedRegion, setSelectedRegion] = useState(() => {
         const matchingRegion = REGIONS.find(
             (region) =>
@@ -195,6 +218,12 @@ export function AccountClient({
                     Boolean(event.data.payload?.installed ?? true),
                 );
                 setExtensionConfigured(Boolean(event.data.payload?.configured));
+                setExtensionVersion(
+                    typeof event.data.payload?.version === "string" &&
+                        event.data.payload.version.trim()
+                        ? event.data.payload.version.trim()
+                        : null,
+                );
                 return;
             }
 
@@ -203,9 +232,11 @@ export function AccountClient({
 
                 const payload = event.data.payload as {
                     ok?: boolean;
+                    syncOk?: boolean;
                     error?: string;
                     syncedDomains?: string[];
                     configured?: boolean;
+                    version?: string;
                     results?: ExtensionSyncResult[];
                 };
 
@@ -218,6 +249,12 @@ export function AccountClient({
 
                 setExtensionInstalled(true);
                 setExtensionConfigured(Boolean(payload.configured ?? true));
+                setExtensionVersion(
+                    typeof payload.version === "string" &&
+                        payload.version.trim()
+                        ? payload.version.trim()
+                        : null,
+                );
                 setBrowserSync((current) =>
                     current
                         ? {
@@ -235,12 +272,18 @@ export function AccountClient({
                 const completedSyncs = getCompletedSyncs(payload.results);
                 const syncedCount =
                     completedSyncs.length || payload.syncedDomains?.length || 0;
-                if (syncedCount > 0) {
+                if (payload.syncOk !== false && syncedCount > 0) {
                     toast.success(
                         `Extension connected and synced ${syncedCount} Vinted session${syncedCount === 1 ? "" : "s"}`,
                     );
                 } else {
-                    toast.success("Extension connected");
+                    const issue = getSyncIssue(payload.results);
+                    toast.warning(
+                        payload.error ||
+                            issue?.error ||
+                            issue?.reason ||
+                            "Extension connected, but no fresh Vinted browser session was found.",
+                    );
                 }
 
                 void getAccountStatus().then((updated) => {
@@ -397,7 +440,7 @@ export function AccountClient({
             }));
             toast.success(`Primary Vinted region set to ${result.domain}`);
 
-            if (extensionInstalled) {
+            if (extensionInstalled && !extensionUpdateRequired) {
                 window.postMessage(
                     {
                         type: "VINTRACK_EXTENSION_MANUAL_SYNC",
@@ -412,6 +455,12 @@ export function AccountClient({
     };
 
     const handleBrowserSyncStart = async () => {
+        if (extensionUpdateRequired) {
+            toast.error(
+                `Update the browser extension to v${minimumExtensionVersion} or newer first.`,
+            );
+            return;
+        }
         setIsBrowserSyncStarting(true);
 
         try {
@@ -462,6 +511,12 @@ export function AccountClient({
             toast.error("Browser extension not detected");
             return;
         }
+        if (extensionUpdateRequired) {
+            toast.error(
+                `Update the browser extension to v${minimumExtensionVersion} or newer first.`,
+            );
+            return;
+        }
 
         window.postMessage(
             {
@@ -474,17 +529,41 @@ export function AccountClient({
         );
     };
 
-    const extensionReady = extensionInstalled && extensionConfigured;
+    const extensionUpdateRequired =
+        extensionInstalled &&
+        (!extensionVersion ||
+            compareExtensionVersions(
+                extensionVersion,
+                minimumExtensionVersion,
+            ) < 0);
+    const extensionUpdateAvailable =
+        extensionInstalled &&
+        Boolean(extensionVersion) &&
+        !extensionUpdateRequired &&
+        compareExtensionVersions(
+            extensionVersion || "0",
+            latestExtensionVersion,
+        ) < 0;
+    const extensionReady =
+        extensionInstalled && extensionConfigured && !extensionUpdateRequired;
     const extensionStatusTitle = !extensionInstalled
         ? "Extension not detected"
-        : extensionConfigured
-          ? "Extension connected"
-          : "Extension detected";
+        : extensionUpdateRequired
+          ? "Extension update required"
+          : extensionUpdateAvailable
+            ? "Extension update available"
+            : extensionConfigured
+              ? "Extension connected"
+              : "Extension detected";
     const extensionStatusCopy = !extensionInstalled
         ? "Install the browser extension, reload this page, then connect it here."
-        : extensionConfigured
-          ? "This browser can refresh the saved Vinted session automatically."
-          : "Connect this browser once to start automatic Vinted session sync.";
+        : extensionUpdateRequired
+          ? `Version ${extensionVersion ? `v${extensionVersion}` : "legacy"} is no longer supported. Install v${minimumExtensionVersion} or newer.`
+          : extensionUpdateAvailable
+            ? `Version v${latestExtensionVersion} is available. Your current version v${extensionVersion} remains supported.`
+            : extensionConfigured
+              ? "This browser can refresh the saved Vinted session automatically."
+              : "Connect this browser once to start automatic Vinted session sync.";
     const lastBrowserSyncLabel =
         status.last_browser_sync || browserSync?.last_used_at
             ? formatSessionTimestamp(
@@ -518,14 +597,18 @@ export function AccountClient({
                     <div
                         className={cn(
                             "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium",
-                            extensionReady
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                                : extensionInstalled
-                                  ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-                                  : "border-border bg-muted/40 text-muted-foreground",
+                            extensionUpdateRequired
+                                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                : extensionReady
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                  : extensionInstalled
+                                    ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+                                    : "border-border bg-muted/40 text-muted-foreground",
                         )}
                     >
-                        {extensionReady ? (
+                        {extensionUpdateRequired ? (
+                            <AlertCircle className="h-4 w-4" />
+                        ) : extensionReady ? (
                             <CheckCircle2 className="h-4 w-4" />
                         ) : extensionInstalled ? (
                             <Cable className="h-4 w-4" />
@@ -536,7 +619,7 @@ export function AccountClient({
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-5 pt-3">
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         <div className="border-border/80 bg-background/60 rounded-md border p-3">
                             <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Browser
@@ -557,6 +640,24 @@ export function AccountClient({
                         </div>
                         <div className="border-border/80 bg-background/60 rounded-md border p-3">
                             <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+                                Version
+                            </p>
+                            <p
+                                className={cn(
+                                    "mt-1 text-sm font-medium",
+                                    extensionUpdateRequired &&
+                                        "text-destructive",
+                                )}
+                            >
+                                {!extensionInstalled
+                                    ? "—"
+                                    : extensionVersion
+                                      ? `v${extensionVersion}`
+                                      : "Legacy"}
+                            </p>
+                        </div>
+                        <div className="border-border/80 bg-background/60 rounded-md border p-3">
+                            <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
                                 Last browser sync
                             </p>
                             <p className="mt-1 text-sm font-medium">
@@ -564,6 +665,76 @@ export function AccountClient({
                             </p>
                         </div>
                     </div>
+
+                    {extensionUpdateRequired ? (
+                        <div className="border-destructive/30 bg-destructive/8 rounded-md border p-4">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex gap-3">
+                                    <AlertCircle className="text-destructive mt-0.5 h-5 w-5 shrink-0" />
+                                    <div>
+                                        <p className="text-sm font-semibold">
+                                            Browser extension update required
+                                        </p>
+                                        <p className="text-muted-foreground mt-1 text-xs leading-5">
+                                            Install v{minimumExtensionVersion}{" "}
+                                            or newer to continue syncing.
+                                            Extract the new ZIP over the old
+                                            extension folder, then click Reload
+                                            on{" "}
+                                            <code className="text-foreground font-medium">
+                                                chrome://extensions
+                                            </code>
+                                            .
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button
+                                    asChild
+                                    size="sm"
+                                    className="gap-2 sm:shrink-0"
+                                >
+                                    <a
+                                        href={CHROME_EXTENSION_DOWNLOAD_URL}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        <Download className="h-4 w-4" />
+                                        Download v{latestExtensionVersion}
+                                    </a>
+                                </Button>
+                            </div>
+                        </div>
+                    ) : extensionUpdateAvailable ? (
+                        <div className="rounded-md border border-amber-300/60 bg-amber-500/8 p-4 dark:border-amber-500/30">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <p className="text-sm font-semibold">
+                                        Extension v{latestExtensionVersion} is
+                                        available
+                                    </p>
+                                    <p className="text-muted-foreground mt-1 text-xs">
+                                        Your installed v{extensionVersion} still
+                                        works, but updating is recommended.
+                                    </p>
+                                </div>
+                                <Button
+                                    asChild
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-2 sm:shrink-0"
+                                >
+                                    <a
+                                        href={CHROME_EXTENSION_DOWNLOAD_URL}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        <Download className="h-4 w-4" />
+                                        Download update
+                                    </a>
+                                </Button>
+                            </div>
+                        </div>
+                    ) : null}
 
                     <div className="border-border/80 bg-muted/30 rounded-md border p-4">
                         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -573,13 +744,16 @@ export function AccountClient({
                                 </p>
                                 <p className="text-muted-foreground mt-1 text-xs">
                                     Sign in to Vinted in this same browser. The
-                                    extension syncs only the session token and the
-                                    selected Vinted domain.
+                                    extension syncs only the session token and
+                                    the selected Vinted domain.
                                 </p>
                             </div>
                             <Button
                                 onClick={handleBrowserSyncStart}
-                                disabled={isBrowserSyncStarting}
+                                disabled={
+                                    isBrowserSyncStarting ||
+                                    extensionUpdateRequired
+                                }
                                 className="gap-2 md:shrink-0"
                             >
                                 {isBrowserSyncStarting ? (
@@ -624,6 +798,7 @@ export function AccountClient({
                                 type="button"
                                 variant="outline"
                                 onClick={handleManualExtensionSync}
+                                disabled={extensionUpdateRequired}
                                 className="gap-2"
                             >
                                 <RefreshCw className="h-4 w-4" />
