@@ -58,6 +58,7 @@ export default async function DashboardPage() {
             discord_webhook: m.discord_webhook ?? null,
             webhook_active: m.webhook_active ?? true,
             telegram_active: m.telegram_active ?? false,
+            proxy_source: m.proxy_source ?? "server",
             proxy_group_name: m.proxy_group?.name ?? null,
             _count: { items: visibleCountByMonitor.get(m.id) ?? 0 },
             created_at: m.created_at

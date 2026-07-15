@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useTransition } from "react";
+import {
+    useState,
+    useMemo,
+    useEffect,
+    useCallback,
+    useTransition,
+} from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
+    Bell,
     PauseCircle,
     PlayCircle,
     Plus,
@@ -21,6 +28,8 @@ import {
     AlertTriangle,
     Pencil,
     Send,
+    Search,
+    SlidersHorizontal,
     Timer,
     Settings,
     Trash2,
@@ -88,6 +97,7 @@ export type Monitor = {
     discord_webhook: string | null;
     webhook_active: boolean;
     telegram_active: boolean;
+    proxy_source: string;
     proxy_group_name: string | null;
     _count: { items: number };
     created_at: string;
@@ -138,6 +148,46 @@ function formatTimestamp(value: string) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "not yet";
     return date.toLocaleString();
+}
+
+function getMonitorFilterLabels(monitor: Monitor): string[] {
+    const labels = [...monitor.category_labels];
+
+    if (monitor.brand_ids) {
+        labels.push(...getBrandLabels(monitor.brand_ids));
+    }
+    if (monitor.size_id) {
+        labels.push(
+            ...getSizeLabels(monitor.size_id).map((label) => `Size ${label}`),
+        );
+    }
+    if (monitor.status_ids) {
+        labels.push(
+            ...getStatusLabels(
+                monitor.status_ids,
+                getStatusLocaleForRegionCodes(
+                    monitor.allowed_countries,
+                    monitor.region,
+                ),
+            ),
+        );
+    }
+    if (monitor.color_ids) {
+        labels.push(...getColorLabels(monitor.color_ids));
+    }
+    if (monitor.allowed_countries) {
+        labels.push(
+            `From ${getRegionFlags(monitor.allowed_countries).join(" ")}`,
+        );
+    }
+
+    return Array.from(new Set(labels));
+}
+
+function getMonitorProxyLabel(monitor: Monitor): string {
+    if (monitor.proxy_source === "free") return "Free Proxy Pool";
+    if (monitor.proxy_group_name) return monitor.proxy_group_name;
+    return "Server Proxies";
 }
 
 export function DashboardClient({
@@ -529,7 +579,7 @@ export function DashboardClient({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="border-border/75 bg-card/80 rounded-xl border px-5 py-4 shadow-sm backdrop-blur">
+                <div className="border-border/70 bg-card rounded-lg border px-5 py-4">
                     <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
                         Total Monitors
                     </p>
@@ -537,7 +587,7 @@ export function DashboardClient({
                         {monitors.length}
                     </p>
                 </div>
-                <div className="border-border/75 bg-card/80 rounded-xl border px-5 py-4 shadow-sm backdrop-blur">
+                <div className="border-border/70 bg-card rounded-lg border px-5 py-4">
                     <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
                         Active
                     </p>
@@ -553,7 +603,7 @@ export function DashboardClient({
                         )}
                     </div>
                 </div>
-                <div className="border-border/75 bg-card/80 rounded-xl border px-5 py-4 shadow-sm backdrop-blur">
+                <div className="border-border/70 bg-card rounded-lg border px-5 py-4">
                     <p className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
                         Items Found
                     </p>
@@ -564,8 +614,8 @@ export function DashboardClient({
             </div>
 
             {monitors.length === 0 ? (
-                <div className="border-border/80 bg-card/75 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-20 shadow-sm backdrop-blur">
-                    <div className="bg-muted mb-4 rounded-xl p-3">
+                <div className="border-border/80 bg-card/60 flex flex-col items-center justify-center rounded-lg border border-dashed py-20">
+                    <div className="bg-muted mb-4 rounded-md p-3">
                         <Radio className="text-muted-foreground h-6 w-6" />
                     </div>
                     <h3 className="text-foreground text-base font-semibold">
@@ -581,108 +631,151 @@ export function DashboardClient({
                     </Link>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {sortedMonitors.map((m) => (
-                        <Card
-                            key={m.id}
-                            data-testid="monitor-card"
-                            className="group border-border/75 bg-card/85 hover:border-border hover:bg-card flex flex-col overflow-hidden transition-colors"
-                        >
-                            <CardContent className="flex flex-1 flex-col p-5">
-                                <div className="mb-3 flex items-start justify-between gap-3">
-                                    <div className="min-w-0 flex-1">
-                                        <h3
-                                            className="text-foreground truncate text-[15px] font-semibold"
-                                            title={m.name}
-                                        >
-                                            {m.name}
-                                        </h3>
-                                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                            <Badge
-                                                variant={
-                                                    m.status === "active"
-                                                        ? "default"
-                                                        : "secondary"
-                                                }
-                                                className={`text-[10px] font-medium ${
-                                                    m.status === "active"
-                                                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/20 dark:bg-emerald-500/12 dark:text-emerald-400 dark:hover:bg-emerald-500/18"
-                                                        : m.status === "error"
-                                                          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/12 dark:text-red-400"
-                                                          : "bg-muted text-muted-foreground"
-                                                }`}
+                <div className="space-y-4">
+                    <h2 className="text-base font-semibold">Your monitors</h2>
+                    <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                        {sortedMonitors.map((m) => (
+                            <Card
+                                key={m.id}
+                                data-testid="monitor-card"
+                                className="group border-border/70 bg-card hover:border-foreground/20 h-full overflow-hidden rounded-lg py-0 shadow-none transition-colors"
+                            >
+                                <CardContent className="flex h-full flex-1 flex-col p-0">
+                                    <div className="flex items-start justify-between gap-3 p-5 pb-4">
+                                        <div className="min-w-0 flex-1">
+                                            <h3
+                                                className="text-foreground truncate text-[15px] font-semibold"
+                                                title={m.name}
                                             >
-                                                {m.status === "active" ? (
-                                                    <span className="flex items-center gap-1">
-                                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                                        Running
-                                                    </span>
-                                                ) : m.status === "error" ? (
-                                                    <span className="flex items-center gap-1">
-                                                        <AlertTriangle className="h-3 w-3" />
-                                                        Proxy Error
-                                                    </span>
-                                                ) : (
-                                                    "Paused"
-                                                )}
-                                            </Badge>
-                                            {m.price_max && (
-                                                <span className="text-muted-foreground text-[11px]">
-                                                    Max {m.price_max}€
-                                                </span>
-                                            )}
-                                            {m.region && m.region && (
-                                                <span className="text-muted-foreground text-[11px]">
-                                                    {getRegionLabel(m.region)}
-                                                </span>
-                                            )}
-                                            <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
-                                                <Timer className="h-3 w-3" />
-                                                {formatQueryDelay(
-                                                    m.query_delay_ms,
-                                                )}
-                                            </span>
+                                                {m.name}
+                                            </h3>
+                                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                                <Badge
+                                                    variant="outline"
+                                                    className={`text-[10px] font-medium ${
+                                                        m.status === "active"
+                                                            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                                            : m.status ===
+                                                                "error"
+                                                              ? "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-400"
+                                                              : "bg-muted/60 text-muted-foreground"
+                                                    }`}
+                                                >
+                                                    {m.status === "active" ? (
+                                                        <span className="flex items-center gap-1">
+                                                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                            Running
+                                                        </span>
+                                                    ) : m.status === "error" ? (
+                                                        <span className="flex items-center gap-1">
+                                                            <AlertTriangle className="h-3 w-3" />
+                                                            Proxy Error
+                                                        </span>
+                                                    ) : (
+                                                        "Paused"
+                                                    )}
+                                                </Badge>
+                                                {m.status === "active" &&
+                                                    hasProxyWarning(
+                                                        healthMap[m.id],
+                                                    ) && (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-400"
+                                                        >
+                                                            <AlertTriangle className="size-3" />
+                                                            Proxy issue
+                                                        </Badge>
+                                                    )}
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="flex shrink-0 items-center gap-0.5">
-                                        <Link
-                                            href={`/monitors/${m.id}/edit?from=dashboard`}
-                                        >
-                                            <button
-                                                className="text-muted-foreground/55 hover:bg-accent hover:text-accent-foreground rounded-md p-1.5 transition-colors"
+                                        <div className="flex shrink-0 items-center gap-0.5">
+                                            <Link
+                                                href={`/monitors/${m.id}/edit?from=dashboard`}
+                                                className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-8 items-center justify-center rounded-md transition-colors"
                                                 title="Edit monitor"
+                                                aria-label="Edit monitor"
                                             >
                                                 <Pencil className="h-3.5 w-3.5" />
+                                            </Link>
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    openWebhookDialog(m)
+                                                }
+                                                className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-8 items-center justify-center rounded-md transition-colors"
+                                                title="Configure notifications"
+                                                aria-label="Configure notifications"
+                                            >
+                                                <Webhook
+                                                    className={`h-3.5 w-3.5 ${
+                                                        (m.discord_webhook &&
+                                                            m.webhook_active) ||
+                                                        m.telegram_active
+                                                            ? "text-indigo-600 dark:text-indigo-400"
+                                                            : ""
+                                                    }`}
+                                                />
                                             </button>
-                                        </Link>
-                                        <button
-                                            onClick={() => openWebhookDialog(m)}
-                                            className="text-muted-foreground/55 hover:bg-accent hover:text-accent-foreground rounded-md p-1.5 transition-colors"
-                                            title="Configure notifications"
-                                        >
-                                            <Webhook
-                                                className={`h-3.5 w-3.5 ${
-                                                    (m.discord_webhook &&
-                                                        m.webhook_active) ||
-                                                    m.telegram_active
-                                                        ? "text-indigo-600 dark:text-indigo-400"
-                                                        : ""
-                                                }`}
-                                            />
-                                        </button>
+                                        </div>
                                     </div>
-                                </div>
 
-                                {(m.catalog_ids ||
-                                    m.brand_ids ||
-                                    m.color_ids ||
-                                    m.status_ids ||
-                                    m.size_id ||
-                                    m.allowed_countries) && (
-                                    <div className="mb-3 flex flex-wrap gap-1">
+                                    <div className="px-5 pb-4">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                            <Search className="text-muted-foreground size-3.5 shrink-0" />
+                                            <p
+                                                className="truncate text-sm font-medium"
+                                                title={m.query}
+                                            >
+                                                {m.query || "All listings"}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-4 text-xs">
+                                        <span
+                                            className="inline-flex min-w-0 items-center gap-1.5"
+                                            title={getRegionLabel(m.region)}
+                                        >
+                                            <Globe className="size-3.5 shrink-0" />
+                                            <span className="truncate">
+                                                {getRegionLabel(m.region)}
+                                            </span>
+                                        </span>
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <Timer className="size-3.5" />
+                                            {formatQueryDelay(m.query_delay_ms)}
+                                        </span>
+                                        <span>
+                                            {m.price_max
+                                                ? "Max " + m.price_max + " EUR"
+                                                : "No price limit"}
+                                        </span>
+                                    </div>
+
+                                    <div className="flex px-5 pb-5 [&>span]:hidden">
+                                        <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs">
+                                            <SlidersHorizontal className="text-muted-foreground size-3.5" />
+                                            <span className="shrink-0">
+                                                {
+                                                    getMonitorFilterLabels(m)
+                                                        .length
+                                                }{" "}
+                                                filters
+                                            </span>
+                                            {getMonitorFilterLabels(m).length >
+                                                0 && (
+                                                <span className="truncate">
+                                                    ·{" "}
+                                                    {getMonitorFilterLabels(m)
+                                                        .slice(0, 2)
+                                                        .join(" · ")}
+                                                </span>
+                                            )}
+                                        </div>
                                         {m.allowed_countries && (
                                             <span
-                                                className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/12 dark:text-emerald-400"
+                                                className="border-border/60 bg-muted/50 text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium"
                                                 title={`Only items from: ${m.allowed_countries}`}
                                             >
                                                 {getRegionFlags(
@@ -693,7 +786,7 @@ export function DashboardClient({
                                         {m.category_labels.map((label) => (
                                             <span
                                                 key={`cat-${label}`}
-                                                className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/12 dark:text-violet-400"
+                                                className="border-border/60 bg-muted/50 text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium"
                                             >
                                                 {label}
                                             </span>
@@ -703,7 +796,7 @@ export function DashboardClient({
                                                 (label) => (
                                                     <span
                                                         key={`brand-${label}`}
-                                                        className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/12 dark:text-blue-400"
+                                                        className="border-border/60 bg-muted/50 text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium"
                                                     >
                                                         {label}
                                                     </span>
@@ -714,7 +807,7 @@ export function DashboardClient({
                                                 (label) => (
                                                     <span
                                                         key={`color-${label}`}
-                                                        className="inline-flex items-center rounded-md border border-pink-200 bg-pink-50 px-1.5 py-0.5 text-[10px] font-medium text-pink-700 dark:border-pink-500/20 dark:bg-pink-500/12 dark:text-pink-400"
+                                                        className="border-border/60 bg-muted/50 text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium"
                                                     >
                                                         {label}
                                                     </span>
@@ -730,7 +823,7 @@ export function DashboardClient({
                                             ).map((label) => (
                                                 <span
                                                     key={`status-${label}`}
-                                                    className="inline-flex items-center rounded-md border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:border-cyan-500/20 dark:bg-cyan-500/12 dark:text-cyan-400"
+                                                    className="border-border/60 bg-muted/50 text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium"
                                                     title={label}
                                                 >
                                                     {label}
@@ -741,93 +834,109 @@ export function DashboardClient({
                                                 (label) => (
                                                     <span
                                                         key={`size-${label}`}
-                                                        className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/12 dark:text-amber-400"
+                                                        className="border-border/60 bg-muted/50 text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium"
                                                     >
                                                         {label}
                                                     </span>
                                                 ),
                                             )}
                                     </div>
-                                )}
 
-                                <div className="flex-1" />
-
-                                <div className="text-muted-foreground mb-1.5 flex items-center gap-1.5 text-[13px]">
-                                    <Package className="text-muted-foreground h-3.5 w-3.5" />
-                                    <span className="text-foreground font-medium">
-                                        {m._count.items.toLocaleString()}
-                                    </span>
-                                    items found
-                                </div>
-
-                                <div className="text-muted-foreground mb-2 flex items-center gap-1.5 text-[13px]">
-                                    {m.proxy_group_name ? (
-                                        <>
-                                            <Globe className="text-muted-foreground h-3.5 w-3.5" />
-                                            <span
-                                                className="text-foreground truncate font-medium"
-                                                title={m.proxy_group_name}
-                                            >
-                                                {m.proxy_group_name}
-                                            </span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Zap className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                                            <span className="font-medium text-amber-600 dark:text-amber-400">
-                                                Server Proxies
-                                            </span>
-                                        </>
-                                    )}
-                                    {m.status === "active" &&
-                                        hasProxyWarning(healthMap[m.id]) && (
-                                            <span className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:border-red-500/20 dark:bg-red-500/12 dark:text-red-400">
-                                                <AlertTriangle className="h-3 w-3" />
-                                                Proxy Warning
-                                            </span>
-                                        )}
-                                </div>
-
-                                <div className="border-border/70 flex items-center gap-2 border-t pt-3">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() =>
-                                            handleToggle(m.id, m.status)
-                                        }
-                                        className={`h-8 px-3 text-xs font-medium ${
-                                            m.status === "active"
-                                                ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
-                                                : "text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
-                                        }`}
-                                    >
-                                        {m.status === "active" ? (
-                                            <>
-                                                <PauseCircle className="mr-1 h-3.5 w-3.5" />{" "}
-                                                Pause
-                                            </>
-                                        ) : (
-                                            <>
-                                                <PlayCircle className="mr-1 h-3.5 w-3.5" />{" "}
-                                                Resume
-                                            </>
-                                        )}
-                                    </Button>
                                     <div className="flex-1" />
-                                    <Link href={`/monitors/${m.id}`}>
+
+                                    <div className="border-border/60 text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 border-t px-5 py-4">
+                                        <div className="min-w-0">
+                                            <p className="hidden">Results</p>
+                                            <p className="flex items-center gap-1.5 text-xs">
+                                                <Package className="text-muted-foreground size-3.5" />
+                                                {m._count.items.toLocaleString()}{" "}
+                                                items found
+                                            </p>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="hidden">Proxy</p>
+                                            <p
+                                                className="flex min-w-0 items-center gap-1.5 text-xs"
+                                                title={getMonitorProxyLabel(m)}
+                                            >
+                                                {m.proxy_source === "server" ? (
+                                                    <Zap className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                                                ) : (
+                                                    <Globe
+                                                        className={
+                                                            m.proxy_source ===
+                                                            "free"
+                                                                ? "size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                                                                : "text-muted-foreground size-3.5 shrink-0"
+                                                        }
+                                                    />
+                                                )}
+                                                <span className="truncate">
+                                                    {getMonitorProxyLabel(m)}
+                                                </span>
+                                            </p>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="hidden">Alerts</p>
+                                            <p className="flex min-w-0 items-center gap-1.5 text-xs">
+                                                <Bell className="text-muted-foreground size-3.5 shrink-0" />
+                                                <span className="truncate">
+                                                    {m.discord_webhook &&
+                                                    m.webhook_active &&
+                                                    m.telegram_active
+                                                        ? "Discord + Telegram"
+                                                        : m.discord_webhook &&
+                                                            m.webhook_active
+                                                          ? "Discord"
+                                                          : m.telegram_active
+                                                            ? "Telegram"
+                                                            : "Off"}
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="border-border/60 bg-muted/10 flex items-center gap-2 border-t px-3 py-2.5">
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            className="text-muted-foreground hover:text-foreground h-8 gap-1 px-3 text-xs font-medium"
+                                            onClick={() =>
+                                                handleToggle(m.id, m.status)
+                                            }
+                                            className={`h-8 px-3 text-xs font-medium ${
+                                                m.status === "active"
+                                                    ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+                                                    : "text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
+                                            }`}
                                         >
-                                            View{" "}
-                                            <ArrowRight className="h-3 w-3" />
+                                            {m.status === "active" ? (
+                                                <>
+                                                    <PauseCircle className="h-3.5 w-3.5" />
+                                                    Pause
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <PlayCircle className="h-3.5 w-3.5" />
+                                                    Resume
+                                                </>
+                                            )}
                                         </Button>
-                                    </Link>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
+                                        <div className="flex-1" />
+                                        <Link href={`/monitors/${m.id}`}>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="text-muted-foreground hover:text-foreground h-8 gap-1 px-3 text-xs font-medium"
+                                            >
+                                                View monitor
+                                                <ArrowRight className="h-3 w-3" />
+                                            </Button>
+                                        </Link>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
                 </div>
             )}
 

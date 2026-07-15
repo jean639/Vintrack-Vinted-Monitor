@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Open-source Vinted monitoring platform for resellers.</b><br/>
-  Real-time scraping · Discord & Telegram alerts · Proxy rotation · Account linking · Beautiful dashboard
+  Real-time scraping · Health-checked free starter proxies · Discord & Telegram alerts · Account linking · Dashboard
 </p>
 
 <p align="center">
@@ -16,6 +16,7 @@
   <a href="#tech-stack"><img src="https://img.shields.io/badge/PostgreSQL-15-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" /></a>
   <a href="#tech-stack"><img src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis" /></a>
   <a href="#self-hosting"><img src="https://img.shields.io/badge/deploy-one_command-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
+  <a href="#free-starter-proxy-pools"><img src="https://img.shields.io/badge/free_proxy_pools-health_checked-10b981?style=flat-square" alt="Health-checked free proxy pools" /></a>
 </p>
 
 <p align="center">
@@ -51,13 +52,14 @@ You can try Vintrack without hosting anything yourself:
 - **URL:** https://vintrack.jakobaio.dev
 - **Login:** sign up with Discord OAuth
 - **Default role:** new accounts start as **Free**
+- **Free Proxy Pool:** ready regions can be tested without purchasing proxies first
 - **Browser extension:** download the latest Chrome ZIP or Firefox XPI from GitHub releases
 - **Support:** join the Discord server if you need help: https://discord.gg/WbEpEjaWjP
 
 ### Demo Quick Start
 
 1. Open https://vintrack.jakobaio.dev and sign in with Discord.
-2. Open **Proxies** and add your own proxy group if your account does not have server proxy access.
+2. Create a monitor and select **Free Proxy Pool** when its Vinted region is marked **Ready**. If the region is degraded or unavailable, add your own proxy group under **Proxies**.
 3. Open **Monitors** or the dashboard and create a monitor with your Vinted search, region, price, size, brand, and country filters.
 4. Enable notifications:
    - **Discord:** paste your Discord webhook URL in the monitor notification dialog.
@@ -67,7 +69,9 @@ You can try Vintrack without hosting anything yourself:
 
 ### Demo Notes
 
-- Free demo accounts normally use their own proxies. Server proxies are not guaranteed on the public demo.
+- The Free Proxy Pool is shared, best-effort starter infrastructure. Availability, latency, and supported regions change with live pool health.
+- Free proxies are used only for catalog monitoring. Linked-account actions such as likes, offers, messages, and checkout never use the free pool.
+- Server proxies are not guaranteed for free accounts. Personal proxy groups remain the reliable fallback for dedicated capacity.
 - The demo is shared infrastructure, so monitoring reliability can vary.
 - Telegram users never need a bot token or chat ID. The public demo shows the bot username during the connect flow.
 - Discord notifications require your own Discord webhook URL.
@@ -83,6 +87,7 @@ Built for resellers who need speed. Open-sourced for the community.
 
 - **Sub-2s detection** — catch items faster than any other tool
 - **Anti-detection** — TLS fingerprint rotation with proxy support
+- **Free starter proxy pools** — try ready Vinted regions before buying a proxy plan
 - **Granular filters** — price, size, category, brand, color, and country/region
 - **Direct Interaction** — Like items, send offers, and message sellers from the dashboard
 - **Browser session sync** — Chrome extension keeps linked Vinted sessions fresh without copying tokens manually
@@ -172,12 +177,27 @@ Rich alerts sent instantly when a new item is found:
 
 Server-Sent Events (SSE) stream items directly to the dashboard in real-time. See every new listing appear the moment it's detected — no manual refresh needed.
 
+### Free Starter Proxy Pools
+
+New users can select **Free Proxy Pool** for Vinted regions currently marked **Ready** in the monitor form. Vintrack manages this pool continuously:
+
+- Imports candidates from configured public proxy sources
+- Creates separate health state for each Vinted region
+- Validates candidates against Vinted before they enter rotation
+- Requires repeated successful checks before activation
+- Moves failing proxies into cooldown or marks them dead
+- Exposes regional pool health to normal users during monitor creation
+- Keeps account actions off the shared pool
+
+The pool is intended for onboarding and short tests, not guaranteed production capacity. Public proxies can disappear or become blocked without notice. For sustained monitoring, use a personal proxy group or configured server proxies.
+
 ### Proxy System
 
-Two-tier proxy architecture designed for scale:
+Three proxy sources are available:
 
-- **Server proxies** — shared pool for premium users
-- **User proxy groups** — BYOP (Bring Your Own Proxies) for free users
+- **Free Proxy Pool** — shared, health-checked starter capacity for ready regions
+- **Server proxies** — shared managed pool for premium users
+- **User proxy groups** — BYOP (Bring Your Own Proxies) for dedicated capacity
 - Automatic rotation with `tls-client` TLS fingerprint spoofing
 - Input validation — garbage lines are silently skipped
 - Supports `http://`, `https://`, `socks4://`, `socks5://`, and `host:port:user:pass` formats
@@ -186,11 +206,13 @@ Two-tier proxy architecture designed for scale:
 ### Multi-User & Roles
 
 Built-in role system with Discord or OIDC authentication:
-| Role | Server Proxies | Own Proxies | Admin Panel |
-|------|:-:|:-:|:-:|
-| **Free** | ❌ | ✅ | ❌ |
-| **Premium** | ✅ | ✅ | ❌ |
-| **Admin** | ✅ | ✅ | ✅ |
+| Role | Free Pool* | Server Proxies | Own Proxies | Admin Panel |
+|------|:-:|:-:|:-:|:-:|
+| **Free** | ✅ | ❌ | ✅ | ❌ |
+| **Premium** | ✅ | ✅ | ✅ | ❌ |
+| **Admin** | ✅ | ✅ | ✅ | ✅ |
+
+\* Only while the pool is enabled and the selected region is healthy.
 
 ---
 
@@ -302,7 +324,7 @@ Before starting, prepare:
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2
 - [Discord Developer App](https://discord.com/developers/applications) (for OAuth2 login) **or** an OIDC provider (e.g. Authentik, Google, Keycloak)
-- Proxies for Vinted monitoring (residential recommended)
+- Optional dedicated proxies for sustained Vinted monitoring (residential recommended). The managed Free Proxy Pool can cover initial tests in ready regions.
 - A public HTTPS domain for production
 - Optional: a Telegram bot from [@BotFather](https://t.me/BotFather) if you want Telegram notifications
 
@@ -382,9 +404,11 @@ The `AUTH_OIDC_NAME` value is the display name shown on the login button (defaul
 
 If you switch an existing installation from Discord to OIDC, existing Discord accounts are not automatically linked to OIDC accounts. Make sure at least one administrator can sign in through the new provider, or update the relevant user role in the database after the first OIDC login.
 
-### 4. Add Proxies
+### 4. Configure Proxy Sources
 
-Add one proxy per line:
+After the first admin login, open **Admin Panel → Settings** to enable the Free Proxy Pool, choose import sources and starter regions, and set validation thresholds. The worker continuously imports, validates, cools down, and rotates candidates.
+
+For dedicated capacity, add one proxy per line:
 
 ```bash
 nano apps/worker/proxies.txt
@@ -396,7 +420,7 @@ Example:
 http://user:pass@host:port
 ```
 
-Free users can also add their own proxy groups from the dashboard. Admin and premium users can use server proxies when configured.
+Users can add personal proxy groups from the dashboard. Premium and admin users can use server proxies when configured. Any user can select the Free Proxy Pool when the feature is enabled and the monitor region is healthy.
 
 ### 5. Start Vintrack
 

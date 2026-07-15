@@ -6,6 +6,7 @@ import {
     resetProxyGroupBandwidth,
     updateProxyGroup,
 } from "@/actions/proxy-groups";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -18,7 +19,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getRegionLabel } from "@/lib/regions";
 import {
+    Activity,
+    ArrowRight,
     ChevronDown,
     ChevronUp,
     Globe,
@@ -30,6 +34,7 @@ import {
     Shield,
     Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -43,6 +48,17 @@ export type ProxyGroup = {
     bandwidthLimitBytes: string | null;
     bandwidthResetAt: string | null;
     created_at: string;
+};
+
+export type FreeProxyPoolOverview = {
+    enabled: boolean;
+    minActivePerRegion: number;
+    regions: {
+        region: string;
+        usable: number;
+        medianLatencyMs: number | null;
+        healthy: boolean;
+    }[];
 };
 
 function formatBytes(value: bigint) {
@@ -76,9 +92,11 @@ function formatLimitInput(value: string | null) {
 export function ProxiesClient({
     initialGroups,
     userRole,
+    freeProxyPool,
 }: {
     initialGroups: ProxyGroup[];
     userRole: string;
+    freeProxyPool: FreeProxyPoolOverview;
 }) {
     const [groups, setGroups] = useState<ProxyGroup[]>(initialGroups);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -184,15 +202,24 @@ export function ProxiesClient({
     const getProxyCount = (proxies: string) =>
         proxies.split("\n").filter((l) => l.trim().length > 0).length;
 
+    const readyRegionCount = freeProxyPool.regions.filter(
+        (region) => region.healthy,
+    ).length;
+    const usableProxyCount = freeProxyPool.regions.reduce(
+        (total, region) => total + region.usable,
+        0,
+    );
+
     return (
-        <div className="mx-auto max-w-4xl space-y-6">
+        <div className="mx-auto max-w-5xl space-y-6">
             <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">
-                        Proxy Groups
+                        Proxy Infrastructure
                     </h1>
                     <p className="text-muted-foreground mt-0.5 text-sm">
-                        Manage your proxy lists for monitors.
+                        Use the shared starter pool or manage dedicated proxy
+                        groups.
                     </p>
                 </div>
                 <Button
@@ -204,13 +231,165 @@ export function ProxiesClient({
                 </Button>
             </div>
 
-            {userRole === "premium" && (
+            <section className="border-border/70 overflow-hidden rounded-lg border">
+                <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                        <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-md">
+                            <Globe className="text-muted-foreground size-4" />
+                        </span>
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-sm font-semibold">
+                                    Free Proxy Pool
+                                </h2>
+                                <Badge
+                                    variant="outline"
+                                    className={
+                                        freeProxyPool.enabled
+                                            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                            : "text-muted-foreground"
+                                    }
+                                >
+                                    <span
+                                        className={
+                                            freeProxyPool.enabled
+                                                ? "size-1.5 rounded-full bg-emerald-500"
+                                                : "bg-muted-foreground size-1.5 rounded-full"
+                                        }
+                                    />
+                                    {freeProxyPool.enabled
+                                        ? "Online"
+                                        : "Unavailable"}
+                                </Badge>
+                            </div>
+                            <p className="text-muted-foreground mt-1 text-xs leading-5">
+                                Shared, health-checked proxies for catalog
+                                monitors. No proxy purchase required in Ready
+                                regions.
+                            </p>
+                        </div>
+                    </div>
+                    <Button asChild size="sm" className="shrink-0">
+                        <Link href="/monitors/new">
+                            Create monitor
+                            <ArrowRight />
+                        </Link>
+                    </Button>
+                </div>
+
+                {freeProxyPool.enabled ? (
+                    <>
+                        <div className="border-border/70 bg-muted/20 grid border-y sm:grid-cols-3">
+                            <div className="border-border/70 px-5 py-3 sm:border-r">
+                                <p className="text-muted-foreground text-[11px] font-medium uppercase">
+                                    Ready regions
+                                </p>
+                                <p className="mt-1 text-lg font-semibold">
+                                    {readyRegionCount}
+                                    <span className="text-muted-foreground ml-1 text-xs font-normal">
+                                        of {freeProxyPool.regions.length}
+                                    </span>
+                                </p>
+                            </div>
+                            <div className="border-border/70 border-t px-5 py-3 sm:border-t-0 sm:border-r">
+                                <p className="text-muted-foreground text-[11px] font-medium uppercase">
+                                    Usable candidates
+                                </p>
+                                <p className="mt-1 text-lg font-semibold">
+                                    {usableProxyCount.toLocaleString()}
+                                </p>
+                            </div>
+                            <div className="border-border/70 border-t px-5 py-3 sm:border-t-0">
+                                <p className="text-muted-foreground text-[11px] font-medium uppercase">
+                                    Pool management
+                                </p>
+                                <p className="mt-1 flex items-center gap-1.5 text-sm font-medium">
+                                    <Activity className="size-3.5 text-emerald-600" />
+                                    Automatic rotation
+                                </p>
+                            </div>
+                        </div>
+
+                        {freeProxyPool.regions.length > 0 ? (
+                            <div className="bg-muted/10 p-3 sm:p-4">
+                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                    {freeProxyPool.regions.map((region) => (
+                                        <div
+                                            key={region.region}
+                                            className="border-border/70 bg-background flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+                                        >
+                                            <div className="min-w-0">
+                                                <p className="truncate text-xs font-medium">
+                                                    {getRegionLabel(
+                                                        region.region,
+                                                    )}
+                                                </p>
+                                                <p className="text-muted-foreground mt-0.5 text-[11px]">
+                                                    {region.usable.toLocaleString()}{" "}
+                                                    usable
+                                                    {region.medianLatencyMs !==
+                                                        null && (
+                                                        <span>
+                                                            {" · "}
+                                                            {
+                                                                region.medianLatencyMs
+                                                            }{" "}
+                                                            ms
+                                                        </span>
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <Badge
+                                                variant="outline"
+                                                className={
+                                                    region.healthy
+                                                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                                        : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                                }
+                                            >
+                                                {region.healthy
+                                                    ? "Ready"
+                                                    : "Checking"}
+                                            </Badge>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-muted-foreground mt-3 px-1 text-[11px] leading-5">
+                                    Pool availability is live and best-effort.
+                                    Regions become selectable once at least{" "}
+                                    {freeProxyPool.minActivePerRegion} proxies
+                                    pass validation.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="px-5 py-6 text-center">
+                                <p className="text-sm font-medium">
+                                    Region validation is starting
+                                </p>
+                                <p className="text-muted-foreground mt-1 text-xs">
+                                    Ready regions will appear here
+                                    automatically.
+                                </p>
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <div className="border-border/70 bg-muted/20 border-t px-5 py-5">
+                        <p className="text-muted-foreground text-sm">
+                            The shared pool is currently unavailable. Personal
+                            proxy groups continue to work normally.
+                        </p>
+                    </div>
+                )}
+            </section>
+
+            {(userRole === "premium" || userRole === "admin") && (
                 <Card className="border-amber-200 bg-amber-50 dark:border-amber-500/20 dark:bg-amber-500/10">
                     <CardContent className="flex items-center gap-3 p-4">
                         <Shield className="h-5 w-5 shrink-0 text-amber-600" />
                         <div>
                             <p className="text-[13px] font-medium text-amber-900 dark:text-amber-200">
-                                Premium Account
+                                Server Proxy Access
                             </p>
                             <p className="text-[12px] text-amber-700 dark:text-amber-300">
                                 You can use server proxies when creating
@@ -221,16 +400,27 @@ export function ProxiesClient({
                 </Card>
             )}
 
+            <div className="flex items-end justify-between gap-4 pt-2">
+                <div>
+                    <h2 className="text-base font-semibold">
+                        Personal Proxy Groups
+                    </h2>
+                    <p className="text-muted-foreground mt-0.5 text-xs">
+                        Dedicated proxy lists available only to your account.
+                    </p>
+                </div>
+            </div>
+
             {groups.length === 0 ? (
                 <Card className="border-dashed">
-                    <CardContent className="p-12 text-center">
+                    <CardContent className="p-10 text-center">
                         <Globe className="text-muted-foreground/40 mx-auto mb-3 h-10 w-10" />
                         <p className="text-muted-foreground text-[15px] font-medium">
-                            No proxy groups yet
+                            No personal proxy groups yet
                         </p>
                         <p className="text-muted-foreground mt-1 text-[13px]">
-                            Create a proxy group to start monitoring. Each
-                            monitor needs a proxy group to scrape Vinted.
+                            Use a Ready Free Pool region, or create a dedicated
+                            group for your own proxies.
                         </p>
                         <Button
                             onClick={() => setIsCreateOpen(true)}

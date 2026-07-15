@@ -1,5 +1,7 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
+import { getFreeProxyPoolHealth } from "@/lib/free-proxy-health";
+import { REGIONS } from "@/lib/regions";
 import { redirect } from "next/navigation";
 import { ProxiesClient } from "./client";
 
@@ -7,18 +9,36 @@ export default async function ProxiesPage() {
     const session = await auth();
     if (!session?.user?.id) redirect("/login");
 
-    const proxyGroups = await db.proxy_groups.findMany({
-        where: { userId: session.user.id },
-        orderBy: { created_at: "desc" },
-        include: {
-            _count: { select: { monitors: true } },
-        },
-    });
+    const [proxyGroups, user, freeProxyHealth] = await Promise.all([
+        db.proxy_groups.findMany({
+            where: { userId: session.user.id },
+            orderBy: { created_at: "desc" },
+            include: {
+                _count: { select: { monitors: true } },
+            },
+        }),
+        db.user.findUnique({
+            where: { id: session.user.id },
+            select: { role: true },
+        }),
+        getFreeProxyPoolHealth(),
+    ]);
 
-    const user = await db.user.findUnique({
-        where: { id: session.user.id },
-        select: { role: true },
-    });
+    const regionOrder = new Map(
+        REGIONS.map((region, index) => [region.code, index]),
+    );
+    const freeProxyRegions = Object.values(freeProxyHealth.regions)
+        .sort(
+            (a, b) =>
+                (regionOrder.get(a.region) ?? Number.MAX_SAFE_INTEGER) -
+                (regionOrder.get(b.region) ?? Number.MAX_SAFE_INTEGER),
+        )
+        .map((region) => ({
+            region: region.region,
+            usable: region.usable,
+            medianLatencyMs: region.medianLatencyMs,
+            healthy: region.healthy,
+        }));
 
     return (
         <ProxiesClient
@@ -35,6 +55,11 @@ export default async function ProxiesPage() {
                 created_at: g.created_at?.toISOString() ?? "",
             }))}
             userRole={user?.role ?? "free"}
+            freeProxyPool={{
+                enabled: freeProxyHealth.enabled,
+                minActivePerRegion: freeProxyHealth.minActivePerRegion,
+                regions: freeProxyRegions,
+            }}
         />
     );
 }
