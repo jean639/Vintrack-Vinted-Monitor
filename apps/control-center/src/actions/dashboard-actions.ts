@@ -266,6 +266,7 @@ export async function toggleMonitor(id: number, currentStatus: string) {
 export async function updateMonitorWebhook(
     monitorId: number,
     webhookUrl: string,
+    webhookActive: boolean,
 ) {
     const session = await auth();
     if (!session?.user) throw new Error("Unauthorized");
@@ -280,7 +281,7 @@ export async function updateMonitorWebhook(
         where: { id: monitorId, userId: session.user.id },
         data: {
             discord_webhook: urlToSave,
-            webhook_active: urlToSave ? true : false,
+            webhook_active: Boolean(urlToSave && webhookActive),
         },
     });
 
@@ -288,22 +289,22 @@ export async function updateMonitorWebhook(
     return { success: true, message: "Webhook saved successfully" };
 }
 
-export async function toggleWebhookStatus(
+export async function setMonitorWebhookStatus(
     monitorId: number,
-    currentStatus: boolean,
+    enabled: boolean,
 ) {
     const session = await auth();
     if (!session?.user) throw new Error("Unauthorized");
 
     await db.monitors.update({
         where: { id: monitorId, userId: session.user.id },
-        data: { webhook_active: !currentStatus },
+        data: { webhook_active: enabled },
     });
 
     revalidatePath("/dashboard");
     return {
         success: true,
-        message: !currentStatus ? "Webhook activated" : "Webhook deactivated",
+        message: enabled ? "Webhook activated" : "Webhook deactivated",
     };
 }
 

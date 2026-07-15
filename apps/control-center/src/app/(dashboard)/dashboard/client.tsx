@@ -54,7 +54,7 @@ import {
     stopAllMonitors,
     toggleMonitor,
     updateMonitorWebhook,
-    toggleWebhookStatus,
+    setMonitorWebhookStatus,
     toggleTelegramStatus,
 } from "@/actions/dashboard-actions";
 import { testDiscordWebhook } from "@/actions/monitor";
@@ -205,6 +205,8 @@ export function DashboardClient({
     const [webhookInput, setWebhookInput] = useState("");
     const [isWebhookOpen, setIsWebhookOpen] = useState(false);
     const [isWebhookActive, setIsWebhookActive] = useState(true);
+    const [isUpdatingWebhookStatus, setIsUpdatingWebhookStatus] =
+        useState(false);
     const [isTelegramActive, setIsTelegramActive] = useState(false);
     const [isTestingWebhook, setIsTestingWebhook] = useState(false);
     const [isTestingTelegram, setIsTestingTelegram] = useState(false);
@@ -393,7 +395,9 @@ export function DashboardClient({
     const openWebhookDialog = (monitor: Monitor) => {
         setSelectedMonitor(monitor);
         setWebhookInput(monitor.discord_webhook || "");
-        setIsWebhookActive(monitor.webhook_active);
+        setIsWebhookActive(
+            monitor.discord_webhook ? monitor.webhook_active : true,
+        );
         setIsTelegramActive(monitor.telegram_active);
         setTelegramConnectCode(null);
         setIsWebhookOpen(true);
@@ -502,25 +506,93 @@ export function DashboardClient({
 
     const handleSaveWebhook = async () => {
         if (!selectedMonitor) return;
+        const webhookActive = Boolean(webhookInput.trim() && isWebhookActive);
+        const previousMonitor = selectedMonitor;
+
         setMonitors((prev) =>
             prev.map((m) =>
                 m.id === selectedMonitor.id
                     ? {
                           ...m,
-                          discord_webhook: webhookInput || null,
-                          webhook_active: webhookInput ? true : false,
+                          discord_webhook: webhookInput.trim() || null,
+                          webhook_active: webhookActive,
                       }
                     : m,
             ),
         );
-        toast.promise(updateMonitorWebhook(selectedMonitor.id, webhookInput), {
-            loading: "Saving...",
-            success: () => {
-                setIsWebhookOpen(false);
-                return "Discord webhook saved";
+        toast.promise(
+            updateMonitorWebhook(
+                selectedMonitor.id,
+                webhookInput,
+                webhookActive,
+            ),
+            {
+                loading: "Saving...",
+                success: () => {
+                    setIsWebhookOpen(false);
+                    return "Discord webhook saved";
+                },
+                error: (error) => {
+                    setMonitors((prev) =>
+                        prev.map((monitor) =>
+                            monitor.id === previousMonitor.id
+                                ? previousMonitor
+                                : monitor,
+                        ),
+                    );
+                    return error instanceof Error
+                        ? error.message
+                        : "Failed to save Discord webhook";
+                },
             },
-            error: "Failed to save Discord webhook",
-        });
+        );
+    };
+
+    const handleWebhookStatusChange = async (checked: boolean) => {
+        if (!selectedMonitor || isUpdatingWebhookStatus) return;
+
+        const monitorId = selectedMonitor.id;
+        const previousStatus = isWebhookActive;
+        setIsWebhookActive(checked);
+        setIsUpdatingWebhookStatus(true);
+        setSelectedMonitor((monitor) =>
+            monitor ? { ...monitor, webhook_active: checked } : monitor,
+        );
+        setMonitors((prev) =>
+            prev.map((monitor) =>
+                monitor.id === monitorId
+                    ? { ...monitor, webhook_active: checked }
+                    : monitor,
+            ),
+        );
+
+        try {
+            await setMonitorWebhookStatus(monitorId, checked);
+            toast.success(
+                checked ? "Webhook activated" : "Webhook deactivated",
+            );
+        } catch (error) {
+            setIsWebhookActive(previousStatus);
+            setSelectedMonitor((monitor) =>
+                monitor
+                    ? { ...monitor, webhook_active: previousStatus }
+                    : monitor,
+            );
+            setMonitors((prev) =>
+                prev.map((monitor) =>
+                    monitor.id === monitorId
+                        ? { ...monitor, webhook_active: previousStatus }
+                        : monitor,
+                ),
+            );
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to toggle webhook",
+            );
+        } finally {
+            setIsUpdatingWebhookStatus(false);
+        }
     };
 
     const activeCount = monitors.filter((m) => m.status === "active").length;
@@ -1158,35 +1230,8 @@ export function DashboardClient({
                                 <Switch
                                     id="active-mode"
                                     checked={isWebhookActive}
-                                    onCheckedChange={async (checked) => {
-                                        setIsWebhookActive(checked);
-                                        setMonitors((prev) =>
-                                            prev.map((m) =>
-                                                selectedMonitor &&
-                                                m.id === selectedMonitor.id
-                                                    ? {
-                                                          ...m,
-                                                          webhook_active:
-                                                              checked,
-                                                      }
-                                                    : m,
-                                            ),
-                                        );
-                                        if (selectedMonitor) {
-                                            toast.promise(
-                                                toggleWebhookStatus(
-                                                    selectedMonitor.id,
-                                                    !checked,
-                                                ),
-                                                {
-                                                    success: checked
-                                                        ? "Webhook activated"
-                                                        : "Webhook deactivated",
-                                                    error: "Failed to toggle",
-                                                },
-                                            );
-                                        }
-                                    }}
+                                    disabled={isUpdatingWebhookStatus}
+                                    onCheckedChange={handleWebhookStatusChange}
                                 />
                             </div>
                         )}
