@@ -1,4 +1,51 @@
 (function () {
+  const extensionApi = globalThis.chrome || globalThis.browser;
+
+  function getRuntime() {
+    const runtime = extensionApi?.runtime;
+    return runtime?.sendMessage ? runtime : null;
+  }
+
+  function sendRuntimeMessage(message, callback) {
+    const runtime = getRuntime();
+    if (!runtime) {
+      callback?.(undefined, {
+        message: "Extension context unavailable. Reload this page.",
+      });
+      return false;
+    }
+
+    try {
+      Promise.resolve(runtime.sendMessage(message))
+        .then((response) => callback?.(response, undefined))
+        .catch((error) =>
+          callback?.(undefined, {
+            message:
+              error instanceof Error
+                ? error.message
+                : "Extension context unavailable. Reload this page.",
+          }),
+        );
+      return true;
+    } catch (error) {
+      callback?.(undefined, {
+        message:
+          error instanceof Error
+            ? error.message
+            : "Extension context unavailable. Reload this page.",
+      });
+      return false;
+    }
+  }
+
+  function sendResponseSafely(sendResponse, payload) {
+    try {
+      sendResponse(payload);
+    } catch {
+      // Chrome invalidates pending response channels when an extension reloads.
+    }
+  }
+
   function isVintedHost(hostname) {
     return (
       hostname === "vinted.co.uk" ||
@@ -20,8 +67,17 @@
       return;
     }
 
+    const runtime = getRuntime();
+    if (!runtime?.getURL) {
+      return;
+    }
+
     const script = document.createElement("script");
-    script.src = chrome.runtime.getURL("page-bridge.js");
+    try {
+      script.src = runtime.getURL("page-bridge.js");
+    } catch {
+      return;
+    }
     script.async = false;
     script.dataset.vintrackPageBridge = "true";
     script.onload = () => {
@@ -49,7 +105,7 @@
       return;
     }
 
-    chrome.runtime.sendMessage(
+    sendRuntimeMessage(
       {
         type: "VINTRACK_EXTENSION_SET_THEME",
         payload: {
@@ -58,7 +114,6 @@
       },
       () => {
         // The background script ignores non-Vintrack origins.
-        void chrome.runtime.lastError;
       },
     );
   }
@@ -191,13 +246,51 @@
     });
   }
 
+  function requestPageAccount(payload = {}) {
+    return new Promise((resolve) => {
+      const requestId = payload?.requestId || crypto.randomUUID();
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", handleResponse);
+        resolve({
+          ok: false,
+          code: "page_bridge_timeout",
+          error: "Vinted page bridge did not identify the open account in time",
+          requestId,
+        });
+      }, 15000);
+
+      function handleResponse(event) {
+        if (
+          event.source !== window ||
+          event.data?.type !== "VINTRACK_PAGE_ACCOUNT_RESPONSE" ||
+          event.data.payload?.requestId !== requestId
+        ) {
+          return;
+        }
+
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", handleResponse);
+        resolve(event.data.payload);
+      }
+
+      window.addEventListener("message", handleResponse);
+      window.postMessage(
+        {
+          type: "VINTRACK_PAGE_ACCOUNT_REQUEST",
+          payload: { ...payload, requestId },
+        },
+        window.location.origin,
+      );
+    });
+  }
+
   ensurePageBridge();
   watchVintrackTheme();
 
-  chrome.runtime.sendMessage(
+  sendRuntimeMessage(
     { type: "VINTRACK_EXTENSION_PING" },
-    (response) => {
-      if (chrome.runtime.lastError) {
+    (response, runtimeError) => {
+      if (runtimeError) {
         return;
       }
       post("VINTRACK_EXTENSION_READY", response || { installed: true });
@@ -210,10 +303,10 @@
     }
 
     if (event.data.type === "VINTRACK_EXTENSION_PING") {
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         { type: "VINTRACK_EXTENSION_PING" },
-        (response) => {
-          if (chrome.runtime.lastError) {
+        (response, runtimeError) => {
+          if (runtimeError) {
             return;
           }
           post("VINTRACK_EXTENSION_READY", response || { installed: true });
@@ -223,13 +316,12 @@
     }
 
     if (event.data.type === "VINTRACK_EXTENSION_CONNECT") {
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "VINTRACK_EXTENSION_CONNECT",
           payload: event.data.payload,
         },
-        (response) => {
-          const runtimeError = chrome.runtime.lastError;
+        (response, runtimeError) => {
           post(
             "VINTRACK_EXTENSION_CONNECT_RESULT",
             runtimeError
@@ -249,13 +341,12 @@
     }
 
     if (event.data.type === "VINTRACK_EXTENSION_MANUAL_SYNC") {
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "VINTRACK_EXTENSION_MANUAL_SYNC",
           payload: event.data.payload,
         },
-        (response) => {
-          const runtimeError = chrome.runtime.lastError;
+        (response, runtimeError) => {
           post(
             "VINTRACK_EXTENSION_MANUAL_SYNC_RESULT",
             runtimeError
@@ -274,21 +365,31 @@
     }
 
     if (event.data.type === "VINTRACK_EXTENSION_BUY") {
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "VINTRACK_EXTENSION_BUY",
           payload: event.data.payload,
         },
-        (response) => {
-          post("VINTRACK_EXTENSION_BUY_RESULT", response || { ok: false });
+        (response, runtimeError) => {
+          post(
+            "VINTRACK_EXTENSION_BUY_RESULT",
+            runtimeError
+              ? {
+                  ok: false,
+                  error:
+                    runtimeError.message || "Extension checkout failed",
+                }
+              : response || { ok: false },
+          );
         },
       );
     }
   });
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const runtime = getRuntime();
+  runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
     if (message?.type === "VINTRACK_TAB_PING") {
-      sendResponse({
+      sendResponseSafely(sendResponse, {
         ok: true,
         isVintedPage: isVintedHost(window.location.hostname),
       });
@@ -299,9 +400,9 @@
       ensurePageBridge();
       waitForPageBridgeReady()
         .then(() => requestPageBuy(message.payload))
-        .then((response) => sendResponse(response))
+        .then((response) => sendResponseSafely(sendResponse, response))
         .catch((error) =>
-          sendResponse({
+          sendResponseSafely(sendResponse, {
             ok: false,
             code: "page_bridge_error",
             error:
@@ -318,15 +419,34 @@
       ensurePageBridge();
       waitForPageBridgeReady()
         .then(() => requestPageSessionRefresh(message.payload))
-        .then((response) => sendResponse(response))
+        .then((response) => sendResponseSafely(sendResponse, response))
         .catch((error) =>
-          sendResponse({
+          sendResponseSafely(sendResponse, {
             ok: false,
             code: "page_bridge_error",
             error:
               error instanceof Error
                 ? error.message
                 : "Unknown page bridge error",
+            requestId: message.payload?.requestId,
+          }),
+        );
+      return true;
+    }
+
+    if (message?.type === "VINTRACK_GET_BROWSER_ACCOUNT") {
+      ensurePageBridge();
+      waitForPageBridgeReady()
+        .then(() => requestPageAccount(message.payload))
+        .then((response) => sendResponseSafely(sendResponse, response))
+        .catch((error) =>
+          sendResponseSafely(sendResponse, {
+            ok: false,
+            code: "page_bridge_error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unknown browser account lookup error",
             requestId: message.payload?.requestId,
           }),
         );

@@ -10,7 +10,7 @@ export default async function AccountPage() {
 
     const status: AccountStatus = await getAccountStatus();
     const latestExtensionVersion =
-        process.env.BROWSER_EXTENSION_LATEST_VERSION?.trim() || "0.1.3";
+        process.env.BROWSER_EXTENSION_LATEST_VERSION?.trim() || "0.1.4";
     const minimumExtensionVersion =
         process.env.BROWSER_EXTENSION_MIN_VERSION?.trim() ||
         latestExtensionVersion;

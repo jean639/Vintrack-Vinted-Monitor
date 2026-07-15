@@ -524,11 +524,14 @@ type browserSyncCompleteRequest struct {
 }
 
 type extensionSyncCompleteRequest struct {
-	LinkToken    string `json:"link_token"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	UserAgent    string `json:"user_agent"`
-	Domain       string `json:"domain"`
+	LinkToken          string `json:"link_token"`
+	AccessToken        string `json:"access_token"`
+	RefreshToken       string `json:"refresh_token"`
+	UserAgent          string `json:"user_agent"`
+	Domain             string `json:"domain"`
+	AllowAccountSwitch bool   `json:"allow_account_switch"`
+	BrowserVintedID    int64  `json:"browser_vinted_id"`
+	BrowserVintedName  string `json:"browser_vinted_name"`
 }
 
 func (s *Server) buildLinkedSession(userID string, req linkRequest) (*session.VintedSession, error) {
@@ -881,7 +884,7 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 	}
 	if existingSession != nil {
 		s.canonicalizeSessionDomain(existingSession)
-		if incomingDomain != "" && existingSession.Domain != "" && incomingDomain != existingSession.Domain {
+		if !req.AllowAccountSwitch && incomingDomain != "" && existingSession.Domain != "" && incomingDomain != existingSession.Domain {
 			if err := s.sessions.TouchBrowserLink(req.LinkToken); err != nil {
 				log.Printf("[extension-sync] failed to touch browser link for user %s: %v", link.UserID, err)
 			}
@@ -934,7 +937,19 @@ func (s *Server) handleExtensionSyncComplete(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if existingSession != nil && existingSession.VintedUserID > 0 && info.ID > 0 && existingSession.VintedUserID != info.ID {
+	if req.BrowserVintedID > 0 && info.ID != req.BrowserVintedID {
+		writeJSON(w, 409, map[string]interface{}{
+			"status":              "browser_account_mismatch",
+			"domain":              incomingDomain,
+			"browser_vinted_id":   req.BrowserVintedID,
+			"resolved_vinted_id":  info.ID,
+			"browser_vinted_name": strings.TrimSpace(req.BrowserVintedName),
+			"error":               "the server-resolved Vinted account does not match the account open in the selected browser tab",
+		})
+		return
+	}
+
+	if !req.AllowAccountSwitch && existingSession != nil && existingSession.VintedUserID > 0 && info.ID > 0 && existingSession.VintedUserID != info.ID {
 		if err := s.sessions.TouchBrowserLink(req.LinkToken); err != nil {
 			log.Printf("[extension-sync] failed to touch browser link for user %s: %v", link.UserID, err)
 		}

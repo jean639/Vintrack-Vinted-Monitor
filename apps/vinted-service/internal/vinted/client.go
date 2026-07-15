@@ -566,9 +566,28 @@ func parseUserIDFromJWT(token string) (int64, string) {
 	if err := json.Unmarshal(decoded, &claims); err != nil {
 		return 0, ""
 	}
+	parseClaim := func(value interface{}) int64 {
+		switch typed := value.(type) {
+		case string:
+			parsed, _ := strconv.ParseInt(typed, 10, 64)
+			return parsed
+		case float64:
+			if typed > 0 && typed == float64(int64(typed)) {
+				return int64(typed)
+			}
+		}
+		return 0
+	}
+
 	var userID int64
-	if sub, ok := claims["sub"].(string); ok {
-		userID, _ = strconv.ParseInt(sub, 10, 64)
+	if actor, ok := claims["act"].(map[string]interface{}); ok {
+		userID = parseClaim(actor["sub"])
+	}
+	if userID == 0 {
+		userID = parseClaim(claims["sub"])
+	}
+	if userID == 0 {
+		userID = parseClaim(claims["account_id"])
 	}
 	return userID, fmt.Sprintf("%d", userID)
 }
@@ -620,7 +639,7 @@ func (c *Client) GetAccountInfo() (*AccountInfo, error) {
 				}
 
 				if resp.StatusCode == 401 || resp.StatusCode == 403 {
-					return nil, fmt.Errorf("authentication failed (HTTP %d)", resp.StatusCode)
+					log.Printf("[vinted] /users/%d rejected with HTTP %d, trying /users/current", jwtUserID, resp.StatusCode)
 				}
 			}
 		}

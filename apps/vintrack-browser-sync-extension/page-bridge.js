@@ -394,6 +394,40 @@
     return { ok: true, data, text };
   }
 
+  async function getBrowserAccount() {
+    const result = await vintedRequest("current account", {
+      method: "GET",
+      url: `${window.location.origin}/api/v2/users/current`,
+      referrer: window.location.href,
+    });
+    if (!result.ok) {
+      return result;
+    }
+
+    const accountId = findNumberByPaths(result.data, [
+      ["user", "id"],
+      ["id"],
+    ]);
+    const accountName = findStringByPaths(result.data, [
+      ["user", "login"],
+      ["login"],
+    ]);
+    if (!accountId) {
+      return {
+        ok: false,
+        code: "browser_account_missing",
+        error: "Could not identify the account open in this Vinted tab",
+      };
+    }
+
+    return {
+      ok: true,
+      accountId,
+      accountName,
+      domain: window.location.hostname,
+    };
+  }
+
   async function runBrowserBuy(payload) {
     await waitForDocumentReady();
 
@@ -593,6 +627,35 @@
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || !event.data?.type) {
+      return;
+    }
+
+    if (event.data.type === "VINTRACK_PAGE_ACCOUNT_REQUEST") {
+      const requestId = event.data.payload?.requestId || crypto.randomUUID();
+      getBrowserAccount()
+        .then((result) => {
+          window.postMessage(
+            {
+              type: "VINTRACK_PAGE_ACCOUNT_RESPONSE",
+              payload: { ...result, requestId },
+            },
+            window.location.origin
+          );
+        })
+        .catch((error) => {
+          window.postMessage(
+            {
+              type: "VINTRACK_PAGE_ACCOUNT_RESPONSE",
+              payload: {
+                ok: false,
+                requestId,
+                code: "browser_account_exception",
+                error: error instanceof Error ? error.message : "Unknown browser account lookup failure",
+              },
+            },
+            window.location.origin
+          );
+        });
       return;
     }
 

@@ -895,6 +895,16 @@ components:
           type: string
         domain:
           $ref: "#/components/schemas/VintedDomain"
+        allow_account_switch:
+          type: boolean
+          description: Allow an explicit user-triggered sync to replace the linked Vinted account.
+        browser_vinted_id:
+          type: integer
+          format: int64
+          description: Vinted user ID observed in the selected browser tab for mismatch protection.
+        browser_vinted_name:
+          type: string
+          description: Vinted login observed in the selected browser tab for diagnostics.
     SyncCompletedResponse:
       type: object
       required: [status, vinted_name, vinted_id, domain]
