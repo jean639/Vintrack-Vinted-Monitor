@@ -45,6 +45,7 @@ function NotificationBell() {
     const [isLoading, setIsLoading] = useState(false);
     const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
     const [hasLoaded, setHasLoaded] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const rootRef = useRef<HTMLDivElement | null>(null);
 
     const unreadCount = useMemo(
@@ -60,24 +61,28 @@ function NotificationBell() {
         }
 
         setIsLoading(true);
+        setLoadError(null);
         try {
             const res = await fetch("/api/notifications?page=1&per_page=5", {
                 cache: "no-store",
             });
             const data = await res.json();
             if (!res.ok) {
-                throw new Error(
+                setLoadError(
                     data.error ||
-                        `Failed to load notifications (${res.status})`,
+                        "Vinted notifications are temporarily unavailable.",
                 );
+                setNotifications([]);
+                setHasLoaded(true);
+                return;
             }
 
             setNotifications(
                 Array.isArray(data.notifications) ? data.notifications : [],
             );
             setHasLoaded(true);
-        } catch (error) {
-            console.error(error);
+        } catch {
+            setLoadError("Vinted notifications are temporarily unavailable.");
             setNotifications([]);
             setHasLoaded(true);
         } finally {
@@ -96,6 +101,7 @@ function NotificationBell() {
             setOpen(false);
             setNotifications([]);
             setHasLoaded(false);
+            setLoadError(null);
         }
     }, [linked, loading]);
 
@@ -177,6 +183,18 @@ function NotificationBell() {
                                         className="bg-muted h-18 animate-pulse rounded-2xl"
                                     />
                                 ))}
+                            </div>
+                        ) : loadError ? (
+                            <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
+                                <div className="bg-muted text-muted-foreground mb-3 flex h-12 w-12 items-center justify-center rounded-full">
+                                    <Bell className="h-5 w-5" />
+                                </div>
+                                <p className="text-foreground text-sm font-medium">
+                                    Notifications unavailable
+                                </p>
+                                <p className="text-muted-foreground mt-1 text-xs">
+                                    {loadError}
+                                </p>
                             </div>
                         ) : notifications.length > 0 ? (
                             notifications.map((notification) => (

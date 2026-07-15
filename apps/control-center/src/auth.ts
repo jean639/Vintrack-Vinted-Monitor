@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import { cache } from "react";
 import type { Session } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { PrismaAdapter } from "@auth/prisma-adapter";
@@ -41,11 +42,7 @@ const authResult = NextAuth({
         async session({ session, user }) {
             if (session.user) {
                 session.user.id = user.id;
-                const dbUser = await db.user.findUnique({
-                    where: { id: user.id },
-                    select: { role: true },
-                });
-                session.user.role = dbUser?.role ?? "free";
+                session.user.role = user.role ?? "free";
             }
             return session;
         },
@@ -54,10 +51,10 @@ const authResult = NextAuth({
 
 export const { handlers, signIn, signOut } = authResult;
 
-export async function auth(): Promise<Session | null> {
-	if (process.env.E2E_TEST_MODE === "true") {
-		const userId = process.env.E2E_TEST_USER_ID ?? "e2e-user";
-		return {
+async function getAuthSession(): Promise<Session | null> {
+    if (process.env.E2E_TEST_MODE === "true") {
+        const userId = process.env.E2E_TEST_USER_ID ?? "e2e-user";
+        return {
             user: {
                 id: userId,
                 name: "E2E User",
@@ -66,8 +63,10 @@ export async function auth(): Promise<Session | null> {
                 role: "admin",
             },
             expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-		};
-	}
+        };
+    }
 
-	return authResult.auth() as Promise<Session | null>;
+    return authResult.auth() as Promise<Session | null>;
 }
+
+export const auth = cache(getAuthSession);
