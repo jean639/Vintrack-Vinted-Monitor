@@ -50,6 +50,8 @@ import {
     setRoleActiveMonitorLimit,
     setUserRole,
     setUserActiveMonitorLimit,
+    getAdminLogs,
+    getAdminUserDetails,
     updateServerProxies,
     stopSingleUserMonitor,
     stopUserActiveMonitors,
@@ -220,10 +222,16 @@ export function AdminClient({
     monitorLimits: MonitorLimits;
 }) {
     const [users, setUsers] = useState<UserRow[]>(initialUsers);
+    const [adminLogs, setAdminLogs] = useState<AdminLogRow[]>(logs);
+    const [logsLoaded, setLogsLoaded] = useState(logs.length > 0);
+    const [isLoadingLogs, setIsLoadingLogs] = useState(false);
     const [activeTab, setActiveTab] = useState<AdminTab>(
         normalizeTab(initialTab),
     );
     const [selected, setSelected] = useState<UserRow | null>(null);
+    const [loadingUserDetailsId, setLoadingUserDetailsId] = useState<
+        string | null
+    >(null);
     const [pendingRole, setPendingRole] = useState<string>("");
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -256,10 +264,27 @@ export function AdminClient({
     const [serverProxies, setServerProxies] = useState(initialServerProxies);
     const [isSavingServerProxies, setIsSavingServerProxies] = useState(false);
 
+    const loadAdminLogs = () => {
+        if (logsLoaded || isLoadingLogs) return;
+
+        setIsLoadingLogs(true);
+        getAdminLogs()
+            .then((nextLogs) => {
+                setAdminLogs(nextLogs);
+                setLogsLoaded(true);
+            })
+            .catch(() => {
+                toast.error("Failed to load admin logs");
+            })
+            .finally(() => setIsLoadingLogs(false));
+    };
+
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const tab = normalizeTab(params.get("tab"));
         setActiveTab(tab);
+        if (tab === "logs") loadAdminLogs();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const switchTab = (tab: AdminTab) => {
@@ -267,6 +292,8 @@ export function AdminClient({
         const url = new URL(window.location.href);
         url.searchParams.set("tab", tab);
         window.history.replaceState(null, "", url.toString());
+
+        if (tab === "logs") loadAdminLogs();
     };
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -342,7 +369,7 @@ export function AdminClient({
                 b._count.monitors - a._count.monitors,
         )
         .slice(0, 5);
-    const importantLogs = logs
+    const importantLogs = adminLogs
         .filter(
             (log) =>
                 log.status !== "success" ||
@@ -387,12 +414,43 @@ export function AdminClient({
     const roleLimitsConfigured = Object.values(monitorLimits.roles).filter(
         (value) => value !== null && value !== undefined,
     ).length;
+    const activeMonitorShare =
+        totalMonitors > 0 ? Math.round((runningMonitors / totalMonitors) * 100) : 0;
+
+    const hydrateUserDetails = async (user: UserRow) => {
+        if (user.monitors.length > 0 || user._count.monitors === 0) {
+            return user;
+        }
+
+        setLoadingUserDetailsId(user.id);
+        const monitors = await getAdminUserDetails(user.id);
+        const hydratedUser = { ...user, monitors };
+
+        setUsers((prev) =>
+            prev.map((current) =>
+                current.id === user.id ? hydratedUser : current,
+            ),
+        );
+
+        return hydratedUser;
+    };
 
     const openUserDetails = (user: UserRow) => {
         setSelected(user);
         setPendingRole(user.role);
         setUserLimitInput(limitInputValue(monitorLimits.users[user.id]));
         setIsDetailsOpen(true);
+
+        hydrateUserDetails(user)
+            .then((hydratedUser) => {
+                setSelected((current) =>
+                    current?.id === hydratedUser.id ? hydratedUser : current,
+                );
+            })
+            .catch(() => {
+                toast.error("Failed to load user monitor details");
+            })
+            .finally(() => setLoadingUserDetailsId(null));
     };
 
     const openRoleDialog = (user: UserRow) => {
@@ -405,11 +463,14 @@ export function AdminClient({
         user: UserRow,
         monitorId: number | null = null,
     ): UserRow => {
-        const stoppedCount = user.monitors.filter(
-            (monitor) =>
-                monitor.status === "active" &&
-                (monitorId === null || monitor.id === monitorId),
-        ).length;
+        const stoppedCount =
+            monitorId === null && user.monitors.length === 0
+                ? user.metrics.runningMonitors
+                : user.monitors.filter(
+                      (monitor) =>
+                          monitor.status === "active" &&
+                          (monitorId === null || monitor.id === monitorId),
+                  ).length;
 
         if (stoppedCount === 0) return user;
 
@@ -652,10 +713,16 @@ export function AdminClient({
     const selectedPausedMonitors =
         selected?.monitors.filter((monitor) => monitor.status !== "active") ??
         [];
+    const selectedRunningMonitors =
+        selected && selected.monitors.length > 0
+            ? selectedActiveMonitors.length
+            : (selected?.metrics.runningMonitors ?? 0);
     const selectedItems = selected?.metrics.totalItems ?? 0;
     const selectedEffectiveLimit = selected
         ? getEffectiveLimit(selected)
         : { value: null, source: "Unlimited" };
+    const isLoadingSelectedDetails =
+        selected !== null && loadingUserDetailsId === selected.id;
 
     return (
         <div className="space-y-8">
@@ -787,7 +854,7 @@ export function AdminClient({
                 </Card>
             </div>
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                        <div className="border-border/60 bg-card rounded-2xl border p-5 shadow-sm">
+                        <div className="border-border/60 bg-card flex h-full flex-col rounded-2xl border p-5 shadow-sm">
                             <div className="mb-4 flex items-center justify-between">
                                 <div>
                                     <p className="text-foreground text-sm font-semibold">
@@ -871,6 +938,51 @@ export function AdminClient({
                                     <p className="mt-1 text-xl font-semibold">
                                         {serverProxyLineCount}
                                     </p>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 flex-1 rounded-xl border px-4 py-3">
+                                <div className="mb-2 flex items-center justify-between gap-3">
+                                    <p className="text-muted-foreground text-xs font-medium">
+                                        Running capacity
+                                    </p>
+                                    <p className="text-foreground text-sm font-semibold">
+                                        {activeMonitorShare}%
+                                    </p>
+                                </div>
+                                <div className="bg-muted h-2 overflow-hidden rounded-full">
+                                    <div
+                                        className="h-full rounded-full bg-emerald-500 transition-all"
+                                        style={{
+                                            width: `${activeMonitorShare}%`,
+                                        }}
+                                    />
+                                </div>
+                                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                                    <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs dark:bg-emerald-500/10">
+                                        <span className="text-emerald-700 dark:text-emerald-300">
+                                            Running
+                                        </span>
+                                        <span className="font-semibold text-emerald-800 dark:text-emerald-200">
+                                            {runningMonitors}
+                                        </span>
+                                    </div>
+                                    <div className="bg-muted/40 flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs">
+                                        <span className="text-muted-foreground">
+                                            Paused
+                                        </span>
+                                        <span className="font-semibold">
+                                            {pausedMonitors}
+                                        </span>
+                                    </div>
+                                    <div className="bg-muted/40 flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs">
+                                        <span className="text-muted-foreground">
+                                            Failed checks
+                                        </span>
+                                        <span className="font-semibold">
+                                            {failedChecks24h}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1423,7 +1535,11 @@ export function AdminClient({
                             Latest audit, monitor, and alert events.
                         </p>
                     </div>
-                    {logs.length > 0 ? (
+                    {isLoadingLogs ? (
+                        <div className="text-muted-foreground px-5 py-12 text-center text-sm">
+                            Loading admin logs...
+                        </div>
+                    ) : adminLogs.length > 0 ? (
                         <div className="overflow-x-auto">
                             <table className="w-full">
                                 <thead className="bg-muted/30">
@@ -1446,7 +1562,7 @@ export function AdminClient({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-border/50 divide-y">
-                                    {logs.map((log) => (
+                                    {adminLogs.map((log) => (
                                         <tr key={log.id}>
                                             <td className="px-5 py-3.5">
                                                 <div className="space-y-1">
@@ -1720,8 +1836,9 @@ export function AdminClient({
                                         className="h-9 rounded-lg text-xs text-amber-700 hover:text-amber-800"
                                         onClick={handleStopUserMonitors}
                                         disabled={
-                                            selectedActiveMonitors.length ===
-                                                0 || isStoppingMonitors
+                                            isLoadingSelectedDetails ||
+                                            selectedRunningMonitors === 0 ||
+                                            isStoppingMonitors
                                         }
                                     >
                                         <PauseCircle className="mr-1.5 h-3.5 w-3.5" />
@@ -1765,7 +1882,7 @@ export function AdminClient({
                                             >
                                                 Running:{" "}
                                                 {
-                                                    selectedActiveMonitors.length
+                                                    selectedRunningMonitors
                                                 }
                                             </Badge>
                                         </div>
@@ -1829,7 +1946,7 @@ export function AdminClient({
                                             Running Now
                                         </CardDescription>
                                         <CardTitle className="text-2xl text-emerald-600">
-                                            {selectedActiveMonitors.length}
+                                            {selectedRunningMonitors}
                                         </CardTitle>
                                     </CardHeader>
                                 </Card>
@@ -1959,13 +2076,17 @@ export function AdminClient({
                                             Running Monitors
                                         </p>
                                         <p className="text-muted-foreground text-xs">
-                                            {selectedActiveMonitors.length}{" "}
+                                            {selectedRunningMonitors}{" "}
                                             currently active
                                         </p>
                                     </div>
                                 </div>
                                 <Separator />
-                                {selectedActiveMonitors.length > 0 ? (
+                                {isLoadingSelectedDetails ? (
+                                    <div className="text-muted-foreground px-4 py-8 text-center text-sm">
+                                        Loading monitor details...
+                                    </div>
+                                ) : selectedActiveMonitors.length > 0 ? (
                                     <div className="divide-border/50 divide-y">
                                         {selectedActiveMonitors.map(
                                             (monitor) => (
@@ -2083,7 +2204,11 @@ export function AdminClient({
                                     </p>
                                 </div>
                                 <Separator />
-                                {selected.monitors.length > 0 ? (
+                                {isLoadingSelectedDetails ? (
+                                    <div className="text-muted-foreground px-4 py-8 text-center text-sm">
+                                        Loading monitor details...
+                                    </div>
+                                ) : selected.monitors.length > 0 ? (
                                     <div className="divide-border/50 divide-y">
                                         {[
                                             ...selectedActiveMonitors,

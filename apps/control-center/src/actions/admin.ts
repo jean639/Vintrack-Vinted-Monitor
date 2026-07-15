@@ -16,6 +16,14 @@ import {
 const SERVER_PROXIES_SETTING_KEY = "server_proxies";
 const VALID_PROXY_SCHEMES = ["http", "https", "socks4", "socks5"];
 
+type AlertIssueSummaryRow = {
+    channel: string;
+    status: string;
+    failure_reason: string | null;
+    event_count: bigint;
+    last_seen_at: Date;
+};
+
 async function requireAdmin() {
     const session = await auth();
     if (!session?.user?.id) throw new Error("Unauthorized");
@@ -164,6 +172,170 @@ export async function getUsers() {
     });
 
     return users;
+}
+
+export async function getAdminUserDetails(userId: string) {
+    await requireAdmin();
+
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+            id: true,
+            monitors: {
+                orderBy: [{ status: "asc" }, { created_at: "desc" }],
+                select: {
+                    id: true,
+                    name: true,
+                    query: true,
+                    query_delay_ms: true,
+                    status: true,
+                    region: true,
+                    created_at: true,
+                    price_min: true,
+                    price_max: true,
+                    discord_webhook: true,
+                    webhook_active: true,
+                    telegram_active: true,
+                    proxy_group: {
+                        select: {
+                            name: true,
+                        },
+                    },
+                    _count: {
+                        select: {
+                            items: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    if (!user) throw new Error("User not found");
+
+    return user.monitors;
+}
+
+export async function getAdminLogs() {
+    await requireAdmin();
+
+    const logs: {
+        id: string;
+        type: "audit" | "monitor" | "alert";
+        title: string;
+        detail: string | null;
+        status: string;
+        subject: string | null;
+        actor: string | null;
+        createdAt: Date;
+    }[] = [];
+
+    try {
+        const auditRows = await db.audit_events.findMany({
+            orderBy: { created_at: "desc" },
+            take: 60,
+            select: {
+                id: true,
+                action: true,
+                target_type: true,
+                target_id: true,
+                status: true,
+                created_at: true,
+                user: { select: { name: true, email: true } },
+            },
+        });
+
+        logs.push(
+            ...auditRows.map((row) => ({
+                id: `audit-${row.id.toString()}`,
+                type: "audit" as const,
+                title: row.action,
+                detail: row.target_type
+                    ? `${row.target_type}${row.target_id ? ` #${row.target_id}` : ""}`
+                    : null,
+                status: row.status,
+                subject: row.target_id,
+                actor: row.user?.name ?? row.user?.email ?? null,
+                createdAt: row.created_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load audit logs", error);
+    }
+
+    try {
+        const monitorRows = await db.monitor_events.findMany({
+            orderBy: { created_at: "desc" },
+            take: 60,
+            select: {
+                id: true,
+                event_type: true,
+                severity: true,
+                message: true,
+                created_at: true,
+                monitor: {
+                    select: {
+                        name: true,
+                        user: { select: { name: true, email: true } },
+                    },
+                },
+            },
+        });
+
+        logs.push(
+            ...monitorRows.map((row) => ({
+                id: `monitor-${row.id.toString()}`,
+                type: "monitor" as const,
+                title: row.event_type,
+                detail: row.message,
+                status: row.severity,
+                subject: row.monitor.name,
+                actor: row.monitor.user.name ?? row.monitor.user.email ?? null,
+                createdAt: row.created_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load monitor logs", error);
+    }
+
+    try {
+        const alertRows = await db.$queryRaw<AlertIssueSummaryRow[]>`
+            SELECT
+                channel,
+                status,
+                failure_reason,
+                COUNT(*)::bigint AS event_count,
+                MAX(created_at) AS last_seen_at
+            FROM alert_events
+            WHERE created_at >= NOW() - INTERVAL '24 hours'
+              AND (
+                status <> 'success'
+                OR failure_reason IS NOT NULL
+              )
+            GROUP BY channel, status, failure_reason
+            ORDER BY event_count DESC, last_seen_at DESC
+            LIMIT 20
+        `;
+
+        logs.push(
+            ...alertRows.map((row) => ({
+                id: `alert-${row.channel}-${row.status}-${row.failure_reason ?? "unknown"}`,
+                type: "alert" as const,
+                title: `${row.channel} alert issues`,
+                detail: `${Number(row.event_count)} event${Number(row.event_count) === 1 ? "" : "s"} in 24h${row.failure_reason ? ` · ${row.failure_reason}` : ""}`,
+                status: row.status,
+                subject: "24h summary",
+                actor: null,
+                createdAt: row.last_seen_at,
+            })),
+        );
+    } catch (error) {
+        console.error("[admin] failed to load alert logs", error);
+    }
+
+    return logs
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, 100);
 }
 
 async function sendPausedWebhook(
