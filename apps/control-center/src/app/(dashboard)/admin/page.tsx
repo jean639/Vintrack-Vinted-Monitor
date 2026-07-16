@@ -224,27 +224,84 @@ export default async function AdminPage({
         ...roles.map(roleLimitScope),
         ...users.map((user) => userLimitScope(user.id)),
     ];
-    const [adminMetrics, limits, freeProxyState, serverProxyRows, params] =
-        await Promise.all([
-            getAdminUserMetrics(users.map((user) => user.id)),
-            getMonitorLimits(limitScopes),
-            getFreeProxyAdminState(),
-            db.$queryRaw<{ value: string }[]>`
+    const [
+        adminMetrics,
+        limits,
+        freeProxyState,
+        serverProxyRows,
+        activeMonitors,
+        params,
+    ] = await Promise.all([
+        getAdminUserMetrics(users.map((user) => user.id)),
+        getMonitorLimits(limitScopes),
+        getFreeProxyAdminState(),
+        db.$queryRaw<{ value: string }[]>`
                 SELECT value FROM app_settings WHERE key = ${"server_proxies"}
             `.catch((error) => {
-                console.error("[admin] failed to load server proxies", error);
-                return [];
-            }),
-            searchParams,
-        ]);
+            console.error("[admin] failed to load server proxies", error);
+            return [];
+        }),
+        db.monitors.findMany({
+            where: { status: "active" },
+            orderBy: { created_at: "desc" },
+            select: {
+                id: true,
+                userId: true,
+                name: true,
+                query: true,
+                query_delay_ms: true,
+                status: true,
+                region: true,
+                created_at: true,
+                price_min: true,
+                price_max: true,
+                discord_webhook: true,
+                webhook_active: true,
+                telegram_active: true,
+                proxy_group: {
+                    select: {
+                        name: true,
+                    },
+                },
+                _count: {
+                    select: {
+                        items: true,
+                    },
+                },
+            },
+        }),
+        searchParams,
+    ]);
+
+    type ActiveMonitorRow = Omit<
+        (typeof activeMonitors)[number],
+        "userId" | "discord_webhook"
+    > & { discord_configured: boolean };
+    const activeMonitorsByUser = new Map<string, ActiveMonitorRow[]>();
+    for (const { userId, discord_webhook, ...monitor } of activeMonitors) {
+        const current = activeMonitorsByUser.get(userId) ?? [];
+        current.push({
+            ...monitor,
+            discord_configured: Boolean(discord_webhook),
+        });
+        activeMonitorsByUser.set(userId, current);
+    }
+
     const usersWithMetrics = users.map((user) => {
         const metrics = adminMetrics.get(user.id) ?? emptyMetrics();
+        const userActiveMonitors = activeMonitorsByUser.get(user.id) ?? [];
 
         return {
             ...user,
             monitors: [],
+            activeMonitors: userActiveMonitors,
             metrics: {
                 ...metrics,
+                runningMonitors: userActiveMonitors.length,
+                pausedMonitors: Math.max(
+                    0,
+                    user._count.monitors - userActiveMonitors.length,
+                ),
             },
         };
     });
