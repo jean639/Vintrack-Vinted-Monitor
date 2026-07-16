@@ -8,10 +8,15 @@ import { cn } from "@/lib/utils";
 interface SizePickerProps {
     selected: string[];
     onChange: (ids: string[]) => void;
+    defaultGroup?: string;
 }
 
-export function SizePicker({ selected, onChange }: SizePickerProps) {
-    const [activeGroup, setActiveGroup] = useState<string>("14");
+export function SizePicker({
+    selected,
+    onChange,
+    defaultGroup = "14",
+}: SizePickerProps) {
+    const [activeGroup, setActiveGroup] = useState<string>(defaultGroup);
     const [dropdownOpen, setDropdownOpen] = useState(false);
 
     const group = SIZE_GROUPS.find((g) => g.key === activeGroup);

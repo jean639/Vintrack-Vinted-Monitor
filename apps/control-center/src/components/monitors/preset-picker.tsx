@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Footprints, Shirt, Sparkles } from "lucide-react";
+import { Check, Footprints, Hammer, Shirt, Sparkles, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
     MONITOR_PRESETS,
@@ -12,6 +12,8 @@ const ICONS = {
     shirt: Shirt,
     sneaker: Footprints,
     sparkles: Sparkles,
+    tag: Tag,
+    workwear: Hammer,
 } as const;
 
 const ACCENTS = {
@@ -21,11 +23,23 @@ const ACCENTS = {
         selected:
             "border-violet-500/60 ring-2 ring-violet-500/15 dark:border-violet-400/60",
     },
+    sky: {
+        shell: "from-sky-500/14 via-sky-500/5 to-transparent",
+        icon: "bg-sky-500/12 text-sky-700 dark:text-sky-300",
+        selected:
+            "border-sky-500/60 ring-2 ring-sky-500/15 dark:border-sky-400/60",
+    },
     amber: {
         shell: "from-amber-500/16 via-amber-500/5 to-transparent",
         icon: "bg-amber-500/14 text-amber-700 dark:text-amber-300",
         selected:
             "border-amber-500/60 ring-2 ring-amber-500/15 dark:border-amber-400/60",
+    },
+    rose: {
+        shell: "from-rose-500/14 via-rose-500/5 to-transparent",
+        icon: "bg-rose-500/12 text-rose-700 dark:text-rose-300",
+        selected:
+            "border-rose-500/60 ring-2 ring-rose-500/15 dark:border-rose-400/60",
     },
     emerald: {
         shell: "from-emerald-500/14 via-emerald-500/5 to-transparent",
@@ -46,7 +60,12 @@ export function MonitorPresetPicker({
 }) {
     return (
         <div
-            className="grid gap-3 md:grid-cols-3"
+            className={cn(
+                "grid",
+                compact
+                    ? "grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3"
+                    : "gap-3 md:grid-cols-3",
+            )}
             role="radiogroup"
             aria-label="Monitor presets"
         >
@@ -61,11 +80,15 @@ export function MonitorPresetPicker({
                         type="button"
                         role="radio"
                         aria-checked={isSelected}
+                        aria-label={`${preset.name}: ${preset.description}`}
+                        title={compact ? preset.description : undefined}
                         data-testid={`monitor-preset-${preset.key}`}
                         onClick={() => onSelect(preset)}
                         className={cn(
-                            "border-border/70 bg-card hover:border-foreground/25 focus-visible:ring-ring relative overflow-hidden rounded-xl border text-left transition-[border-color,box-shadow,transform] outline-none hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-offset-2",
-                            compact ? "min-h-36 p-4" : "min-h-44 p-5",
+                            "border-border/70 bg-card hover:border-foreground/25 focus-visible:ring-ring relative overflow-hidden border text-left transition-[border-color,box-shadow,transform] outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                            compact
+                                ? "min-h-24 rounded-lg p-3"
+                                : "min-h-44 rounded-xl p-5 hover:-translate-y-0.5",
                             isSelected && accent.selected,
                         )}
                     >
@@ -75,42 +98,72 @@ export function MonitorPresetPicker({
                                 accent.shell,
                             )}
                         />
-                        <div className="relative flex h-full flex-col">
-                            <div className="flex items-start justify-between gap-3">
+                        {compact ? (
+                            <div className="relative flex h-full items-start gap-3">
                                 <span
                                     className={cn(
-                                        "flex size-9 items-center justify-center rounded-lg",
+                                        "flex size-8 shrink-0 items-center justify-center rounded-md",
                                         accent.icon,
                                     )}
                                 >
-                                    <Icon className="size-4.5" />
+                                    <Icon className="size-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-sm leading-5 font-semibold">
+                                        {preset.name}
+                                    </span>
+                                    <span className="text-muted-foreground mt-1 block text-[11px] leading-4">
+                                        {preset.description}
+                                    </span>
                                 </span>
                                 <span
                                     className={cn(
-                                        "flex size-6 items-center justify-center rounded-full border transition-opacity",
+                                        "flex size-5 shrink-0 items-center justify-center rounded-full border transition-opacity",
                                         isSelected
                                             ? "border-foreground bg-foreground text-background opacity-100"
                                             : "border-border bg-background/70 opacity-0",
                                     )}
                                     aria-hidden="true"
                                 >
-                                    <Check className="size-3.5" />
+                                    <Check className="size-3" />
                                 </span>
                             </div>
-                            <div className={cn("mt-auto", compact && "pt-5")}>
-                                <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-                                    {preset.eyebrow}
-                                </p>
-                                <p className="mt-1.5 text-sm font-semibold">
-                                    {preset.name}
-                                </p>
-                                {!compact && (
+                        ) : (
+                            <div className="relative flex h-full flex-col">
+                                <div className="flex items-start justify-between gap-3">
+                                    <span
+                                        className={cn(
+                                            "flex size-9 items-center justify-center rounded-lg",
+                                            accent.icon,
+                                        )}
+                                    >
+                                        <Icon className="size-4.5" />
+                                    </span>
+                                    <span
+                                        className={cn(
+                                            "flex size-6 items-center justify-center rounded-full border transition-opacity",
+                                            isSelected
+                                                ? "border-foreground bg-foreground text-background opacity-100"
+                                                : "border-border bg-background/70 opacity-0",
+                                        )}
+                                        aria-hidden="true"
+                                    >
+                                        <Check className="size-3.5" />
+                                    </span>
+                                </div>
+                                <div className="mt-auto">
+                                    <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+                                        {preset.eyebrow}
+                                    </p>
+                                    <p className="mt-1.5 text-sm font-semibold">
+                                        {preset.name}
+                                    </p>
                                     <p className="text-muted-foreground mt-1.5 text-xs leading-5">
                                         {preset.description}
                                     </p>
-                                )}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </button>
                 );
             })}

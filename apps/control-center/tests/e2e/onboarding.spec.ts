@@ -59,16 +59,37 @@ test.describe("first monitor onboarding", () => {
         await expect(page.getByTestId("demo-monitor-lease")).toBeHidden();
 
         await page.goto("/monitors/new");
-        await page.getByTestId("monitor-preset-adidas-samba").click();
-        await expect(page.getByLabel("Monitor Name")).toHaveValue(
-            "Adidas Samba",
-        );
+        await expect(page.getByTestId("monitor-preset-carhartt")).toBeVisible();
+        await page.getByTestId("monitor-preset-levis-501").click();
+        await expect(page.getByLabel("Monitor Name")).toHaveValue("Levi's 501");
         await expect(
             page.getByRole("textbox", {
                 name: "Keywords (optional)",
                 exact: true,
             }),
-        ).toHaveValue("Samba");
-        await expect(page.locator('input[name="brand_ids"]')).toHaveValue("14");
+        ).toHaveValue("501");
+        await expect(page.locator('input[name="anti_keywords"]')).toHaveValue(
+            "fake,replica,replika,defekt,beschädigt",
+        );
+        await expect(page.locator('input[name="catalog_ids"]')).toHaveValue(
+            "183,257",
+        );
+        await expect(page.locator('input[name="brand_ids"]')).toHaveValue("10");
+        await expect(page.locator('input[name="color_ids"]')).toHaveValue(
+            "9,27,1,3",
+        );
+        await expect(page.locator('input[name="status_ids"]')).toHaveValue(
+            "6,1,2",
+        );
+        await expect(page.locator('input[name="size_id"]')).toHaveValue(
+            "1634,1635,1636,1637,1638,1639,1640,1641,1642",
+        );
+        await expect(
+            page.locator('input[name="allowed_countries"]'),
+        ).toHaveValue("de");
+        await expect(page.locator('input[name="price_min"]')).toHaveValue("10");
+        await expect(page.locator('input[name="price_max"]')).toHaveValue(
+            "100",
+        );
     });
 });

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { MonitorPresetPicker } from "@/components/monitors/preset-picker";
 import {
+    getMonitorPreset,
     type MonitorPreset,
     type MonitorPresetKey,
 } from "@/lib/monitor-presets";
@@ -70,16 +71,7 @@ export function FirstMonitorQuickStart({
         pool.regions[selectedRegion]?.healthy,
     );
     const selectedPresetDefinition = useMemo(
-        () =>
-            selectedPreset
-                ? (
-                      {
-                          "ralph-lauren": "Ralph Lauren",
-                          "nike-dunk-low": "Nike Dunk Low",
-                          "adidas-samba": "Adidas Samba",
-                      } as const
-                  )[selectedPreset]
-                : null,
+        () => getMonitorPreset(selectedPreset)?.name ?? null,
         [selectedPreset],
     );
 
