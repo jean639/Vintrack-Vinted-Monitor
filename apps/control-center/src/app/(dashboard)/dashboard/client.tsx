@@ -34,6 +34,8 @@ import {
     Settings,
     Trash2,
     UserX,
+    Rocket,
+    Clock3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -69,6 +71,11 @@ import {
 } from "@/lib/regions";
 import { getStatusLabels } from "@/lib/statuses";
 import { formatQueryDelay } from "@/lib/monitor-delay";
+import {
+    FirstMonitorQuickStart,
+    type QuickStartPool,
+} from "@/components/monitors/first-monitor-quick-start";
+import { DEMO_MONITOR_DURATION_MS } from "@/lib/demo-monitor";
 
 type MonitorHealth = {
     monitor_id: number;
@@ -99,6 +106,7 @@ export type Monitor = {
     telegram_active: boolean;
     proxy_source: string;
     proxy_group_name: string | null;
+    demo_expires_at: string | null;
     _count: { items: number };
     created_at: string;
 };
@@ -190,14 +198,30 @@ function getMonitorProxyLabel(monitor: Monitor): string {
     return "Server Proxies";
 }
 
+function getDemoMonitorLabel(monitor: Monitor, now: number) {
+    if (!monitor.demo_expires_at) return null;
+    const remaining = new Date(monitor.demo_expires_at).getTime() - now;
+    if (remaining <= 0) return "Demo ended";
+    if (monitor.status !== "active") return "Demo paused";
+    return `Demo · ${Math.max(1, Math.ceil(remaining / 60_000))}m`;
+}
+
 export function DashboardClient({
     initialMonitors,
     userName,
     initialDedupeMonitorAlerts,
+    quickStartEligible,
+    initialQuickStartOpen,
+    quickStartPool,
+    initialNow,
 }: {
     initialMonitors: Monitor[];
     userName: string;
     initialDedupeMonitorAlerts: boolean;
+    quickStartEligible: boolean;
+    initialQuickStartOpen: boolean;
+    quickStartPool: QuickStartPool | null;
+    initialNow: string;
 }) {
     const [selectedMonitor, setSelectedMonitor] = useState<Monitor | null>(
         null,
@@ -229,6 +253,34 @@ export function DashboardClient({
         {},
     );
     const [isDedupePending, startDedupeTransition] = useTransition();
+    const [isQuickStartOpen, setIsQuickStartOpen] = useState(
+        initialQuickStartOpen,
+    );
+    const [demoNow, setDemoNow] = useState(() =>
+        new Date(initialNow).getTime(),
+    );
+    const hasDemoMonitors = useMemo(
+        () => monitors.some((monitor) => monitor.demo_expires_at),
+        [monitors],
+    );
+
+    useEffect(() => {
+        if (!hasDemoMonitors) return;
+        const interval = window.setInterval(() => {
+            const nextNow = Date.now();
+            setDemoNow(nextNow);
+            setMonitors((current) =>
+                current.map((monitor) =>
+                    monitor.status === "active" &&
+                    monitor.demo_expires_at &&
+                    new Date(monitor.demo_expires_at).getTime() <= nextNow
+                        ? { ...monitor, status: "paused" }
+                        : monitor,
+                ),
+            );
+        }, 15_000);
+        return () => window.clearInterval(interval);
+    }, [hasDemoMonitors]);
 
     const handleTestWebhook = async () => {
         if (!webhookInput) {
@@ -430,7 +482,15 @@ export function DashboardClient({
                 const startedIds = new Set(result.startedMonitorIds);
                 setMonitors((prev) =>
                     prev.map((m) =>
-                        startedIds.has(m.id) ? { ...m, status: "active" } : m,
+                        startedIds.has(m.id)
+                            ? {
+                                  ...m,
+                                  status: "active",
+                                  demo_expires_at:
+                                      result.demoExpirations[m.id] ??
+                                      m.demo_expires_at,
+                              }
+                            : m,
                     ),
                 );
                 return result.message;
@@ -445,18 +505,44 @@ export function DashboardClient({
     const handleToggle = async (id: number, currentStatus: string) => {
         const newStatus = currentStatus === "active" ? "paused" : "active";
         const actionText = newStatus === "active" ? "Resumed" : "Paused";
+        const currentMonitor = monitors.find((monitor) => monitor.id === id);
+        const optimisticDemoExpiry =
+            newStatus === "active" && currentMonitor?.demo_expires_at
+                ? new Date(Date.now() + DEMO_MONITOR_DURATION_MS).toISOString()
+                : currentMonitor?.demo_expires_at;
 
         setMonitors((prev) =>
-            prev.map((m) => (m.id === id ? { ...m, status: newStatus } : m)),
+            prev.map((m) =>
+                m.id === id
+                    ? {
+                          ...m,
+                          status: newStatus,
+                          demo_expires_at:
+                              optimisticDemoExpiry ?? m.demo_expires_at,
+                      }
+                    : m,
+            ),
         );
 
         toast.promise(toggleMonitor(id, currentStatus), {
             loading: "Updating...",
-            success: `Monitor ${actionText}`,
+            success: (result) => {
+                setMonitors((prev) =>
+                    prev.map((monitor) =>
+                        monitor.id === id
+                            ? {
+                                  ...monitor,
+                                  demo_expires_at: result.demoExpiresAt,
+                              }
+                            : monitor,
+                    ),
+                );
+                return `Monitor ${actionText}`;
+            },
             error: (error) => {
                 setMonitors((prev) =>
                     prev.map((m) =>
-                        m.id === id ? { ...m, status: currentStatus } : m,
+                        m.id === id && currentMonitor ? currentMonitor : m,
                     ),
                 );
                 return error instanceof Error
@@ -601,6 +687,14 @@ export function DashboardClient({
 
     return (
         <div className="space-y-8">
+            {quickStartEligible && (
+                <FirstMonitorQuickStart
+                    open={isQuickStartOpen}
+                    onOpenChange={setIsQuickStartOpen}
+                    initialPool={quickStartPool}
+                />
+            )}
+
             <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">
@@ -688,19 +782,44 @@ export function DashboardClient({
             {monitors.length === 0 ? (
                 <div className="border-border/80 bg-card/60 flex flex-col items-center justify-center rounded-lg border border-dashed py-20">
                     <div className="bg-muted mb-4 rounded-md p-3">
-                        <Radio className="text-muted-foreground h-6 w-6" />
+                        {quickStartEligible ? (
+                            <Rocket className="text-muted-foreground h-6 w-6" />
+                        ) : (
+                            <Radio className="text-muted-foreground h-6 w-6" />
+                        )}
                     </div>
                     <h3 className="text-foreground text-base font-semibold">
-                        No monitors yet
+                        {quickStartEligible
+                            ? "Start finding listings in seconds"
+                            : "No monitors yet"}
                     </h3>
-                    <p className="text-muted-foreground mt-1 mb-4 text-sm">
-                        Create your first monitor to start finding deals.
+                    <p className="text-muted-foreground mt-1 mb-4 max-w-md px-5 text-center text-sm">
+                        {quickStartEligible
+                            ? "Choose a ready-made search or configure every detail yourself."
+                            : "Create your first monitor to start finding deals."}
                     </p>
-                    <Link href="/monitors/new">
-                        <Button size="sm" className="gap-1.5">
-                            <Plus className="h-3.5 w-3.5" /> Create Monitor
-                        </Button>
-                    </Link>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                        {quickStartEligible && (
+                            <Button
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => setIsQuickStartOpen(true)}
+                            >
+                                <Rocket className="h-3.5 w-3.5" /> Quick start
+                            </Button>
+                        )}
+                        <Link href="/monitors/new">
+                            <Button
+                                size="sm"
+                                variant={
+                                    quickStartEligible ? "outline" : "default"
+                                }
+                                className="gap-1.5"
+                            >
+                                <Plus className="h-3.5 w-3.5" /> Create manually
+                            </Button>
+                        </Link>
+                    </div>
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -747,6 +866,18 @@ export function DashboardClient({
                                                         "Paused"
                                                     )}
                                                 </Badge>
+                                                {m.demo_expires_at && (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="border-amber-500/25 bg-amber-500/10 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+                                                    >
+                                                        <Clock3 className="size-3" />
+                                                        {getDemoMonitorLabel(
+                                                            m,
+                                                            demoNow,
+                                                        )}
+                                                    </Badge>
+                                                )}
                                                 {m.status === "active" &&
                                                     hasProxyWarning(
                                                         healthMap[m.id],

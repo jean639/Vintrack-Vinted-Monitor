@@ -34,6 +34,7 @@ import { MonitorLiveProvider } from "@/components/monitors/monitor-live-context"
 import { MonitorItemCount } from "@/components/monitors/monitor-item-count";
 import { MonitorMetricsDialog } from "@/components/monitors/monitor-metrics-dialog";
 import { getBannedSellerIds, visibleSellerWhere } from "@/lib/seller-bans";
+import { DemoMonitorLease } from "@/components/monitors/demo-monitor-lease";
 
 type MonitorRunRow = {
     status: string;
@@ -225,7 +226,12 @@ export default async function MonitorPage({
                                 <span className="text-muted-foreground/50">
                                     ·
                                 </span>
-                                {monitor.proxy_group ? (
+                                {monitor.proxy_source === "free" ? (
+                                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                                        <Globe className="h-3 w-3" /> Free Proxy
+                                        Pool
+                                    </span>
+                                ) : monitor.proxy_group ? (
                                     <span className="flex items-center gap-1">
                                         <Globe className="h-3 w-3" />{" "}
                                         {monitor.proxy_group.name}
@@ -369,6 +375,15 @@ export default async function MonitorPage({
                         </form>
                     </div>
                 </div>
+
+                {monitor.demo_expires_at && (
+                    <DemoMonitorLease
+                        monitorId={monitor.id}
+                        initialExpiresAt={monitor.demo_expires_at.toISOString()}
+                        initialStatus={monitor.status ?? "paused"}
+                        initialNow={new Date().toISOString()}
+                    />
+                )}
 
                 {monitor.status === "active" && (
                     <ProxyHealthCard monitorId={monitor.id} />

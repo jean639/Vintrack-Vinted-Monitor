@@ -24,6 +24,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/sponsors/JakobAIOdev">
+    <img src="https://img.shields.io/badge/Sponsor-Vintrack-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor Vintrack" />
+  </a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/topic-vinted-blue?style=flat-square" alt="Vinted" />
   <img src="https://img.shields.io/badge/topic-bot-blue?style=flat-square" alt="Bot" />
   <img src="https://img.shields.io/badge/topic-scraper-blue?style=flat-square" alt="Scraper" />

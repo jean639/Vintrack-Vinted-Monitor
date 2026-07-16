@@ -10,9 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm ci
 
 # --- Builder ---
-FROM base AS builder
+FROM deps AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_OPTIONS="--max-old-space-size=1536"
 ENV NEXT_DISABLE_TURBOPACK=1

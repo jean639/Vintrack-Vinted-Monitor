@@ -7,6 +7,7 @@ import { isValidDiscordWebhook } from "@/lib/validation";
 import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 import { getMonitorActivationState } from "@/lib/monitor-limits";
+import { getNextDemoMonitorExpiry } from "@/lib/demo-monitor";
 
 async function sendTelegramStatusIfConfigured(
     monitor: { name: string; userId: string; telegram_active: boolean },
@@ -84,9 +85,10 @@ export async function stopAllMonitors() {
 
 export async function startAllMonitors() {
     const session = await auth();
-    if (!session?.user) throw new Error("Unauthorized");
+    if (!session?.user?.id) throw new Error("Unauthorized");
+    const userId = session.user.id;
 
-    const activationState = await getMonitorActivationState(session.user.id);
+    const activationState = await getMonitorActivationState(userId);
     const availableSlots =
         activationState.activeLimit === null
             ? null
@@ -103,6 +105,7 @@ export async function startAllMonitors() {
                 where: { userId: session.user.id, status: "paused" },
             }),
             startedMonitorIds: [] as number[],
+            demoExpirations: {} as Record<number, string>,
             activeLimit: activationState.activeLimit,
             activeCount: activationState.activeCount,
             message: `Active monitor limit reached (${activationState.activeCount}/${activationState.activeLimit}).`,
@@ -121,20 +124,39 @@ export async function startAllMonitors() {
             startedCount: 0,
             skippedCount: 0,
             startedMonitorIds: [] as number[],
+            demoExpirations: {} as Record<number, string>,
             activeLimit: activationState.activeLimit,
             activeCount: activationState.activeCount,
             message: "No paused monitors to start.",
         };
     }
 
-    await db.monitors.updateMany({
-        where: {
-            userId: session.user.id,
-            status: "paused",
-            id: { in: monitorsToStart.map((monitor) => monitor.id) },
-        },
-        data: { status: "active" },
-    });
+    const startedAt = new Date();
+    const demoExpirations = Object.fromEntries(
+        monitorsToStart
+            .filter((monitor) => monitor.demo_expires_at)
+            .map((monitor) => [
+                monitor.id,
+                getNextDemoMonitorExpiry(startedAt).toISOString(),
+            ]),
+    );
+    await db.$transaction(
+        monitorsToStart.map((monitor) =>
+            db.monitors.update({
+                where: { id: monitor.id, userId },
+                data: {
+                    status: "active",
+                    ...(monitor.demo_expires_at
+                        ? {
+                              demo_expires_at: new Date(
+                                  demoExpirations[monitor.id],
+                              ),
+                          }
+                        : {}),
+                },
+            }),
+        ),
+    );
 
     const skippedCount =
         availableSlots === null
@@ -189,6 +211,7 @@ export async function startAllMonitors() {
         startedCount: monitorsToStart.length,
         skippedCount,
         startedMonitorIds: monitorsToStart.map((monitor) => monitor.id),
+        demoExpirations,
         activeLimit: activationState.activeLimit,
         activeCount: activationState.activeCount + monitorsToStart.length,
         message:
@@ -203,6 +226,11 @@ export async function toggleMonitor(id: number, currentStatus: string) {
     if (!session?.user) throw new Error("Unauthorized");
 
     const newStatus = currentStatus === "active" ? "paused" : "active";
+    const existing = await db.monitors.findFirst({
+        where: { id, userId: session.user.id },
+        select: { demo_expires_at: true },
+    });
+    if (!existing) throw new Error("Monitor not found");
 
     if (newStatus === "active") {
         const activationState = await getMonitorActivationState(
@@ -217,7 +245,12 @@ export async function toggleMonitor(id: number, currentStatus: string) {
 
     const monitor = await db.monitors.update({
         where: { id: id, userId: session.user.id },
-        data: { status: newStatus },
+        data: {
+            status: newStatus,
+            ...(newStatus === "active" && existing.demo_expires_at
+                ? { demo_expires_at: getNextDemoMonitorExpiry() }
+                : {}),
+        },
     });
 
     if (monitor.discord_webhook && monitor.webhook_active) {
@@ -260,7 +293,11 @@ export async function toggleMonitor(id: number, currentStatus: string) {
     );
 
     revalidatePath("/dashboard");
-    return { success: true, status: newStatus };
+    return {
+        success: true,
+        status: newStatus,
+        demoExpiresAt: monitor.demo_expires_at?.toISOString() ?? null,
+    };
 }
 
 export async function updateMonitorWebhook(
