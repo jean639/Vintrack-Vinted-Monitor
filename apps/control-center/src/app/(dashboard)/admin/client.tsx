@@ -6,6 +6,7 @@ import {
     AlertTriangle,
     BarChart3,
     CheckCircle2,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     Shield,
@@ -79,6 +80,10 @@ type UserMonitor = {
     _count: { items: number };
 };
 
+type ActiveMonitor = Omit<UserMonitor, "discord_webhook"> & {
+    discord_configured: boolean;
+};
+
 type AdminUserMetrics = {
     runningMonitors: number;
     pausedMonitors: number;
@@ -101,10 +106,17 @@ type UserRow = {
     role: string;
     _count: { monitors: number; proxy_groups: number };
     monitors: UserMonitor[];
+    activeMonitors: ActiveMonitor[];
     metrics: AdminUserMetrics;
 };
 
-type AdminTab = "overview" | "users" | "roles" | "logs" | "settings";
+type AdminTab =
+    | "overview"
+    | "monitors"
+    | "users"
+    | "roles"
+    | "logs"
+    | "settings";
 
 type AdminLogRow = {
     id: string;
@@ -245,6 +257,12 @@ const ADMIN_TABS: {
         label: "Overview",
         icon: BarChart3,
         description: "Live system capacity, monitor health, and recent issues.",
+    },
+    {
+        value: "monitors",
+        label: "Running Monitors",
+        icon: Monitor,
+        description: "All currently running monitors, grouped by member.",
     },
     {
         value: "users",
@@ -403,6 +421,12 @@ export function AdminClient({
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isProxyDialogOpen, setIsProxyDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const [monitorSearchQuery, setMonitorSearchQuery] = useState("");
+    const [expandedMonitorUserIds, setExpandedMonitorUserIds] = useState<
+        Set<string>
+    >(new Set());
+    const [collapsedMonitorSearchUserIds, setCollapsedMonitorSearchUserIds] =
+        useState<Set<string>>(new Set());
     const [userPage, setUserPage] = useState(1);
     const [usersPerPage, setUsersPerPage] =
         useState<(typeof USER_PAGE_SIZES)[number]>(25);
@@ -553,6 +577,68 @@ export function AdminClient({
         userPageStart + usersPerPage,
         filteredUsers.length,
     );
+
+    const normalizedMonitorQuery = monitorSearchQuery.trim().toLowerCase();
+    const activeMonitorMembers = users.filter(
+        (user) => user.activeMonitors.length > 0,
+    );
+    const filteredActiveMonitorMembers = activeMonitorMembers
+        .map((user) => {
+            if (!normalizedMonitorQuery) {
+                return { user, monitors: user.activeMonitors };
+            }
+
+            const userMatches = [user.name ?? "", user.email ?? "", user.role]
+                .join(" ")
+                .toLowerCase()
+                .includes(normalizedMonitorQuery);
+            const monitors = userMatches
+                ? user.activeMonitors
+                : user.activeMonitors.filter((monitor) =>
+                      [
+                          monitor.id.toString(),
+                          monitor.name,
+                          monitor.query,
+                          monitor.region,
+                          getRegionLabel(monitor.region),
+                          monitor.proxy_group?.name ?? "Server Proxies",
+                      ]
+                          .join(" ")
+                          .toLowerCase()
+                          .includes(normalizedMonitorQuery),
+                  );
+
+            return { user, monitors };
+        })
+        .filter(({ monitors }) => monitors.length > 0);
+    const filteredActiveMonitorCount = filteredActiveMonitorMembers.reduce(
+        (sum, { monitors }) => sum + monitors.length,
+        0,
+    );
+    const toggleMonitorMember = (userId: string) => {
+        if (normalizedMonitorQuery) {
+            setCollapsedMonitorSearchUserIds((current) => {
+                const next = new Set(current);
+                if (next.has(userId)) {
+                    next.delete(userId);
+                } else {
+                    next.add(userId);
+                }
+                return next;
+            });
+            return;
+        }
+
+        setExpandedMonitorUserIds((current) => {
+            const next = new Set(current);
+            if (next.has(userId)) {
+                next.delete(userId);
+            } else {
+                next.add(userId);
+            }
+            return next;
+        });
+    };
 
     const totalUsers = users.length;
     const freeUsers = users.filter((u) => u.role === "free").length;
@@ -707,13 +793,18 @@ export function AdminClient({
         monitorId: number | null = null,
     ): UserRow => {
         const stoppedCount =
-            monitorId === null && user.monitors.length === 0
+            monitorId === null
                 ? user.metrics.runningMonitors
-                : user.monitors.filter(
-                      (monitor) =>
-                          monitor.status === "active" &&
-                          (monitorId === null || monitor.id === monitorId),
-                  ).length;
+                : user.activeMonitors.some(
+                        (monitor) => monitor.id === monitorId,
+                    ) ||
+                    user.monitors.some(
+                        (monitor) =>
+                            monitor.id === monitorId &&
+                            monitor.status === "active",
+                    )
+                  ? 1
+                  : 0;
 
         if (stoppedCount === 0) return user;
 
@@ -724,6 +815,9 @@ export function AdminClient({
                 (monitorId === null || monitor.id === monitorId)
                     ? { ...monitor, status: "paused" }
                     : monitor,
+            ),
+            activeMonitors: user.activeMonitors.filter(
+                (monitor) => monitorId !== null && monitor.id !== monitorId,
             ),
             metrics: {
                 ...user.metrics,
@@ -883,31 +977,34 @@ export function AdminClient({
         }
     };
 
-    const handleStopSingleMonitor = async (monitorId: number) => {
-        if (!selected) return;
-
+    const handleStopSingleMonitor = async (
+        userId: string,
+        monitorId: number,
+    ) => {
         setStoppingMonitorId(monitorId);
 
         try {
-            const result = await stopSingleUserMonitor(selected.id, monitorId);
+            const result = await stopSingleUserMonitor(userId, monitorId);
 
-            if (result.stopped) {
-                setUsers((prev) =>
-                    prev.map((user) =>
-                        user.id === selected.id
-                            ? markUserMonitorsStopped(user, monitorId)
-                            : user,
-                    ),
-                );
+            setUsers((prev) =>
+                prev.map((user) =>
+                    user.id === userId
+                        ? markUserMonitorsStopped(user, monitorId)
+                        : user,
+                ),
+            );
 
-                setSelected((prev) =>
-                    prev ? markUserMonitorsStopped(prev, monitorId) : prev,
-                );
+            setSelected((prev) =>
+                prev?.id === userId
+                    ? markUserMonitorsStopped(prev, monitorId)
+                    : prev,
+            );
 
-                toast.success("Monitor stopped");
-            } else {
-                toast.success("Monitor is already stopped");
-            }
+            toast.success(
+                result.stopped
+                    ? "Monitor stopped"
+                    : "Monitor is already stopped",
+            );
         } catch {
             toast.error("Failed to stop monitor");
         } finally {
@@ -1492,6 +1589,337 @@ export function AdminClient({
                         </div>
                     </div>
                 </>
+            ) : null}
+
+            {activeTab === "monitors" ? (
+                <div className="space-y-4">
+                    <div className="border-border/60 bg-card overflow-hidden rounded-lg border">
+                        <div className="border-border/60 flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <p className="text-foreground text-sm font-semibold">
+                                        Active Member Monitors
+                                    </p>
+                                    <Badge className="bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                        {runningMonitors} running
+                                    </Badge>
+                                </div>
+                                <p className="text-muted-foreground mt-1 text-xs">
+                                    {activeMonitorMembers.length} member
+                                    {activeMonitorMembers.length === 1
+                                        ? ""
+                                        : "s"}{" "}
+                                    currently have active monitors.
+                                </p>
+                            </div>
+                            <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+                                <div className="relative flex-1">
+                                    <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                                    <Input
+                                        value={monitorSearchQuery}
+                                        onChange={(event) => {
+                                            setMonitorSearchQuery(
+                                                event.target.value,
+                                            );
+                                            setCollapsedMonitorSearchUserIds(
+                                                new Set(),
+                                            );
+                                        }}
+                                        placeholder="Search members, monitors, queries or regions..."
+                                        aria-label="Search running monitors"
+                                        className="h-10 pl-9"
+                                    />
+                                </div>
+                                {normalizedMonitorQuery ? (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-10 self-start px-3 text-xs sm:self-auto"
+                                        onClick={() => {
+                                            setMonitorSearchQuery("");
+                                            setCollapsedMonitorSearchUserIds(
+                                                new Set(),
+                                            );
+                                        }}
+                                    >
+                                        Clear search
+                                    </Button>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {filteredActiveMonitorMembers.length > 0 ? (
+                            <div className="divide-border/60 divide-y">
+                                {filteredActiveMonitorMembers.map(
+                                    ({ user, monitors }) => {
+                                        const isExpanded =
+                                            normalizedMonitorQuery
+                                                ? !collapsedMonitorSearchUserIds.has(
+                                                      user.id,
+                                                  )
+                                                : expandedMonitorUserIds.has(
+                                                      user.id,
+                                                  );
+                                        const contentId = `active-monitors-${user.id}`;
+
+                                        return (
+                                            <section
+                                                key={user.id}
+                                                data-testid="active-monitor-member"
+                                            >
+                                                <button
+                                                    type="button"
+                                                    data-testid="active-monitor-member-toggle"
+                                                    aria-expanded={isExpanded}
+                                                    aria-controls={contentId}
+                                                    className="bg-muted/20 hover:bg-muted/40 flex w-full items-center justify-between gap-4 px-5 py-3 text-left transition-colors"
+                                                    onClick={() =>
+                                                        toggleMonitorMember(
+                                                            user.id,
+                                                        )
+                                                    }
+                                                >
+                                                    <span className="flex min-w-0 items-center gap-3">
+                                                        {user.image ? (
+                                                            <img
+                                                                src={user.image}
+                                                                alt=""
+                                                                className="h-9 w-9 shrink-0 rounded-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            <span className="bg-muted text-muted-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold">
+                                                                {user.name?.[0]?.toUpperCase() ??
+                                                                    "?"}
+                                                            </span>
+                                                        )}
+                                                        <span className="min-w-0">
+                                                            <span className="flex flex-wrap items-center gap-2">
+                                                                <span className="text-foreground truncate text-sm font-semibold">
+                                                                    {user.name ??
+                                                                        "Unknown"}
+                                                                </span>
+                                                                {getRoleBadge(
+                                                                    user.role,
+                                                                )}
+                                                            </span>
+                                                            <span className="text-muted-foreground block truncate text-xs">
+                                                                {user.email ??
+                                                                    "No email"}
+                                                            </span>
+                                                        </span>
+                                                    </span>
+                                                    <span className="flex shrink-0 items-center gap-2">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="rounded-md"
+                                                        >
+                                                            {monitors.length}{" "}
+                                                            monitor
+                                                            {monitors.length ===
+                                                            1
+                                                                ? ""
+                                                                : "s"}
+                                                        </Badge>
+                                                        <span className="text-muted-foreground hidden text-xs sm:inline">
+                                                            {isExpanded
+                                                                ? "Hide"
+                                                                : "Show"}
+                                                        </span>
+                                                        <ChevronDown
+                                                            className={`text-muted-foreground h-4 w-4 transition-transform ${
+                                                                isExpanded
+                                                                    ? "rotate-180"
+                                                                    : ""
+                                                            }`}
+                                                        />
+                                                    </span>
+                                                </button>
+                                                {isExpanded ? (
+                                                    <div
+                                                        id={contentId}
+                                                        data-testid="active-monitor-content"
+                                                        className="border-border/60 border-t"
+                                                    >
+                                                        <div className="border-border/40 bg-muted/10 flex items-center justify-between gap-3 border-b px-5 py-2.5">
+                                                            <p className="text-muted-foreground text-xs">
+                                                                {
+                                                                    monitors.length
+                                                                }{" "}
+                                                                currently
+                                                                running
+                                                            </p>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-8 px-2 text-xs"
+                                                                onClick={() =>
+                                                                    openUserDetails(
+                                                                        user,
+                                                                    )
+                                                                }
+                                                            >
+                                                                Member details
+                                                                <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                                                            </Button>
+                                                        </div>
+                                                        <div className="divide-border/40 divide-y">
+                                                            {monitors.map(
+                                                                (monitor) => (
+                                                                    <div
+                                                                        key={
+                                                                            monitor.id
+                                                                        }
+                                                                        data-testid="active-monitor-row"
+                                                                        className="grid gap-3 px-5 py-4 md:grid-cols-2 lg:grid-cols-[minmax(220px,1.4fr)_minmax(170px,1fr)_minmax(190px,1fr)_auto] lg:items-center"
+                                                                    >
+                                                                        <div className="min-w-0">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                                                                <p className="text-foreground truncate text-sm font-medium">
+                                                                                    {
+                                                                                        monitor.name
+                                                                                    }
+                                                                                </p>
+                                                                                <Badge
+                                                                                    variant="outline"
+                                                                                    className="shrink-0 rounded-md text-[10px]"
+                                                                                >
+                                                                                    #
+                                                                                    {
+                                                                                        monitor.id
+                                                                                    }
+                                                                                </Badge>
+                                                                            </div>
+                                                                            <p className="text-muted-foreground mt-1 truncate pl-4 text-xs">
+                                                                                Query:{" "}
+                                                                                {
+                                                                                    monitor.query
+                                                                                }
+                                                                            </p>
+                                                                        </div>
+
+                                                                        <div className="text-muted-foreground space-y-1 text-xs">
+                                                                            <p className="text-foreground inline-flex items-center gap-1.5 font-medium">
+                                                                                <Globe className="h-3.5 w-3.5" />
+                                                                                {getRegionLabel(
+                                                                                    monitor.region,
+                                                                                )}
+                                                                            </p>
+                                                                            <p className="truncate">
+                                                                                {monitor
+                                                                                    .proxy_group
+                                                                                    ?.name ??
+                                                                                    "Server Proxies"}
+                                                                            </p>
+                                                                        </div>
+
+                                                                        <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs lg:block lg:space-y-1">
+                                                                            <p className="inline-flex items-center gap-1.5">
+                                                                                <Clock3 className="h-3.5 w-3.5" />
+                                                                                {
+                                                                                    monitor.query_delay_ms
+                                                                                }{" "}
+                                                                                ms
+                                                                                delay
+                                                                            </p>
+                                                                            <p className="inline-flex items-center gap-1.5">
+                                                                                <Boxes className="h-3.5 w-3.5" />
+                                                                                {
+                                                                                    monitor
+                                                                                        ._count
+                                                                                        .items
+                                                                                }{" "}
+                                                                                items
+                                                                            </p>
+                                                                            <p className="inline-flex items-center gap-1.5">
+                                                                                <Webhook className="h-3.5 w-3.5" />
+                                                                                {[
+                                                                                    monitor.discord_configured &&
+                                                                                    monitor.webhook_active
+                                                                                        ? "Discord"
+                                                                                        : null,
+                                                                                    monitor.telegram_active
+                                                                                        ? "Telegram"
+                                                                                        : null,
+                                                                                ]
+                                                                                    .filter(
+                                                                                        Boolean,
+                                                                                    )
+                                                                                    .join(
+                                                                                        " + ",
+                                                                                    ) ||
+                                                                                    "Notifications off"}
+                                                                            </p>
+                                                                        </div>
+
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            className="h-8 justify-self-start text-xs text-amber-700 hover:text-amber-800 md:justify-self-end"
+                                                                            onClick={() =>
+                                                                                handleStopSingleMonitor(
+                                                                                    user.id,
+                                                                                    monitor.id,
+                                                                                )
+                                                                            }
+                                                                            disabled={
+                                                                                stoppingMonitorId ===
+                                                                                monitor.id
+                                                                            }
+                                                                        >
+                                                                            <PauseCircle className="mr-1.5 h-3.5 w-3.5" />
+                                                                            Stop
+                                                                        </Button>
+                                                                    </div>
+                                                                ),
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+                                            </section>
+                                        );
+                                    },
+                                )}
+                            </div>
+                        ) : (
+                            <div className="px-5 py-14 text-center">
+                                <div className="bg-muted text-muted-foreground mx-auto flex h-11 w-11 items-center justify-center rounded-full">
+                                    {normalizedMonitorQuery ? (
+                                        <Search className="h-5 w-5" />
+                                    ) : (
+                                        <Monitor className="h-5 w-5" />
+                                    )}
+                                </div>
+                                <p className="text-foreground mt-3 text-sm font-medium">
+                                    {normalizedMonitorQuery
+                                        ? "No running monitors match your search"
+                                        : "No monitors are currently running"}
+                                </p>
+                                <p className="text-muted-foreground mt-1 text-xs">
+                                    {normalizedMonitorQuery
+                                        ? "Try another member, monitor name, query, or region."
+                                        : "Active member monitors will appear here automatically."}
+                                </p>
+                            </div>
+                        )}
+
+                        {normalizedMonitorQuery &&
+                        filteredActiveMonitorMembers.length > 0 ? (
+                            <div className="border-border/60 text-muted-foreground border-t px-5 py-3 text-xs">
+                                Showing {filteredActiveMonitorCount} running
+                                monitor
+                                {filteredActiveMonitorCount === 1
+                                    ? ""
+                                    : "s"}{" "}
+                                across {filteredActiveMonitorMembers.length}{" "}
+                                member
+                                {filteredActiveMonitorMembers.length === 1
+                                    ? ""
+                                    : "s"}
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
             ) : null}
 
             {activeTab === "users" ? (
@@ -3190,6 +3618,7 @@ export function AdminClient({
                                                         className="h-8 shrink-0 text-xs text-amber-700 hover:text-amber-800"
                                                         onClick={() =>
                                                             handleStopSingleMonitor(
+                                                                selected.id,
                                                                 monitor.id,
                                                             )
                                                         }

@@ -29,12 +29,14 @@ import {
 } from "@/lib/monitor-delay";
 import { buildVintedMonitorUrl } from "@/lib/vinted-url";
 import {
+    getMonitorPreset,
     type MonitorPreset,
     type MonitorPresetKey,
 } from "@/lib/monitor-presets";
 import {
     ArrowLeft,
     Bell,
+    ChevronDown,
     Copy,
     Eye,
     ExternalLink,
@@ -68,6 +70,7 @@ export default function NewMonitorPage() {
     const [name, setName] = useState("");
     const [selectedPreset, setSelectedPreset] =
         useState<MonitorPresetKey | null>(null);
+    const [presetsOpen, setPresetsOpen] = useState(true);
     const [antiKeywordResetKey, setAntiKeywordResetKey] = useState(0);
     const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
     const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -103,16 +106,16 @@ export default function NewMonitorPage() {
         setSelectedPreset(preset.key);
         setName(preset.name);
         setQuery(preset.query);
-        setSelectedBrands([...preset.brandIds]);
-        setSelectedCategories([]);
-        setSelectedCategoryLabels([]);
-        setSelectedSizes([]);
-        setSelectedColors([]);
-        setSelectedStatuses([]);
-        setSelectedAllowedCountries([]);
-        setPriceMin("");
-        setPriceMax("");
         setAntiKeywordResetKey((current) => current + 1);
+        setSelectedBrands([...preset.brandIds]);
+        setSelectedCategories([...preset.catalogIds]);
+        setSelectedCategoryLabels([]);
+        setSelectedSizes([...preset.sizeIds]);
+        setSelectedColors([...preset.colorIds]);
+        setSelectedStatuses([...preset.statusIds]);
+        setSelectedAllowedCountries([selectedRegion]);
+        setPriceMin(String(preset.priceMin));
+        setPriceMax(String(preset.priceMax));
     };
 
     const handleClearPreset = () => {
@@ -129,6 +132,17 @@ export default function NewMonitorPage() {
         setPriceMin("");
         setPriceMax("");
         setAntiKeywordResetKey((current) => current + 1);
+    };
+
+    const handleRegionChange = (nextRegion: string) => {
+        setSelectedAllowedCountries((current) =>
+            selectedPreset &&
+            current.length === 1 &&
+            current[0] === selectedRegion
+                ? [nextRegion]
+                : current,
+        );
+        setSelectedRegion(nextRegion);
     };
 
     const handleTestWebhook = async () => {
@@ -313,44 +327,6 @@ export default function NewMonitorPage() {
                 </div>
             </div>
 
-            <div className="border-border/70 bg-card overflow-hidden rounded-xl border">
-                <div className="border-border/60 bg-muted/20 flex items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
-                    <div className="flex items-start gap-3">
-                        <span className="bg-background border-border/70 flex size-9 shrink-0 items-center justify-center rounded-lg border">
-                            <Sparkles className="size-4 text-amber-600 dark:text-amber-400" />
-                        </span>
-                        <div>
-                            <h2 className="text-sm font-semibold">
-                                Start with a preset
-                            </h2>
-                            <p className="text-muted-foreground mt-1 text-xs leading-5">
-                                Apply a proven search, then adjust anything
-                                below. Region, notifications, and proxy source
-                                stay unchanged.
-                            </p>
-                        </div>
-                    </div>
-                    {selectedPreset && (
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="shrink-0 gap-1.5"
-                            onClick={handleClearPreset}
-                        >
-                            <X className="size-3.5" /> Clear
-                        </Button>
-                    )}
-                </div>
-                <div className="p-4 sm:p-5">
-                    <MonitorPresetPicker
-                        selected={selectedPreset}
-                        onSelect={handlePresetSelect}
-                        compact
-                    />
-                </div>
-            </div>
-
             <Card className="border-input/60">
                 <CardContent className="p-6">
                     <form action={handleCreate} className="space-y-6">
@@ -359,6 +335,61 @@ export default function NewMonitorPage() {
                             name="preset_key"
                             value={selectedPreset ?? ""}
                         />
+                        <details
+                            className="group border-border/60 bg-muted/20 rounded-lg border"
+                            open={presetsOpen}
+                            onToggle={(event) =>
+                                setPresetsOpen(event.currentTarget.open)
+                            }
+                        >
+                            <summary className="hover:bg-muted/40 flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-3 py-3 transition-colors sm:px-4 [&::-webkit-details-marker]:hidden">
+                                <div className="flex min-w-0 items-center gap-2.5">
+                                    <span className="bg-background border-border/70 flex size-7 shrink-0 items-center justify-center rounded-md border">
+                                        <Sparkles className="size-3.5 text-amber-600 dark:text-amber-400" />
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-semibold">
+                                            Quick presets
+                                        </p>
+                                        <p className="text-muted-foreground truncate text-[11px]">
+                                            Fill the filters instantly, then
+                                            tweak anything below.
+                                        </p>
+                                    </div>
+                                </div>
+                                <span className="flex shrink-0 items-center gap-2">
+                                    {selectedPreset && (
+                                        <span className="border-border/70 bg-background text-muted-foreground hidden rounded-md border px-2 py-1 text-[11px] font-medium sm:inline-flex">
+                                            {
+                                                getMonitorPreset(selectedPreset)
+                                                    ?.name
+                                            }
+                                        </span>
+                                    )}
+                                    <ChevronDown className="text-muted-foreground size-4 transition-transform group-open:rotate-180" />
+                                </span>
+                            </summary>
+                            <div className="border-border/60 border-t p-3 sm:p-4">
+                                {selectedPreset && (
+                                    <div className="mb-2 flex justify-end">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 gap-1 px-2 text-xs"
+                                            onClick={handleClearPreset}
+                                        >
+                                            <X className="size-3" /> Clear
+                                        </Button>
+                                    </div>
+                                )}
+                                <MonitorPresetPicker
+                                    selected={selectedPreset}
+                                    onSelect={handlePresetSelect}
+                                    compact
+                                />
+                            </div>
+                        </details>
                         <FormSection
                             title="Basics"
                             description="Name, keywords, polling delay, and target Vinted region."
@@ -421,6 +452,13 @@ export default function NewMonitorPage() {
                                 <AntiKeywordInput
                                     key={antiKeywordResetKey}
                                     name="anti_keywords"
+                                    defaultValue={
+                                        selectedPreset
+                                            ? getMonitorPreset(
+                                                  selectedPreset,
+                                              )?.antiKeywords.join(",")
+                                            : undefined
+                                    }
                                 />
                                 <p className="text-muted-foreground text-[12px]">
                                     New items matching any anti keyword in title
@@ -461,7 +499,7 @@ export default function NewMonitorPage() {
                                 </Label>
                                 <RegionPicker
                                     selected={selectedRegion}
-                                    onChange={setSelectedRegion}
+                                    onChange={handleRegionChange}
                                 />
                                 <input
                                     type="hidden"
@@ -660,8 +698,13 @@ export default function NewMonitorPage() {
                                     </span>
                                 </Label>
                                 <SizePicker
+                                    key={`sizes-${selectedPreset ?? "custom"}`}
                                     selected={selectedSizes}
                                     onChange={setSelectedSizes}
+                                    defaultGroup={
+                                        getMonitorPreset(selectedPreset)
+                                            ?.sizeGroupKey
+                                    }
                                 />
                                 <input
                                     type="hidden"

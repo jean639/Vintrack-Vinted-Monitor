@@ -1,5 +1,7 @@
 function LoadingBlock({ className = "" }: { className?: string }) {
-    return <div className={`bg-muted/60 animate-pulse rounded-md ${className}`} />;
+    return (
+        <div className={`bg-muted/60 animate-pulse rounded-md ${className}`} />
+    );
 }
 
 export default function AdminLoading() {
@@ -14,7 +16,7 @@ export default function AdminLoading() {
             </div>
 
             <div className="border-border/60 flex gap-1 overflow-hidden rounded-lg border p-1">
-                {Array.from({ length: 5 }).map((_, index) => (
+                {Array.from({ length: 6 }).map((_, index) => (
                     <LoadingBlock key={index} className="h-9 min-w-24 flex-1" />
                 ))}
             </div>
