@@ -4,6 +4,7 @@ const db = new PrismaClient();
 
 const userId = process.env.E2E_TEST_USER_ID ?? "e2e-user";
 const monitorName = "E2E Mock Feed";
+const onboardingMode = process.env.E2E_ONBOARDING === "true";
 
 const items = [
     {
@@ -18,10 +19,14 @@ const items = [
         rating: "⭐ 4.9 (58)",
         seller_id: BigInt(880001),
         seller_login: "e2e_seller_one",
-        seller_profile_url: "https://www.vinted.de/member/880001-e2e_seller_one",
+        seller_profile_url:
+            "https://www.vinted.de/member/880001-e2e_seller_one",
         url: "https://www.vinted.de/items/990001-nike-dunk-low-retro",
         image_url: "/mock-images/vinted-1.svg",
-        extra_images: ["/mock-images/vinted-2.svg", "/mock-images/vinted-3.svg"],
+        extra_images: [
+            "/mock-images/vinted-2.svg",
+            "/mock-images/vinted-3.svg",
+        ],
         found_at: new Date(Date.now() - 60_000),
     },
     {
@@ -36,7 +41,8 @@ const items = [
         rating: "⭐ 5.0 (124)",
         seller_id: BigInt(880002),
         seller_login: "e2e_seller_two",
-        seller_profile_url: "https://www.vinted.de/member/880002-e2e_seller_two",
+        seller_profile_url:
+            "https://www.vinted.de/member/880002-e2e_seller_two",
         url: "https://www.vinted.de/items/990002-carhartt-detroit-jacket",
         image_url: "/mock-images/vinted-4.svg",
         extra_images: ["/mock-images/vinted-5.svg"],
@@ -51,13 +57,24 @@ async function main() {
             id: userId,
             name: "E2E User",
             email: "e2e@vintrack.test",
-            role: "admin",
+            role: onboardingMode ? "free" : "admin",
+            monitor_onboarding_status: onboardingMode ? "pending" : "completed",
         },
         update: {
             name: "E2E User",
             email: "e2e@vintrack.test",
-            role: "admin",
+            role: onboardingMode ? "free" : "admin",
+            monitor_onboarding_status: onboardingMode ? "pending" : "completed",
         },
+    });
+
+    if (onboardingMode) {
+        await db.monitors.deleteMany({ where: { userId } });
+        return;
+    }
+
+    await db.monitors.deleteMany({
+        where: { userId, id: { not: 990001 } },
     });
 
     const monitor = await db.monitors.upsert({
@@ -75,6 +92,7 @@ async function main() {
             brand_ids: "112202",
             region: "de",
             status: "active",
+            demo_expires_at: null,
             webhook_active: false,
             telegram_active: false,
         },
@@ -83,6 +101,7 @@ async function main() {
             name: monitorName,
             query: "mock",
             status: "active",
+            demo_expires_at: null,
             webhook_active: false,
             telegram_active: false,
         },

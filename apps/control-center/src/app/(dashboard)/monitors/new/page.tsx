@@ -13,6 +13,7 @@ import { CountryFilterPicker } from "@/components/monitors/country-filter-picker
 import { ColorPicker } from "@/components/monitors/color-picker";
 import { StatusPicker } from "@/components/monitors/status-picker";
 import { AntiKeywordInput } from "@/components/monitors/anti-keyword-input";
+import { MonitorPresetPicker } from "@/components/monitors/preset-picker";
 import {
     FormSection,
     RegionPoolStatus,
@@ -28,6 +29,10 @@ import {
 } from "@/lib/monitor-delay";
 import { buildVintedMonitorUrl } from "@/lib/vinted-url";
 import {
+    type MonitorPreset,
+    type MonitorPresetKey,
+} from "@/lib/monitor-presets";
+import {
     ArrowLeft,
     Bell,
     Copy,
@@ -37,7 +42,9 @@ import {
     Plus,
     Send,
     Settings2,
+    Sparkles,
     SlidersHorizontal,
+    X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -58,6 +65,10 @@ type ProxyGroupOption = {
 
 export default function NewMonitorPage() {
     const router = useRouter();
+    const [name, setName] = useState("");
+    const [selectedPreset, setSelectedPreset] =
+        useState<MonitorPresetKey | null>(null);
+    const [antiKeywordResetKey, setAntiKeywordResetKey] = useState(0);
     const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
     const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
     const [selectedCategoryLabels, setSelectedCategoryLabels] = useState<
@@ -87,6 +98,38 @@ export default function NewMonitorPage() {
     const [telegramEnabled, setTelegramEnabled] = useState(false);
     const [isTestingWebhook, setIsTestingWebhook] = useState(false);
     const [loading, setLoading] = useState(true);
+
+    const handlePresetSelect = (preset: MonitorPreset) => {
+        setSelectedPreset(preset.key);
+        setName(preset.name);
+        setQuery(preset.query);
+        setSelectedBrands([...preset.brandIds]);
+        setSelectedCategories([]);
+        setSelectedCategoryLabels([]);
+        setSelectedSizes([]);
+        setSelectedColors([]);
+        setSelectedStatuses([]);
+        setSelectedAllowedCountries([]);
+        setPriceMin("");
+        setPriceMax("");
+        setAntiKeywordResetKey((current) => current + 1);
+    };
+
+    const handleClearPreset = () => {
+        setSelectedPreset(null);
+        setName("");
+        setQuery("");
+        setSelectedBrands([]);
+        setSelectedCategories([]);
+        setSelectedCategoryLabels([]);
+        setSelectedSizes([]);
+        setSelectedColors([]);
+        setSelectedStatuses([]);
+        setSelectedAllowedCountries([]);
+        setPriceMin("");
+        setPriceMax("");
+        setAntiKeywordResetKey((current) => current + 1);
+    };
 
     const handleTestWebhook = async () => {
         if (!webhookUrl) {
@@ -270,9 +313,52 @@ export default function NewMonitorPage() {
                 </div>
             </div>
 
+            <div className="border-border/70 bg-card overflow-hidden rounded-xl border">
+                <div className="border-border/60 bg-muted/20 flex items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
+                    <div className="flex items-start gap-3">
+                        <span className="bg-background border-border/70 flex size-9 shrink-0 items-center justify-center rounded-lg border">
+                            <Sparkles className="size-4 text-amber-600 dark:text-amber-400" />
+                        </span>
+                        <div>
+                            <h2 className="text-sm font-semibold">
+                                Start with a preset
+                            </h2>
+                            <p className="text-muted-foreground mt-1 text-xs leading-5">
+                                Apply a proven search, then adjust anything
+                                below. Region, notifications, and proxy source
+                                stay unchanged.
+                            </p>
+                        </div>
+                    </div>
+                    {selectedPreset && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0 gap-1.5"
+                            onClick={handleClearPreset}
+                        >
+                            <X className="size-3.5" /> Clear
+                        </Button>
+                    )}
+                </div>
+                <div className="p-4 sm:p-5">
+                    <MonitorPresetPicker
+                        selected={selectedPreset}
+                        onSelect={handlePresetSelect}
+                        compact
+                    />
+                </div>
+            </div>
+
             <Card className="border-input/60">
                 <CardContent className="p-6">
                     <form action={handleCreate} className="space-y-6">
+                        <input
+                            type="hidden"
+                            name="preset_key"
+                            value={selectedPreset ?? ""}
+                        />
                         <FormSection
                             title="Basics"
                             description="Name, keywords, polling delay, and target Vinted region."
@@ -287,6 +373,10 @@ export default function NewMonitorPage() {
                                     name="name"
                                     id="name"
                                     placeholder="e.g. Nike Jackets DE"
+                                    value={name}
+                                    onChange={(event) =>
+                                        setName(event.target.value)
+                                    }
                                     required
                                 />
                                 <p className="text-muted-foreground text-[12px]">
@@ -328,7 +418,10 @@ export default function NewMonitorPage() {
                                         (optional)
                                     </span>
                                 </Label>
-                                <AntiKeywordInput name="anti_keywords" />
+                                <AntiKeywordInput
+                                    key={antiKeywordResetKey}
+                                    name="anti_keywords"
+                                />
                                 <p className="text-muted-foreground text-[12px]">
                                     New items matching any anti keyword in title
                                     or description will be skipped.

@@ -26,6 +26,13 @@ func NewManager(store *database.Store, engine *Engine) *Manager {
 }
 
 func (m *Manager) Sync(ctx context.Context) {
+	expiredDemoIDs, err := m.store.PauseExpiredDemoMonitors()
+	if err != nil {
+		log.Printf("Error pausing expired demo monitors: %v", err)
+	} else if len(expiredDemoIDs) > 0 {
+		log.Printf("Auto-paused %d expired demo monitor(s)", len(expiredDemoIDs))
+	}
+
 	monitors, err := m.store.GetActiveMonitors()
 	if err != nil {
 		log.Printf("Error fetching monitors: %v", err)

@@ -883,6 +883,47 @@ func (s *Store) SetMonitorStatus(monitorID int, status string) {
 	}
 }
 
+func (s *Store) PauseExpiredDemoMonitors() ([]int, error) {
+	rows, err := s.db.Query(`
+		UPDATE monitors
+		SET status = 'paused'
+		WHERE status = 'active'
+		  AND demo_expires_at IS NOT NULL
+		  AND demo_expires_at <= NOW()
+		RETURNING id`)
+	if err != nil {
+		return nil, err
+	}
+
+	var monitorIDs []int
+	for rows.Next() {
+		var monitorID int
+		if err := rows.Scan(&monitorID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		monitorIDs = append(monitorIDs, monitorID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	for _, monitorID := range monitorIDs {
+		s.RecordMonitorEvent(model.MonitorEvent{
+			MonitorID: monitorID,
+			EventType: "demo_auto_paused",
+			Severity:  "info",
+			Message:   "Demo monitor automatically paused after 30 minutes",
+		})
+	}
+
+	return monitorIDs, nil
+}
+
 func (s *Store) RecordMonitorRun(run model.MonitorRun) {
 	if run.MonitorID <= 0 || run.Status == "" {
 		return

@@ -37,6 +37,33 @@ type FreeProxyHealthRow = {
 };
 
 export async function getFreeProxyPoolHealth(): Promise<FreeProxyPoolHealth> {
+    if (
+        process.env.E2E_TEST_MODE === "true" &&
+        process.env.E2E_ONBOARDING === "true"
+    ) {
+        const now = new Date();
+        return {
+            enabled: true,
+            minActivePerRegion: 1,
+            activeCount: 1,
+            regions: {
+                de: {
+                    region: "de",
+                    active: 1,
+                    warming: 0,
+                    usable: 1,
+                    pending: 0,
+                    cooldown: 0,
+                    dead: 0,
+                    successRate: 100,
+                    medianLatencyMs: 120,
+                    lastCheckedAt: now,
+                    healthy: true,
+                },
+            },
+        };
+    }
+
     const [setting, minActiveSetting, starterRegionsSetting, rows] =
         await Promise.all([
             db.app_settings.findUnique({

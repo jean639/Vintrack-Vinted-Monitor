@@ -4,6 +4,8 @@ import { getCategoryLabelsForRegion } from "@/lib/categories.server";
 import { redirect } from "next/navigation";
 import { DashboardClient, type Monitor } from "./client";
 import { getBannedSellerIds, visibleSellerWhere } from "@/lib/seller-bans";
+import { getFreeProxyPoolHealth } from "@/lib/free-proxy-health";
+import { normalizeMonitorOnboardingStatus } from "@/lib/monitor-presets";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,10 @@ export default async function DashboardPage() {
     });
     const userSettings = await db.user.findUnique({
         where: { id: session.user.id },
-        select: { dedupe_monitor_alerts: true },
+        select: {
+            dedupe_monitor_alerts: true,
+            monitor_onboarding_status: true,
+        },
     });
     const bannedSellerIds = await getBannedSellerIds(session.user.id);
     const visibleCounts = await db.items.groupBy({
@@ -60,12 +65,37 @@ export default async function DashboardPage() {
             telegram_active: m.telegram_active ?? false,
             proxy_source: m.proxy_source ?? "server",
             proxy_group_name: m.proxy_group?.name ?? null,
+            demo_expires_at: m.demo_expires_at?.toISOString() ?? null,
             _count: { items: visibleCountByMonitor.get(m.id) ?? 0 },
             created_at: m.created_at
                 ? m.created_at.toISOString()
                 : new Date().toISOString(),
         })),
     );
+
+    const onboardingStatus = normalizeMonitorOnboardingStatus(
+        userSettings?.monitor_onboarding_status,
+    );
+    const quickStartEligible =
+        monitors.length === 0 &&
+        (onboardingStatus === "pending" || onboardingStatus === "dismissed");
+    const freeProxyHealth = quickStartEligible
+        ? await getFreeProxyPoolHealth()
+        : null;
+    const quickStartPool = freeProxyHealth
+        ? {
+              enabled: freeProxyHealth.enabled,
+              minActivePerRegion: freeProxyHealth.minActivePerRegion,
+              regions: Object.fromEntries(
+                  Object.entries(freeProxyHealth.regions).map(
+                      ([code, health]) => [
+                          code,
+                          { healthy: health.healthy, usable: health.usable },
+                      ],
+                  ),
+              ),
+          }
+        : null;
 
     return (
         <DashboardClient
@@ -74,6 +104,12 @@ export default async function DashboardPage() {
             initialDedupeMonitorAlerts={
                 userSettings?.dedupe_monitor_alerts ?? false
             }
+            quickStartEligible={quickStartEligible}
+            initialQuickStartOpen={
+                quickStartEligible && onboardingStatus === "pending"
+            }
+            quickStartPool={quickStartPool}
+            initialNow={new Date().toISOString()}
         />
     );
 }
