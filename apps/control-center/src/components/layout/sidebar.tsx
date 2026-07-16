@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const ACCOUNT_SEEN_KEY = "vintrack:account-tab-seen";
+const GITHUB_SPONSORS_URL = "https://github.com/sponsors/JakobAIOdev";
 const SNEAKERDEV_REVIEW_URL =
     "https://www.sneakerdev.com/services/e9c9ec35-71a2-43b0-b93b-2c1e8bf2f84d-vintrack";
 
@@ -43,9 +44,7 @@ const experimentalNavItems = [
     { href: "/checkout-links", label: "Checkout Links", icon: Link2 },
 ];
 
-const adminNavItems = [
-    { href: "/admin", label: "Admin Panel", icon: Shield },
-];
+const adminNavItems = [{ href: "/admin", label: "Admin Panel", icon: Shield }];
 
 interface SidebarProps {
     user?: {
@@ -225,6 +224,16 @@ export function Sidebar({ user, isOpen, onClose }: SidebarProps) {
                     >
                         <Star className="h-4 w-4" />
                         Review us
+                        <ExternalLink className="ml-auto h-3.5 w-3.5 opacity-70" />
+                    </a>
+                    <a
+                        href={GITHUB_SPONSORS_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mb-1 flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-pink-700 transition-colors hover:bg-pink-50 hover:text-pink-800 dark:text-pink-500 dark:hover:bg-pink-500/12 dark:hover:text-pink-400"
+                    >
+                        <Heart className="h-4 w-4" />
+                        Sponsor Vintrack
                         <ExternalLink className="ml-auto h-3.5 w-3.5 opacity-70" />
                     </a>
                     <a

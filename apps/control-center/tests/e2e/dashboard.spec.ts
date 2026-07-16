@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("dashboard overview", () => {
-    test("renders seeded monitor summary and monitor card", async ({ page }) => {
+    test("renders seeded monitor summary and monitor card", async ({
+        page,
+    }) => {
         await page.goto("/dashboard");
 
         await expect(page).toHaveTitle(/Vintrack/i);
@@ -15,6 +17,9 @@ test.describe("dashboard overview", () => {
         await expect(
             page.getByText("Items Found", { exact: true }),
         ).toBeVisible();
+        await expect(
+            page.getByRole("link", { name: "Sponsor Vintrack" }),
+        ).toHaveAttribute("href", "https://github.com/sponsors/JakobAIOdev");
 
         const monitorCard = page
             .getByTestId("monitor-card")
