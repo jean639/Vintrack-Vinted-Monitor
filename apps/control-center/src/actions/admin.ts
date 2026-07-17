@@ -673,9 +673,11 @@ export async function updateFreeProxySettings(formData: FormData) {
         500,
         15000,
     );
+    const starterRegionsValue = formData.get("starterRegions");
     const starterRegions = (
-        (formData.get("starterRegions") as string | null)?.trim() ||
-        DEFAULT_FREE_PROXY_STARTER_REGIONS
+        typeof starterRegionsValue === "string"
+            ? starterRegionsValue.trim()
+            : DEFAULT_FREE_PROXY_STARTER_REGIONS
     )
         .split(",")
         .map((region) => region.trim().toLowerCase())
@@ -716,6 +718,25 @@ export async function updateFreeProxySettings(formData: FormData) {
         setAppSetting(FREE_PROXY_MAX_LATENCY_MS_KEY, String(maxLatencyMs)),
         setAppSetting(FREE_PROXY_STARTER_REGIONS_KEY, starterRegions),
     ]);
+
+    const activeMonitorRegions = await db.monitors.findMany({
+        where: { status: "active", proxy_source: "free" },
+        distinct: ["region"],
+        select: { region: true },
+    });
+    const retainedRegions = Array.from(
+        new Set([
+            ...starterRegions.split(",").filter(Boolean),
+            ...activeMonitorRegions.map((monitor) => monitor.region),
+        ]),
+    );
+    if (retainedRegions.length > 0) {
+        await db.free_proxy_health.deleteMany({
+            where: { region: { notIn: retainedRegions } },
+        });
+    } else {
+        await db.free_proxy_health.deleteMany();
+    }
 
     revalidatePath("/admin");
     return { success: true };

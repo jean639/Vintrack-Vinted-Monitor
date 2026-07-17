@@ -51,6 +51,21 @@ func TestBuildItemWebhookPayloadUsesStructuredEmbedAndGallery(t *testing.T) {
 	if _, ok := embed["image"]; !ok {
 		t.Fatal("expected primary image in item embed")
 	}
+	fields, ok := embed["fields"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected structured item fields, got %#v", embed["fields"])
+	}
+	fieldsByName := make(map[string]interface{}, len(fields))
+	for _, field := range fields {
+		name, _ := field["name"].(string)
+		fieldsByName[name] = field["value"]
+	}
+	if fieldsByName["Location"] != item.Location {
+		t.Fatalf("expected location %q, got %#v", item.Location, fieldsByName["Location"])
+	}
+	if fieldsByName["Seller rating"] != item.Rating {
+		t.Fatalf("expected rating %q, got %#v", item.Rating, fieldsByName["Seller rating"])
+	}
 	if _, ok := embeds[1]["fields"]; ok {
 		t.Fatal("gallery embed must not duplicate item fields")
 	}

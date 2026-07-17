@@ -131,6 +131,79 @@ func TestFreeDiscoveryFingerprintIgnoresPoolVersionChurn(t *testing.T) {
 	}
 }
 
+func TestWaitForProxyManagerRecovers(t *testing.T) {
+	manager := &proxy.Manager{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		manager.ReplaceFromString("http://1.2.3.4:8080")
+	}()
+
+	if !waitForProxyManager(ctx, manager, time.Millisecond) {
+		t.Fatal("proxy manager did not recover")
+	}
+}
+
+func TestWaitForProxyManagerStopsWithContext(t *testing.T) {
+	manager := &proxy.Manager{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if waitForProxyManager(ctx, manager, time.Millisecond) {
+		t.Fatal("proxy manager wait ignored canceled context")
+	}
+}
+
+func TestDetectedItemAlertPlanWaitsForDiscordEnrichment(t *testing.T) {
+	monitor := model.Monitor{
+		WebhookActive:  true,
+		DiscordWebhook: sql.NullString{String: "https://discord.test/webhook", Valid: true},
+	}
+
+	publishNow, alertAfterEnrich := detectedItemAlertPlan(monitor, false)
+	if !publishNow {
+		t.Fatal("dashboard publish should stay on the immediate path")
+	}
+	if !alertAfterEnrich {
+		t.Fatal("Discord alert should wait for seller enrichment")
+	}
+}
+
+func TestDetectedItemAlertPlanPreservesStrictRegionFilter(t *testing.T) {
+	allowedCountries := "de"
+	monitor := model.Monitor{
+		AllowedCountries: &allowedCountries,
+		WebhookActive:    true,
+		DiscordWebhook:   sql.NullString{String: "https://discord.test/webhook", Valid: true},
+	}
+
+	publishNow, alertAfterEnrich := detectedItemAlertPlan(monitor, hasCountryFilter(monitor.AllowedCountries))
+	if publishNow {
+		t.Fatal("strict region filter published before seller enrichment")
+	}
+	if !alertAfterEnrich {
+		t.Fatal("strict region filter did not schedule the enriched alert")
+	}
+	if !sellerCountryAllowed("🇩🇪 DE", monitor.AllowedCountries) {
+		t.Fatal("matching seller region was rejected")
+	}
+	if sellerCountryAllowed("🇫🇷 FR", monitor.AllowedCountries) {
+		t.Fatal("non-matching seller region was accepted")
+	}
+}
+
+func TestDetectedItemAlertPlanSkipsDeferredWorkWithoutExternalAlerts(t *testing.T) {
+	publishNow, alertAfterEnrich := detectedItemAlertPlan(model.Monitor{}, false)
+	if !publishNow {
+		t.Fatal("dashboard publish should be immediate")
+	}
+	if alertAfterEnrich {
+		t.Fatal("item without external alerts scheduled a deferred alert")
+	}
+}
+
 func TestDiscoveryFailureBackoffOnlyAfterRepeatedFreeFailures(t *testing.T) {
 	if got := discoveryFailureBackoff("server", 5); got != 0 {
 		t.Fatalf("server backoff = %s, want 0", got)

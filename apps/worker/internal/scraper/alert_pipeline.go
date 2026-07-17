@@ -12,10 +12,12 @@ import (
 )
 
 type alertJob struct {
-	ctx         context.Context
-	item        model.Item
-	monitor     model.Monitor
-	proxySource string
+	ctx             context.Context
+	item            model.Item
+	monitor         model.Monitor
+	proxySource     string
+	publish         bool
+	deliverExternal bool
 }
 
 type enrichmentJob struct {
@@ -71,14 +73,15 @@ func (e *Engine) Close() {
 	e.jobsWG.Wait()
 }
 
-func (e *Engine) enqueueItem(job enrichmentJob, alertNow bool) {
+func (e *Engine) enqueueItem(job enrichmentJob, publishNow bool) {
 	// Once an item is atomically claimed, its alert and persistence must survive
 	// a monitor config refresh that cancels the polling task context.
 	job.ctx = e.jobsCtx
-	if alertNow {
+	if publishNow {
 		e.enqueueAlert(alertJob{
 			ctx: job.ctx, item: job.item, monitor: job.monitor, proxySource: job.proxySource,
-		})
+			publish: true,
+		}, true)
 	}
 
 	select {
@@ -88,9 +91,11 @@ func (e *Engine) enqueueItem(job enrichmentJob, alertNow bool) {
 	}
 }
 
-func (e *Engine) enqueueAlert(job alertJob) {
+func (e *Engine) enqueueAlert(job alertJob, recordQueued bool) {
 	job.ctx = e.jobsCtx
-	e.db.RecordDetectionAlertQueued(job.monitor.ID, job.item.ID, time.Now())
+	if recordQueued {
+		e.db.RecordDetectionAlertQueued(job.monitor.ID, job.item.ID, time.Now())
+	}
 	select {
 	case e.alertJobs <- job:
 	case <-job.ctx.Done():
@@ -117,15 +122,21 @@ func (e *Engine) deliverAlert(job alertJob) {
 	default:
 	}
 
-	hasDiscord := job.monitor.WebhookActive && job.monitor.DiscordWebhook.Valid && job.monitor.DiscordWebhook.String != ""
-	hasTelegram := job.monitor.TelegramActive && job.monitor.TelegramChatID.Valid && job.monitor.TelegramChatID.String != ""
+	configuredDiscord, configuredTelegram := configuredExternalAlerts(job.monitor)
+	hasDiscord := job.deliverExternal && configuredDiscord
+	hasTelegram := job.deliverExternal && configuredTelegram
 
-	// Publish dashboard/SSE first. Slow external channels have independent
-	// bounded queues and cannot stop this worker from starting the next item.
-	if err := e.db.PublishItem(job.item); err != nil {
-		log.Printf("[%d] publish error: %v", job.monitor.ID, err)
-	} else if !hasDiscord && !hasTelegram {
-		e.db.RecordDetectionAlertSent(job.monitor.ID, job.item.ID, time.Now())
+	if job.publish {
+		// Dashboard/SSE stays on the immediate path. Discord and Telegram can
+		// wait for seller enrichment without delaying the live feed.
+		if err := e.db.PublishItem(job.item); err != nil {
+			log.Printf("[%d] publish error: %v", job.monitor.ID, err)
+		} else if !configuredDiscord && !configuredTelegram {
+			e.db.RecordDetectionAlertSent(job.monitor.ID, job.item.ID, time.Now())
+		}
+	}
+	if !job.deliverExternal {
+		return
 	}
 
 	if (hasDiscord || hasTelegram) && job.monitor.DedupeMonitorAlerts && !e.db.ClaimUserItemAlert(job.monitor.UserID, job.item.ID) {
@@ -262,14 +273,27 @@ func (e *Engine) enrichAndPersist(job enrichmentJob) {
 	if job.alertAfterEnrich {
 		e.enqueueAlert(alertJob{
 			ctx: job.ctx, item: job.item, monitor: job.monitor, proxySource: job.proxySource,
-		})
-		return
+			publish: job.requireCountryMatch, deliverExternal: true,
+		}, job.requireCountryMatch)
 	}
 	if job.publishUpdate && (job.item.Location != "" || job.item.Rating != "") {
 		if err := e.db.PublishItem(job.item); err != nil {
 			log.Printf("[%d] publish enrichment update: %v", job.monitor.ID, err)
 		}
 	}
+}
+
+func configuredExternalAlerts(monitor model.Monitor) (bool, bool) {
+	hasDiscord := monitor.WebhookActive && monitor.DiscordWebhook.Valid && monitor.DiscordWebhook.String != ""
+	hasTelegram := monitor.TelegramActive && monitor.TelegramChatID.Valid && monitor.TelegramChatID.String != ""
+	return hasDiscord, hasTelegram
+}
+
+func detectedItemAlertPlan(monitor model.Monitor, strictCountryGate bool) (bool, bool) {
+	hasDiscord, hasTelegram := configuredExternalAlerts(monitor)
+	publishNow := !strictCountryGate
+	alertAfterEnrich := strictCountryGate || hasDiscord || hasTelegram
+	return publishNow, alertAfterEnrich
 }
 
 func hasCountryFilter(allowedCountries *string) bool {
