@@ -9,19 +9,23 @@ import (
 )
 
 type Manager struct {
-	store      *database.Store
-	engine     *Engine
-	running    map[int]context.CancelFunc
-	monitorCfg map[int]string
-	mu         sync.Mutex
+	store            *database.Store
+	engine           *Engine
+	running          map[int]context.CancelFunc
+	monitorCfg       map[int]string
+	discoveryRunning map[string]context.CancelFunc
+	discoveryCfg     map[string]string
+	mu               sync.Mutex
 }
 
 func NewManager(store *database.Store, engine *Engine) *Manager {
 	return &Manager{
-		store:      store,
-		engine:     engine,
-		running:    make(map[int]context.CancelFunc),
-		monitorCfg: make(map[int]string),
+		store:            store,
+		engine:           engine,
+		running:          make(map[int]context.CancelFunc),
+		monitorCfg:       make(map[int]string),
+		discoveryRunning: make(map[string]context.CancelFunc),
+		discoveryCfg:     make(map[string]string),
 	}
 }
 
@@ -44,14 +48,15 @@ func (m *Manager) Sync(ctx context.Context) {
 
 	activeIDs := make(map[int]bool, len(monitors))
 
-	for _, mon := range monitors {
+	for i := range monitors {
+		mon := &monitors[i]
 		if mon.ProxySource == "free" {
 			mon.FreeProxyVersion = m.engine.FreeProxyRegionVersion(mon.Region)
 		} else if mon.ProxyGroupID == nil {
 			mon.ServerProxyVersion = m.engine.ServerProxyVersion()
 		}
 		activeIDs[mon.ID] = true
-		hash := monitorConfigFingerprint(mon)
+		hash := monitorConfigFingerprint(*mon)
 
 		if cancelFn, exists := m.running[mon.ID]; exists {
 			if oldHash, ok := m.monitorCfg[mon.ID]; ok && oldHash != hash {
@@ -66,7 +71,7 @@ func (m *Manager) Sync(ctx context.Context) {
 		mCtx, mCancel := context.WithCancel(ctx)
 		m.running[mon.ID] = mCancel
 		m.monitorCfg[mon.ID] = hash
-		go m.engine.MonitorTask(mCtx, mon)
+		go m.engine.MonitorTask(mCtx, *mon)
 	}
 
 	for id, cancelFn := range m.running {
@@ -75,6 +80,29 @@ func (m *Manager) Sync(ctx context.Context) {
 			cancelFn()
 			delete(m.running, id)
 			delete(m.monitorCfg, id)
+		}
+	}
+
+	discoverySpecs := BuildDiscoverySpecs(monitors, m.engine.discoveryMode)
+	for key, spec := range discoverySpecs {
+		if cancelFn, exists := m.discoveryRunning[key]; exists {
+			if m.discoveryCfg[key] == spec.Fingerprint {
+				continue
+			}
+			cancelFn()
+			delete(m.discoveryRunning, key)
+			delete(m.discoveryCfg, key)
+		}
+		dCtx, dCancel := context.WithCancel(ctx)
+		m.discoveryRunning[key] = dCancel
+		m.discoveryCfg[key] = spec.Fingerprint
+		go m.engine.DiscoveryTask(dCtx, spec)
+	}
+	for key, cancelFn := range m.discoveryRunning {
+		if _, active := discoverySpecs[key]; !active {
+			cancelFn()
+			delete(m.discoveryRunning, key)
+			delete(m.discoveryCfg, key)
 		}
 	}
 }
@@ -87,5 +115,10 @@ func (m *Manager) StopAll() {
 		cancelFn()
 		delete(m.running, id)
 		delete(m.monitorCfg, id)
+	}
+	for key, cancelFn := range m.discoveryRunning {
+		cancelFn()
+		delete(m.discoveryRunning, key)
+		delete(m.discoveryCfg, key)
 	}
 }

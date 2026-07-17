@@ -29,6 +29,23 @@ type retryResponse struct {
 	} `json:"parameters"`
 }
 
+type telegramRequestError struct {
+	cause   error
+	message string
+}
+
+func (e *telegramRequestError) Error() string { return e.message }
+func (e *telegramRequestError) Unwrap() error { return e.cause }
+
+func safeTelegramRequestError(err error) error {
+	message := "telegram request failed"
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		message = "telegram request timed out"
+	}
+	return &telegramRequestError{cause: err, message: message}
+}
+
 func SendItem(chatID string, item model.Item, monitorName string, proxySource string) error {
 	if chatID == "" {
 		return nil
@@ -155,7 +172,7 @@ func isTransientPostError(err error) bool {
 func post(endpoint string, body []byte) (*int, error) {
 	resp, err := httpClient.Post(endpoint, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, safeTelegramRequestError(err)
 	}
 	defer resp.Body.Close()
 

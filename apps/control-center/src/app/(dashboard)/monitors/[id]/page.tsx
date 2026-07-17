@@ -44,16 +44,6 @@ type MonitorRunRow = {
     checked_at: Date;
 };
 
-function percentile(values: number[], p: number) {
-    if (values.length === 0) return null;
-    const sorted = [...values].sort((a, b) => a - b);
-    const index = Math.min(
-        sorted.length - 1,
-        Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
-    );
-    return sorted[index];
-}
-
 export default async function MonitorPage({
     params,
 }: {
@@ -105,6 +95,7 @@ export default async function MonitorPage({
         SELECT status, duration_ms, item_count, error_message, checked_at
         FROM monitor_runs
         WHERE monitor_id = ${monitor.id}
+          AND fetch_source = 'canonical'
         ORDER BY checked_at DESC
         LIMIT 100
     `;
@@ -124,7 +115,6 @@ export default async function MonitorPage({
                       durations.length,
               )
             : null;
-    const p95Duration = percentile(durations, 95);
     const successRate =
         recentRuns.length > 0
             ? Math.round((successCount / recentRuns.length) * 100)
@@ -400,7 +390,6 @@ export default async function MonitorPage({
                                 recentChecks: recentRuns.length,
                                 successRate,
                                 avgDurationMs: avgDuration,
-                                p95DurationMs: p95Duration,
                                 newItems: savedItemsInWindow,
                                 failedChecks: failedCount,
                                 lastError,

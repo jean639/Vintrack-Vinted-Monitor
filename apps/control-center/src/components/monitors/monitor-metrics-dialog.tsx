@@ -21,20 +21,24 @@ type MonitorMetrics = {
     recentChecks: number;
     successRate: number | null;
     avgDurationMs: number | null;
-    p95DurationMs: number | null;
     newItems: number;
     failedChecks: number;
     lastError: string | null;
+    earlyAlertRate?: number | null;
+    medianEarlyLeadMs?: number | null;
+    p95DetectToAlertMs?: number | null;
 };
 
 type MonitorMetricsResponse = {
     totalChecks: number;
     successRate: number | null;
     avgDurationMs: number | null;
-    p95DurationMs?: number | null;
     newItemCount: number;
     failedCount: number;
     lastError: string | null;
+    earlyAlertRate: number | null;
+    medianEarlyLeadMs: number | null;
+    p95DetectToAlertMs: number | null;
 };
 
 function formatMs(value: number | null) {
@@ -62,10 +66,12 @@ export function MonitorMetricsDialog({
                 recentChecks: data.totalChecks,
                 successRate: data.successRate,
                 avgDurationMs: data.avgDurationMs,
-                p95DurationMs: data.p95DurationMs ?? null,
                 newItems: data.newItemCount,
                 failedChecks: data.failedCount,
                 lastError: data.lastError,
+                earlyAlertRate: data.earlyAlertRate,
+                medianEarlyLeadMs: data.medianEarlyLeadMs,
+                p95DetectToAlertMs: data.p95DetectToAlertMs,
             });
         } finally {
             setIsRefreshing(false);
@@ -83,10 +89,12 @@ export function MonitorMetricsDialog({
         recentChecks,
         successRate,
         avgDurationMs,
-        p95DurationMs,
         newItems,
         failedChecks,
         lastError,
+        earlyAlertRate = null,
+        medianEarlyLeadMs = null,
+        p95DetectToAlertMs = null,
     } = metrics;
     const hasIssues = failedChecks > 0 || Boolean(lastError);
 
@@ -115,8 +123,9 @@ export function MonitorMetricsDialog({
                         <div className="space-y-1.5">
                             <DialogTitle>Monitor Health</DialogTitle>
                             <DialogDescription>
-                                Latest 100 worker checks. Refreshes every 10
-                                seconds while this dialog is open.
+                                Performance from the latest {recentChecks}{" "}
+                                worker checks. Refreshes every 10 seconds while
+                                this dialog is open.
                             </DialogDescription>
                         </div>
                         <Button
@@ -134,34 +143,38 @@ export function MonitorMetricsDialog({
 
                 <div className="grid gap-3 sm:grid-cols-2">
                     <Metric
-                        label="Recent checks"
-                        value={String(recentChecks)}
-                        description="How many saved worker checks are included in this view."
-                    />
-                    <Metric
-                        label="Success rate"
+                        label="Reliability"
                         value={successRate === null ? "n/a" : `${successRate}%`}
-                        description="Share of checks that reached Vinted successfully."
+                        description="Share of recent checks that reached Vinted successfully."
                     />
                     <Metric
-                        label="Avg latency"
+                        label="Average check speed"
                         value={formatMs(avgDurationMs)}
-                        description="Average time a check took from request start to result."
+                        description="Average time from starting a Vinted check until its result arrived."
                     />
                     <Metric
-                        label="p95 latency"
-                        value={formatMs(p95DurationMs)}
-                        description="95% of checks were faster than this value."
-                    />
-                    <Metric
-                        label="New items"
+                        label="Items found"
                         value={String(newItems)}
-                        description="Items saved since the oldest check included here."
+                        description="New items found during the checks included in this view."
                     />
                     <Metric
-                        label="Failed checks"
-                        value={String(failedChecks)}
-                        description="Checks where all fetch attempts failed."
+                        label="Found before search"
+                        value={
+                            earlyAlertRate === null
+                                ? "n/a"
+                                : `${earlyAlertRate}%`
+                        }
+                        description="Share of recent items whose notification was delivered before the normal Vinted search found them."
+                    />
+                    <Metric
+                        label="Typical head start"
+                        value={formatMs(medianEarlyLeadMs)}
+                        description="Typical amount of time saved when the faster discovery path beat the normal search."
+                    />
+                    <Metric
+                        label="Notification speed"
+                        value={formatMs(p95DetectToAlertMs)}
+                        description="95% of first notifications were delivered within this time after an item was detected."
                     />
                 </div>
 

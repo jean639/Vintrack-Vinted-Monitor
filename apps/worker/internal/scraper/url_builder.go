@@ -9,20 +9,37 @@ import (
 )
 
 func BuildVintedURL(m model.Monitor) string {
-	domain := model.RegionDomain(m.Region)
-	baseURL := fmt.Sprintf("https://%s/api/v2/catalog/items", domain)
-	params := url.Values{}
-
 	perPage := os.Getenv("VINTED_PER_PAGE")
 	if perPage == "" {
 		perPage = "20"
 	}
+	return buildVintedURL(m, perPage, true, 1)
+}
 
-	if m.Query != "" {
+func BuildDiscoveryURL(m model.Monitor, page int) string {
+	return BuildDiscoveryURLWithPerPage(m, page, getEnvInt("DISCOVERY_PER_PAGE", 96))
+}
+
+func BuildDiscoveryURLWithPerPage(m model.Monitor, page int, perPage int) string {
+	if perPage < 1 {
+		perPage = 96
+	}
+	return buildVintedURL(m, fmt.Sprintf("%d", perPage), false, page)
+}
+
+func buildVintedURL(m model.Monitor, perPage string, includeQuery bool, page int) string {
+	domain := model.RegionDomain(m.Region)
+	baseURL := fmt.Sprintf("https://%s/api/v2/catalog/items", domain)
+	params := url.Values{}
+
+	if includeQuery && m.Query != "" {
 		params.Add("search_text", m.Query)
 	}
 	params.Add("order", "newest_first")
 	params.Add("per_page", perPage)
+	if page > 1 {
+		params.Add("page", fmt.Sprintf("%d", page))
+	}
 
 	if m.PriceMin != nil {
 		params.Add("price_from", fmt.Sprintf("%d", *m.PriceMin))

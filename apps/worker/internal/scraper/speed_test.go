@@ -1,0 +1,249 @@
+package scraper
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"net/url"
+	"testing"
+	"time"
+
+	"vintrack-worker/internal/model"
+	"vintrack-worker/internal/proxy"
+)
+
+type timedCatalogFetcher struct {
+	delays   map[string]time.Duration
+	statuses map[string]int
+}
+
+func (f timedCatalogFetcher) FetchCatalog(ctx context.Context, client *Client, _ string, _ string) ([]model.VintedItem, int, error) {
+	delay := f.delays[client.ProxyURL]
+	select {
+	case <-time.After(delay):
+	case <-ctx.Done():
+		return nil, 0, ctx.Err()
+	}
+	status := f.statuses[client.ProxyURL]
+	if status == 0 {
+		status = 200
+	}
+	if status != 200 {
+		return nil, status, errors.New("fetch failed")
+	}
+	return []model.VintedItem{{ID: 42}}, status, nil
+}
+
+func (timedCatalogFetcher) RequiresNetwork() bool { return true }
+func (timedCatalogFetcher) Name() string          { return "timed-test" }
+
+func TestFetchCatalogHedgedUsesFasterSecondary(t *testing.T) {
+	t.Setenv("CATALOG_HEDGE_DELAY_MS", "10")
+	primary := &Client{ProxyURL: "primary"}
+	secondary := &Client{ProxyURL: "secondary"}
+	pool := &ClientPool{states: []*clientState{
+		{client: primary, ewmaLatencyMS: 10},
+		{client: secondary, ewmaLatencyMS: 20},
+	}}
+	engine := &Engine{fetcher: timedCatalogFetcher{delays: map[string]time.Duration{
+		"primary":   100 * time.Millisecond,
+		"secondary": 5 * time.Millisecond,
+	}}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result := engine.fetchCatalogHedged(ctx, pool, "https://example.test", "example.test")
+
+	if result.err != nil || result.status != 200 {
+		t.Fatalf("fetchCatalogHedged() = status %d, error %v", result.status, result.err)
+	}
+	if result.client != secondary {
+		t.Fatalf("winner = %v, want secondary", result.client)
+	}
+	if len(result.items) != 1 || result.items[0].ID != 42 {
+		t.Fatalf("items = %#v, want item 42", result.items)
+	}
+}
+
+func TestClientPoolPrefersHealthyIdleClient(t *testing.T) {
+	slow := &Client{ProxyURL: "slow"}
+	fast := &Client{ProxyURL: "fast"}
+	busy := &Client{ProxyURL: "busy"}
+	pool := &ClientPool{states: []*clientState{
+		{client: slow, ewmaLatencyMS: 900},
+		{client: fast, ewmaLatencyMS: 100},
+		{client: busy, ewmaLatencyMS: 50, inFlight: 2},
+	}}
+
+	if got := pool.Acquire(nil); got != fast {
+		t.Fatalf("Acquire() = %v, want fast healthy client", got)
+	}
+	pool.Report(fast, 429, 50*time.Millisecond, nil)
+	if got := pool.Acquire(nil); got != slow {
+		t.Fatalf("Acquire() after rate limit = %v, want slow non-cooled client", got)
+	}
+}
+
+func TestPoolClientDoesNotFallBackToDirect(t *testing.T) {
+	if _, err := newPoolClient(&proxy.Manager{}, nil, time.Second, true); err == nil {
+		t.Fatal("empty required proxy pool created a direct client")
+	}
+}
+
+func TestBuildDiscoverySpecsGroupsStructuralFilters(t *testing.T) {
+	catalog := "123"
+	monitors := []model.Monitor{
+		{ID: 1, Status: "active", Region: "de", Query: "nike", CatalogIDs: &catalog, ProxySource: "server", ServerProxyVersion: 3},
+		{ID: 2, Status: "active", Region: "de", Query: "adidas", CatalogIDs: &catalog, ProxySource: "server", ServerProxyVersion: 3},
+		{ID: 3, Status: "active", Region: "de", Query: "puma", CatalogIDs: &catalog, ProxySource: "free"},
+	}
+
+	specs := BuildDiscoverySpecs(monitors, "active")
+	if len(specs) != 1 {
+		t.Fatalf("BuildDiscoverySpecs() produced %d groups, want 1", len(specs))
+	}
+	for _, spec := range specs {
+		if len(spec.Monitors) != 2 {
+			t.Fatalf("group has %d monitors, want 2 dedicated monitors", len(spec.Monitors))
+		}
+		if spec.Fingerprint == "" {
+			t.Fatal("group fingerprint is empty")
+		}
+	}
+	if got := BuildDiscoverySpecs(monitors, "off"); len(got) != 0 {
+		t.Fatalf("off mode produced %d groups, want none", len(got))
+	}
+	if got := BuildDiscoverySpecs(monitors, "shadow"); len(got) != 2 {
+		t.Fatalf("shadow mode produced %d groups, want dedicated and free test groups", len(got))
+	}
+	t.Setenv("DISCOVERY_ALLOW_FREE_ACTIVE", "true")
+	if got := BuildDiscoverySpecs(monitors, "active"); len(got) != 2 {
+		t.Fatalf("active free opt-in produced %d groups, want 2", len(got))
+	}
+}
+
+func TestFreeDiscoveryFingerprintIgnoresPoolVersionChurn(t *testing.T) {
+	base := model.Monitor{Region: "de", ProxySource: "free", FreeProxyVersion: 1}
+	updated := base
+	updated.FreeProxyVersion = 2
+	if discoveryStructuralKey(base) != discoveryStructuralKey(updated) {
+		t.Fatal("free proxy pool version unexpectedly restarted the discovery group")
+	}
+}
+
+func TestDiscoveryFailureBackoffOnlyAfterRepeatedFreeFailures(t *testing.T) {
+	if got := discoveryFailureBackoff("server", 5); got != 0 {
+		t.Fatalf("server backoff = %s, want 0", got)
+	}
+	if got := discoveryFailureBackoff("free", 1); got != 0 {
+		t.Fatalf("first free failure backoff = %s, want 0", got)
+	}
+	if got := discoveryFailureBackoff("free", 2); got != 250*time.Millisecond {
+		t.Fatalf("second free failure backoff = %s, want 250ms", got)
+	}
+	if got := discoveryFailureBackoff("free", 20); got != 2*time.Second {
+		t.Fatalf("capped free failure backoff = %s, want 2s", got)
+	}
+}
+
+func TestBuildDiscoverySpecsDoesNotMixProxyGroups(t *testing.T) {
+	groupOne := 1
+	groupTwo := 2
+	proxies := sql.NullString{String: "http://127.0.0.1:8000", Valid: true}
+	monitors := []model.Monitor{
+		{ID: 1, Status: "active", Region: "de", ProxySource: "group", ProxyGroupID: &groupOne, Proxies: proxies},
+		{ID: 2, Status: "active", Region: "de", ProxySource: "group", ProxyGroupID: &groupTwo, Proxies: proxies},
+	}
+
+	if got := BuildDiscoverySpecs(monitors, "active"); len(got) != 2 {
+		t.Fatalf("BuildDiscoverySpecs() produced %d groups, want separate user proxy groups", len(got))
+	}
+}
+
+func TestMatchesDiscoveryAppliesLocalTextFilters(t *testing.T) {
+	anti := "kids, damaged"
+	monitor := model.Monitor{Query: "nike max", AntiKeywords: &anti, BannedSellerIDs: []int64{99}}
+
+	if !matchesDiscovery(model.VintedItem{Title: "Air Max 90", BrandTitle: "Nike", User: model.VintedUser{ID: 1}}, monitor) {
+		t.Fatal("matching title and brand was rejected")
+	}
+	if matchesDiscovery(model.VintedItem{Title: "Air Max", BrandTitle: "Nike", Description: "For kids", User: model.VintedUser{ID: 1}}, monitor) {
+		t.Fatal("anti-keyword item was accepted")
+	}
+	if matchesDiscovery(model.VintedItem{Title: "Air Max 90", BrandTitle: "Nike", User: model.VintedUser{ID: 99}}, monitor) {
+		t.Fatal("banned seller item was accepted")
+	}
+	if matchesDiscovery(model.VintedItem{Title: "Air Force 1", BrandTitle: "Nike", User: model.VintedUser{ID: 1}}, monitor) {
+		t.Fatal("item missing a query term was accepted")
+	}
+}
+
+func TestBuildDiscoveryURLKeepsFiltersAndDropsQuery(t *testing.T) {
+	t.Setenv("DISCOVERY_PER_PAGE", "96")
+	price := 25
+	catalog := "10,20"
+	raw := BuildDiscoveryURL(model.Monitor{
+		Region: "de", Query: "nike", PriceMax: &price, CatalogIDs: &catalog,
+	}, 2)
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("search_text") != "" {
+		t.Fatalf("search_text = %q, want omitted", query.Get("search_text"))
+	}
+	if query.Get("price_to") != "25" || query.Get("page") != "2" || query.Get("per_page") != "96" {
+		t.Fatalf("discovery query lost server filters: %v", query)
+	}
+	if len(query["catalog_ids[]"]) != 2 {
+		t.Fatalf("catalog filters = %v, want two", query["catalog_ids[]"])
+	}
+}
+
+func TestBuildDiscoveryURLWithPerPageOverride(t *testing.T) {
+	raw := BuildDiscoveryURLWithPerPage(model.Monitor{Region: "de", Query: "nike"}, 1, 64)
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Query().Get("per_page"); got != "64" {
+		t.Fatalf("per_page = %q, want 64", got)
+	}
+}
+
+func TestSellerCountryAllowed(t *testing.T) {
+	allowed := "de,fr"
+	if !sellerCountryAllowed("🇩🇪 DE", &allowed) {
+		t.Fatal("sellerCountryAllowed(DE) = false, want true")
+	}
+	if sellerCountryAllowed("🇮🇹 IT", &allowed) {
+		t.Fatal("sellerCountryAllowed(IT) = true, want false")
+	}
+	if sellerCountryAllowed("", &allowed) {
+		t.Fatal("sellerCountryAllowed(empty) = true, want false")
+	}
+}
+
+func TestConfiguredClientFingerprint(t *testing.T) {
+	t.Setenv("TLS_PROFILE", "chrome_146")
+	if got := configuredClientFingerprint(); got.name != "chrome_146" || got.version != "146" {
+		t.Fatalf("configuredClientFingerprint() = %#v", got)
+	}
+	t.Setenv("TLS_PROFILE", "unsupported")
+	if got := configuredClientFingerprint(); got.name != "chrome_144" {
+		t.Fatalf("unsupported profile fallback = %q, want chrome_144", got.name)
+	}
+}
+
+func TestDiscoveryFingerprintTracksNotificationChanges(t *testing.T) {
+	base := model.Monitor{
+		ID: 1, Status: "active", Region: "de", Query: "nike", ProxySource: "server",
+		DiscordWebhook: sql.NullString{String: "https://discord.test/a", Valid: true},
+	}
+	changed := base
+	changed.DiscordWebhook.String = "https://discord.test/b"
+	if discoveryMonitorFingerprint(base) == discoveryMonitorFingerprint(changed) {
+		t.Fatal("notification change did not alter discovery fingerprint")
+	}
+}

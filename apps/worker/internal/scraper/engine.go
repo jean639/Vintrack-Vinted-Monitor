@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"net/url"
@@ -26,16 +27,24 @@ const (
 )
 
 type Engine struct {
-	db           *database.Store
-	serverProxy  *proxy.Manager
-	freeProxy    *proxy.RegionPools
-	fetcher      CatalogFetcher
-	enrichSeller bool
-	poolSize     int
-	pools        map[string]*ClientPool
-	poolsMu      sync.RWMutex
-	enrichers    map[string]*SellerEnricher
-	enrichersMu  sync.RWMutex
+	db             *database.Store
+	serverProxy    *proxy.Manager
+	freeProxy      *proxy.RegionPools
+	fetcher        CatalogFetcher
+	enrichSeller   bool
+	poolSize       int
+	pools          map[string]*ClientPool
+	poolsMu        sync.RWMutex
+	enrichers      map[string]*SellerEnricher
+	enrichersMu    sync.RWMutex
+	discoveryMode  string
+	jobsCtx        context.Context
+	jobsCancel     context.CancelFunc
+	alertJobs      chan alertJob
+	discordJobs    chan alertJob
+	telegramJobs   chan alertJob
+	enrichmentJobs chan enrichmentJob
+	jobsWG         sync.WaitGroup
 }
 
 func NewEngine(db *database.Store, pm *proxy.Manager, freePM *proxy.RegionPools) *Engine {
@@ -45,17 +54,31 @@ func NewEngine(db *database.Store, pm *proxy.Manager, freePM *proxy.RegionPools)
 		enrich = false
 	}
 	poolSize := getEnvInt("CLIENT_POOL_SIZE", 5)
-	log.Printf("Catalog fetch mode: %s, seller enrichment (region/rating): %v, client pool size: %d", fetcher.Name(), enrich, poolSize)
-	return &Engine{
-		db:           db,
-		serverProxy:  pm,
-		freeProxy:    freePM,
-		fetcher:      fetcher,
-		enrichSeller: enrich,
-		poolSize:     poolSize,
-		pools:        make(map[string]*ClientPool),
-		enrichers:    make(map[string]*SellerEnricher),
+	discoveryMode := resolveDiscoveryMode(os.Getenv("DISCOVERY_MODE"))
+	if !fetcher.RequiresNetwork() {
+		discoveryMode = "off"
 	}
+	jobsCtx, jobsCancel := context.WithCancel(context.Background())
+	log.Printf("Catalog fetch mode: %s, seller enrichment (region/rating): %v, client pool size: %d, TLS profile: %s, discovery: %s", fetcher.Name(), enrich, poolSize, configuredClientFingerprint().name, discoveryMode)
+	engine := &Engine{
+		db:             db,
+		serverProxy:    pm,
+		freeProxy:      freePM,
+		fetcher:        fetcher,
+		enrichSeller:   enrich,
+		poolSize:       poolSize,
+		pools:          make(map[string]*ClientPool),
+		enrichers:      make(map[string]*SellerEnricher),
+		discoveryMode:  discoveryMode,
+		jobsCtx:        jobsCtx,
+		jobsCancel:     jobsCancel,
+		alertJobs:      make(chan alertJob, 4096),
+		discordJobs:    make(chan alertJob, 4096),
+		telegramJobs:   make(chan alertJob, 4096),
+		enrichmentJobs: make(chan enrichmentJob, 4096),
+	}
+	engine.startPipelines()
+	return engine
 }
 
 func (e *Engine) ServerProxyVersion() uint64 {
@@ -95,6 +118,10 @@ func (e *Engine) GetOrCreateEnricher(pm *proxy.Manager, domain string, proxyKey 
 }
 
 func (e *Engine) GetOrCreatePool(pm *proxy.Manager, domain string, proxyKey string, trafficRecorder func(txBytes int64, rxBytes int64), proxyLabel string) *ClientPool {
+	return e.GetOrCreatePoolSized(pm, domain, proxyKey, trafficRecorder, proxyLabel, e.poolSize)
+}
+
+func (e *Engine) GetOrCreatePoolSized(pm *proxy.Manager, domain string, proxyKey string, trafficRecorder func(txBytes int64, rxBytes int64), proxyLabel string, poolSize int) *ClientPool {
 	key := fmt.Sprintf("%s:%s", domain, proxyKey)
 
 	e.poolsMu.RLock()
@@ -114,7 +141,7 @@ func (e *Engine) GetOrCreatePool(pm *proxy.Manager, domain string, proxyKey stri
 	}
 
 	log.Printf("Creating new client pool for %s (source: %s)", domain, proxyLabel)
-	pool = NewClientPool(pm, domain, e.poolSize, trafficRecorder)
+	pool = NewClientPool(pm, domain, poolSize, trafficRecorder)
 	e.pools[key] = pool
 	return pool
 }
@@ -129,28 +156,37 @@ func (e *Engine) getProxyManager(m model.Monitor) *proxy.Manager {
 	return e.serverProxy
 }
 
-func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
+func (e *Engine) proxyContext(m model.Monitor) (*proxy.Manager, string, string, func(txBytes int64, rxBytes int64)) {
 	pm := e.getProxyManager(m)
-	domain := model.RegionDomain(m.Region)
-
 	proxySource := "server"
-	proxyKey := "server"
+	proxyKey := fmt.Sprintf("server:%d", e.ServerProxyVersion())
 	var trafficRecorder func(txBytes int64, rxBytes int64)
+
 	if m.ProxyGroupName.Valid && m.ProxyGroupName.String != "" {
 		proxySource = fmt.Sprintf("group:%s", m.ProxyGroupName.String)
 	}
 	if m.ProxyGroupID != nil {
 		groupID := *m.ProxyGroupID
-		proxyKey = fmt.Sprintf("group:%d", groupID)
+		proxyKey = fmt.Sprintf("group:%d:%s", groupID, shortProxyHash(m.Proxies.String))
 		trafficRecorder = func(txBytes int64, rxBytes int64) {
 			e.db.RecordProxyGroupBandwidth(groupID, txBytes, rxBytes)
 		}
 	} else if m.ProxySource == "free" {
 		proxySource = "free"
-		proxyKey = "free"
-	} else {
-		proxyKey = fmt.Sprintf("server:%d", e.ServerProxyVersion())
+		proxyKey = fmt.Sprintf("free:%s:%d", m.Region, e.FreeProxyRegionVersion(m.Region))
 	}
+
+	return pm, proxySource, proxyKey, trafficRecorder
+}
+
+func shortProxyHash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
+	pm, proxySource, proxyKey, trafficRecorder := e.proxyContext(m)
+	domain := model.RegionDomain(m.Region)
 
 	if e.fetcher.RequiresNetwork() && pm.Count() == 0 {
 		log.Printf("[%d] ❌ ERROR: no valid proxies available (source: %s) — skipping monitor", m.ID, proxySource)
@@ -200,11 +236,12 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	} else {
 		proxySource = "mock"
 		log.Printf("[%d] using mock catalog fetcher: %s", m.ID, e.fetcher.Name())
-	}
-
-	allowedCountries := m.AllowedCountries
-	if !e.fetcher.RequiresNetwork() {
-		allowedCountries = nil
+		m.AllowedCountries = nil
+		if strings.TrimSpace(m.DiscordWebhook.String) == "" {
+			m.DiscordWebhook.String = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
+			m.DiscordWebhook.Valid = m.DiscordWebhook.String != ""
+			m.WebhookActive = m.DiscordWebhook.Valid
+		}
 	}
 
 	var enricher *SellerEnricher
@@ -213,27 +250,24 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	}
 
 	apiURL := BuildVintedURL(m)
-
 	interval := resolveQueryDelayMs(m.QueryDelayMs)
 	maxConsecutiveErrors := getEnvInt("MAX_CONSECUTIVE_ERRORS", 20)
-	raceFetchers := getEnvInt("RACE_FETCHERS", 2)
+	timeoutDuration := time.Duration(getEnvInt("CATALOG_TIMEOUT_MS", 2000)) * time.Millisecond
+	if timeoutDuration < 500*time.Millisecond {
+		timeoutDuration = 500 * time.Millisecond
+	}
 	consecutiveErrors := 0
 	checks := 0
 	initialized := false
 	var totalErrors int64
+	localSeen := make(map[int64]time.Time, 128)
 
-	log.Printf("[%d] started | name=%q | query=%q | delay=%dms | race=%d | url=%s", m.ID, m.Name, m.Query, interval, raceFetchers, apiURL)
-	webhookURL := m.DiscordWebhook.String
-	webhookActive := m.WebhookActive
-	if !e.fetcher.RequiresNetwork() && strings.TrimSpace(webhookURL) == "" {
-		webhookURL = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
-		webhookActive = webhookURL != ""
+	log.Printf("[%d] started | name=%q | query=%q | delay=%dms | hedge=%dms | url=%s", m.ID, m.Name, m.Query, interval, getEnvInt("CATALOG_HEDGE_DELAY_MS", 250), apiURL)
+	if m.WebhookActive && m.DiscordWebhook.Valid && m.DiscordWebhook.String != "" {
+		go discord.SendStartupWebhook(m.DiscordWebhook.String, m.Name)
 	}
-	if webhookActive && webhookURL != "" {
-		discord.SendStartupWebhook(webhookURL, m.Name)
-	}
-	if m.TelegramActive && m.TelegramChatID.String != "" {
-		telegram.SendStartup(m.TelegramChatID.String, m.Name)
+	if m.TelegramActive && m.TelegramChatID.Valid && m.TelegramChatID.String != "" {
+		go telegram.SendStartup(m.TelegramChatID.String, m.Name)
 	}
 
 	reportHealth := func(lastErr string) {
@@ -303,12 +337,10 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				}
 				m.DiscordWebhook = updated.DiscordWebhook
 				m.WebhookActive = updated.WebhookActive
-				webhookURL = m.DiscordWebhook.String
-				webhookActive = m.WebhookActive
-				if !e.fetcher.RequiresNetwork() && strings.TrimSpace(webhookURL) == "" {
-					webhookURL = strings.TrimSpace(os.Getenv("VINTED_MOCK_DISCORD_WEBHOOK_URL"))
-					webhookActive = webhookURL != ""
-				}
+				m.TelegramChatID = updated.TelegramChatID
+				m.TelegramActive = updated.TelegramActive
+				m.DedupeMonitorAlerts = updated.DedupeMonitorAlerts
+				m.AllowedCountries = updated.AllowedCountries
 				m.Status = updated.Status
 				m.ProxyGroupLimitBytes = updated.ProxyGroupLimitBytes
 				m.ProxyGroupRxBytes = updated.ProxyGroupRxBytes
@@ -317,119 +349,29 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			}
 		}
 
-		type fetchResult struct {
-			items  []model.VintedItem
-			status int
-			err    error
-			client *Client
-		}
-
-		var clients []*Client
-		if pool != nil {
-			clients = pool.RaceClients(raceFetchers)
-		} else {
-			clients = []*Client{nil}
-		}
-		resultCh := make(chan fetchResult, len(clients))
-
-		for _, c := range clients {
-			go func(cl *Client) {
-				items, status, err := e.fetcher.FetchCatalog(ctx, cl, apiURL, domain)
-				resultCh <- fetchResult{items, status, err, cl}
-			}(c)
-		}
-
-		var items []model.VintedItem
-		gotSuccess := false
-		lastStatus := 0
-		remaining := len(clients)
-
-		timeout := time.NewTimer(3 * time.Second)
-	collectLoop:
-		for remaining > 0 {
-			select {
-			case r := <-resultCh:
-				remaining--
-				if r.status != 0 {
-					lastStatus = r.status
-				}
-				if r.err != nil {
-					if pool != nil && r.client != nil {
-						e.recordFreeProxyFailure(proxySource, r.client, m.Region, 0, r.err.Error())
-						pool.Replace(r.client)
-					}
-					if checks <= 3 || checks%5 == 0 {
-						log.Printf("[%d] fetch error for %s via %s: %v", m.ID, domain, clientProxyLabel(r.client, proxySource), r.err)
-					}
-					continue
-				}
-				if r.status == 200 && !gotSuccess {
-					items = r.items
-					gotSuccess = true
-					e.recordFreeProxySuccess(proxySource, r.client, m.Region, int(time.Since(cycleStart).Milliseconds()))
-					if remaining > 0 {
-						go func(ch chan fetchResult, n int, p *ClientPool) {
-							drain := time.NewTimer(10 * time.Second)
-							defer drain.Stop()
-							for i := 0; i < n; i++ {
-								select {
-								case r := <-ch:
-									if r.client != nil && shouldReplaceClientForStatus(r.status) {
-										e.recordFreeProxyFailure(proxySource, r.client, m.Region, r.status, fmt.Sprintf("status %d", r.status))
-										r.client.ResetWarm(domain)
-										p.Replace(r.client)
-									}
-								case <-drain.C:
-									return
-								}
-							}
-						}(resultCh, remaining, pool)
-					}
-					break collectLoop
-				} else if pool != nil && r.client != nil && shouldReplaceClientForStatus(r.status) {
-					e.recordFreeProxyFailure(proxySource, r.client, m.Region, r.status, fmt.Sprintf("status %d", r.status))
-					r.client.ResetWarm(domain)
-					pool.Replace(r.client)
-				} else if r.status != 0 && (checks <= 3 || checks%5 == 0) {
-					log.Printf("[%d] fetch status for %s via %s: %d", m.ID, domain, clientProxyLabel(r.client, proxySource), r.status)
-				}
-			case <-timeout.C:
-				if remaining > 0 {
-					go func(ch chan fetchResult, n int, p *ClientPool) {
-						drain := time.NewTimer(10 * time.Second)
-						defer drain.Stop()
-						for i := 0; i < n; i++ {
-							select {
-							case r := <-ch:
-								if r.client != nil && shouldReplaceClientForStatus(r.status) {
-									e.recordFreeProxyFailure(proxySource, r.client, m.Region, r.status, fmt.Sprintf("status %d", r.status))
-									r.client.ResetWarm(domain)
-									p.Replace(r.client)
-								}
-							case <-drain.C:
-								return
-							}
-						}
-					}(resultCh, remaining, pool)
-				}
-				break collectLoop
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, timeoutDuration)
+		result := e.fetchCatalogHedged(fetchCtx, pool, apiURL, domain)
+		cancelFetch()
+		gotSuccess := result.err == nil && result.status == 200
+		if gotSuccess {
+			e.recordFreeProxySuccess(proxySource, result.client, m.Region, int(result.duration.Milliseconds()))
+		} else if result.client != nil {
+			message := fmt.Sprintf("status %d", result.status)
+			if result.err != nil {
+				message = result.err.Error()
 			}
-		}
-		if !timeout.Stop() {
-			select {
-			case <-timeout.C:
-			default:
-			}
+			e.recordFreeProxyFailure(proxySource, result.client, m.Region, result.status, message)
 		}
 
 		if !gotSuccess {
 			e.db.RecordMonitorRun(model.MonitorRun{
 				MonitorID:    m.ID,
 				Status:       "failed",
-				StatusCode:   lastStatus,
+				StatusCode:   result.status,
 				DurationMS:   int(time.Since(cycleStart).Milliseconds()),
 				ErrorMessage: "all fetchers failed",
 				ProxySource:  proxySource,
+				FetchSource:  "canonical",
 				Region:       m.Region,
 			})
 			consecutiveErrors++
@@ -463,11 +405,14 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 				}
 				return
 			}
-			backoff := time.Duration(300+consecutiveErrors*200) * time.Millisecond
-			if backoff > 3*time.Second {
-				backoff = 3 * time.Second
+			var rateLimitBackoff time.Duration
+			if result.status == 403 || result.status == 429 {
+				rateLimitBackoff = time.Duration(250*(1<<min(consecutiveErrors, 4))) * time.Millisecond
+				if rateLimitBackoff > 3*time.Second {
+					rateLimitBackoff = 3 * time.Second
+				}
 			}
-			time.Sleep(backoff)
+			sleepMonitorCycle(ctx, cycleStart, intervalDuration+rateLimitBackoff)
 			continue
 		}
 
@@ -476,16 +421,8 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			reportHealth("")
 		}
 
+		items := result.items
 		if len(items) == 0 {
-			e.db.RecordMonitorRun(model.MonitorRun{
-				MonitorID:   m.ID,
-				Status:      "success",
-				StatusCode:  lastStatus,
-				DurationMS:  int(time.Since(cycleStart).Milliseconds()),
-				ItemCount:   0,
-				ProxySource: proxySource,
-				Region:      m.Region,
-			})
 			if !initialized {
 				initialized = true
 				log.Printf("[%d] initial scan completed with no items", m.ID)
@@ -493,79 +430,61 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			if checks%10 == 0 {
 				log.Printf("[%d] #%d | 0 items returned by Vinted", m.ID, checks)
 			}
-			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
-				time.Sleep(remaining)
-			}
+			e.db.RecordMonitorRun(model.MonitorRun{
+				MonitorID: m.ID, Status: "success", StatusCode: 200,
+				DurationMS: int(time.Since(cycleStart).Milliseconds()), ProxySource: proxySource,
+				FetchSource: "canonical", Region: m.Region,
+			})
+			sleepMonitorCycle(ctx, cycleStart, intervalDuration)
 			continue
 		}
 
-		ids := make([]int64, len(items))
-		for i, item := range items {
-			ids[i] = item.ID
-		}
-
-		newMap := e.db.BatchIsNew(m.ID, ids)
-
-		processItems, seedItems := splitIncomingItems(items, newMap, initialized)
-
-		if len(seedItems) > 0 {
-			log.Printf("[%d] initial scan seeded %d items without notifications", m.ID, len(seedItems))
-			e.db.RecordMonitorRun(model.MonitorRun{
-				MonitorID:   m.ID,
-				Status:      "success",
-				StatusCode:  lastStatus,
-				DurationMS:  int(time.Since(cycleStart).Milliseconds()),
-				ItemCount:   len(items),
-				ProxySource: proxySource,
-				Region:      m.Region,
-			})
-
-			seedIDs := make([]int64, len(seedItems))
-			for i, item := range seedItems {
+		now := time.Now()
+		if !initialized {
+			seedIDs := make([]int64, len(items))
+			for i, item := range items {
 				seedIDs[i] = item.ID
+				localSeen[item.ID] = now
 			}
 			e.db.MarkItemsSeen(m.ID, seedIDs)
-
-			filteredSeedItems, antiBlockedSeedCount := filterAntiKeywordItems(seedItems, m.AntiKeywords)
-			filteredSeedItems, sellerBlockedSeedCount := filterBannedSellerItems(filteredSeedItems, m.BannedSellerIDs)
-			if antiBlockedSeedCount > 0 {
-				log.Printf("[%d] initial scan skipped %d items due to anti keywords", m.ID, antiBlockedSeedCount)
+			filteredSeeds, _ := filterAntiKeywordItems(items, m.AntiKeywords)
+			filteredSeeds, _ = filterBannedSellerItems(filteredSeeds, m.BannedSellerIDs)
+			for _, seed := range filteredSeeds {
+				built := e.buildItems(m, []model.VintedItem{seed})[0]
+				e.enqueueItem(enrichmentJob{
+					ctx: ctx, item: built, vintedItem: seed, monitor: m, proxySource: proxySource,
+					enricher: enricher, publishUpdate: false,
+					requireCountryMatch: hasCountryFilter(m.AllowedCountries),
+				}, false)
 			}
-			if sellerBlockedSeedCount > 0 {
-				log.Printf("[%d] initial scan skipped %d items due to seller bans", m.ID, sellerBlockedSeedCount)
-			}
-			if len(filteredSeedItems) > 0 {
-				seedBuiltItems := e.buildItems(m, filteredSeedItems)
-				go e.processItems(ctx, seedBuiltItems, filteredSeedItems, m.ID, m.UserID, m.DedupeMonitorAlerts, m.DiscordWebhook.String, false, m.TelegramChatID.String, false, m.Name, proxySource, enricher, domain, allowedCountries, false)
-			}
-
+			log.Printf("[%d] initial scan seeded %d items without notifications", m.ID, len(items))
 			initialized = true
-			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
-				time.Sleep(remaining)
-			}
-			continue
-		}
-
-		if len(processItems) == 0 {
 			e.db.RecordMonitorRun(model.MonitorRun{
-				MonitorID:   m.ID,
-				Status:      "success",
-				StatusCode:  lastStatus,
-				DurationMS:  int(time.Since(cycleStart).Milliseconds()),
-				ItemCount:   len(items),
-				ProxySource: proxySource,
-				Region:      m.Region,
+				MonitorID: m.ID, Status: "success", StatusCode: 200,
+				DurationMS: int(time.Since(cycleStart).Milliseconds()), ItemCount: len(items),
+				ProxySource: proxySource, FetchSource: "canonical", Region: m.Region,
 			})
-			if !initialized {
-				initialized = true
-			}
-			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
-				time.Sleep(remaining)
-			}
+			sleepMonitorCycle(ctx, cycleStart, intervalDuration)
 			continue
 		}
 
-		alertItems, antiBlockedCount := filterAntiKeywordItems(processItems, m.AntiKeywords)
+		newItems := make([]model.VintedItem, 0)
+		for _, item := range items {
+			if _, exists := localSeen[item.ID]; !exists {
+				newItems = append(newItems, item)
+			}
+			localSeen[item.ID] = now
+		}
+		if checks%100 == 0 {
+			cutoff := now.Add(-10 * time.Minute)
+			for id, seenAt := range localSeen {
+				if seenAt.Before(cutoff) {
+					delete(localSeen, id)
+				}
+			}
+		}
+
+		alertItems, antiBlockedCount := filterAntiKeywordItems(newItems, m.AntiKeywords)
 		alertItems, sellerBlockedCount := filterBannedSellerItems(alertItems, m.BannedSellerIDs)
 		if antiBlockedCount > 0 {
 			log.Printf("[%d] skipped %d new items due to anti keywords", m.ID, antiBlockedCount)
@@ -574,62 +493,53 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] skipped %d new items due to seller bans", m.ID, sellerBlockedCount)
 		}
 
-		newIDs := make([]int64, len(processItems))
-		for i, item := range processItems {
-			newIDs[i] = item.ID
-		}
-		e.db.MarkItemsSeen(m.ID, newIDs)
-		initialized = true
-
-		if len(alertItems) == 0 {
-			e.db.RecordMonitorRun(model.MonitorRun{
-				MonitorID:    m.ID,
-				Status:       "success",
-				StatusCode:   lastStatus,
-				DurationMS:   int(time.Since(cycleStart).Milliseconds()),
-				ItemCount:    len(items),
-				NewItemCount: len(processItems),
-				ProxySource:  proxySource,
-				Region:       m.Region,
+		delivered := 0
+		for _, item := range alertItems {
+			seenAt := time.Now()
+			e.db.RecordItemDetection(model.MonitorItemDetection{
+				MonitorID: m.ID, ItemID: item.ID, Source: "canonical", SeenAt: seenAt,
 			})
-			if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
-				time.Sleep(remaining)
+			if e.handleDetectedItem(ctx, m, item, "canonical", proxySource, enricher) {
+				delivered++
 			}
-			continue
 		}
-
-		log.Printf("[%d] #%d | %d items | %d new | %dms", m.ID, checks, len(items), len(alertItems), time.Since(cycleStart).Milliseconds())
+		if delivered > 0 {
+			log.Printf("[%d] #%d | %d items | %d claimed | %dms", m.ID, checks, len(items), delivered, time.Since(cycleStart).Milliseconds())
+		}
 		e.db.RecordMonitorRun(model.MonitorRun{
-			MonitorID:    m.ID,
-			Status:       "success",
-			StatusCode:   lastStatus,
-			DurationMS:   int(time.Since(cycleStart).Milliseconds()),
-			ItemCount:    len(items),
-			NewItemCount: len(alertItems),
-			ProxySource:  proxySource,
-			Region:       m.Region,
+			MonitorID: m.ID, Status: "success", StatusCode: 200,
+			DurationMS: int(time.Since(cycleStart).Milliseconds()), ItemCount: len(items),
+			NewItemCount: delivered, ProxySource: proxySource, FetchSource: "canonical", Region: m.Region,
 		})
+		sleepMonitorCycle(ctx, cycleStart, intervalDuration)
+	}
+}
 
-		builtItems := e.buildItems(m, alertItems)
+func (e *Engine) handleDetectedItem(ctx context.Context, monitor model.Monitor, vintedItem model.VintedItem, source string, proxySource string, enricher *SellerEnricher) bool {
+	if !e.db.ClaimMonitorItem(monitor.ID, vintedItem.ID, source) {
+		return false
+	}
+	item := e.buildItems(monitor, []model.VintedItem{vintedItem})[0]
+	log.Printf("[%d] NEW via %s: %s (%s) [%s]", monitor.ID, source, item.Title, item.Price, item.Size)
+	strictCountryGate := hasCountryFilter(monitor.AllowedCountries)
+	e.enqueueItem(enrichmentJob{
+		ctx: ctx, item: item, vintedItem: vintedItem, monitor: monitor, proxySource: proxySource,
+		enricher: enricher, publishUpdate: !strictCountryGate,
+		requireCountryMatch: strictCountryGate, alertAfterEnrich: strictCountryGate,
+	}, !strictCountryGate)
+	return true
+}
 
-		if e.enrichSeller {
-			for i, vItem := range alertItems {
-				if info, ok := LookupCachedSellerInfo(e.db, vItem.User.ID); ok {
-					builtItems[i].Location = info.Region
-					builtItems[i].Rating = info.Rating
-				}
-			}
-		}
-
-		for _, item := range builtItems {
-			log.Printf("[%d] NEW: %s (%s) [%s]", m.ID, item.Title, item.Price, item.Size)
-		}
-
-		go e.processItems(ctx, builtItems, alertItems, m.ID, m.UserID, m.DedupeMonitorAlerts, webhookURL, webhookActive, m.TelegramChatID.String, m.TelegramActive, m.Name, proxySource, enricher, domain, allowedCountries, true)
-
-		if remaining := intervalDuration - time.Since(cycleStart); remaining > 0 {
-			time.Sleep(remaining)
-		}
+func sleepMonitorCycle(ctx context.Context, cycleStart time.Time, interval time.Duration) {
+	remaining := interval - time.Since(cycleStart)
+	if remaining <= 0 {
+		return
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
 	}
 }
 
@@ -705,149 +615,6 @@ func resolveRedirectURL(currentURL string, location string) (string, error) {
 	}
 
 	return base.ResolveReference(next).String(), nil
-}
-
-func (e *Engine) processItems(ctx context.Context, items []model.Item, vItems []model.VintedItem, monitorID int, userID string, dedupeAlerts bool, webhook string, webhookActive bool, telegramChatID string, telegramActive bool, monitorName string, ps string, enricher *SellerEnricher, dom string, allowedCountries *string, publish bool) {
-	if e.enrichSeller && enricher != nil {
-		sem := make(chan struct{}, 10)
-		var wg sync.WaitGroup
-		for i := range items {
-			if items[i].Location != "" && items[i].Rating != "" {
-				continue
-			}
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			wg.Add(1)
-			go func(idx int, userID int64) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				info := enricher.FetchSellerInfo(userID)
-				if info.Region != "" && info.Region != "NaN" {
-					items[idx].Location = info.Region
-					items[idx].Rating = info.Rating
-				}
-			}(i, vItems[i].User.ID)
-		}
-		wg.Wait()
-	}
-
-	if allowedCountries != nil && *allowedCountries != "" {
-		allowedMap := make(map[string]bool)
-		for _, a := range strings.Split(strings.ToLower(*allowedCountries), ",") {
-			allowedMap[strings.TrimSpace(a)] = true
-		}
-
-		var filtered []model.Item
-		for _, it := range items {
-			if it.Location == "" {
-				log.Printf("[%d] Item %d dropped: location unknown (enrichment failed)", monitorID, it.ID)
-				continue
-			}
-			locLower := strings.ToLower(it.Location)
-			matched := false
-			for code := range allowedMap {
-				if strings.Contains(locLower, code) {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				filtered = append(filtered, it)
-			} else {
-				log.Printf("[%d] Item %d dropped: location %q not in %q", monitorID, it.ID, it.Location, *allowedCountries)
-			}
-		}
-		items = filtered
-	}
-
-	if len(items) == 0 {
-		return
-	}
-
-	if err := e.db.BatchSaveItems(items); err != nil {
-		log.Printf("[%d] batch save error: %v", monitorID, err)
-	}
-
-	if !publish {
-		return
-	}
-
-	for i := range items {
-		if err := e.db.PublishItem(items[i]); err != nil {
-			log.Printf("[%d] publish error: %v", monitorID, err)
-		}
-
-		hasActiveAlert := (webhook != "" && webhookActive) || (telegramChatID != "" && telegramActive)
-		if hasActiveAlert && dedupeAlerts && !e.db.ClaimUserItemAlert(userID, items[i].ID) {
-			log.Printf("[%d] alert skipped for item %d: already sent for user", monitorID, items[i].ID)
-			e.db.RecordAlertEvent(model.AlertEvent{
-				UserID:        userID,
-				MonitorID:     monitorID,
-				ItemID:        items[i].ID,
-				Channel:       "all",
-				Status:        "skipped",
-				FailureReason: "duplicate_user_item_alert",
-			})
-			continue
-		}
-
-		if webhook != "" && webhookActive {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			if err := discord.SendWebhook(webhook, items[i], monitorName, ps); err != nil {
-				e.db.RecordAlertEvent(model.AlertEvent{
-					UserID:        userID,
-					MonitorID:     monitorID,
-					ItemID:        items[i].ID,
-					Channel:       "discord",
-					Status:        "failed",
-					FailureReason: err.Error(),
-				})
-			} else {
-				e.db.RecordAlertEvent(model.AlertEvent{
-					UserID:    userID,
-					MonitorID: monitorID,
-					ItemID:    items[i].ID,
-					Channel:   "discord",
-					Status:    "sent",
-				})
-			}
-		}
-		if telegramChatID != "" && telegramActive {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			if err := telegram.SendItem(telegramChatID, items[i], monitorName, ps); err != nil {
-				e.db.RecordAlertEvent(model.AlertEvent{
-					UserID:        userID,
-					MonitorID:     monitorID,
-					ItemID:        items[i].ID,
-					Channel:       "telegram",
-					Status:        "failed",
-					FailureReason: err.Error(),
-				})
-			} else {
-				e.db.RecordAlertEvent(model.AlertEvent{
-					UserID:    userID,
-					MonitorID: monitorID,
-					ItemID:    items[i].ID,
-					Channel:   "telegram",
-					Status:    "sent",
-				})
-			}
-		}
-	}
 }
 
 func splitIncomingItems(items []model.VintedItem, newMap map[int64]bool, initialized bool) ([]model.VintedItem, []model.VintedItem) {

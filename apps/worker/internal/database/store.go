@@ -27,6 +27,18 @@ type Store struct {
 	trafficUsage   map[int]proxyGroupBandwidthState
 	trafficStop    chan struct{}
 	trafficDone    chan struct{}
+	telemetryCh    chan telemetryEvent
+	telemetryStop  chan struct{}
+	telemetryDone  chan struct{}
+}
+
+type telemetryEvent struct {
+	kind       string
+	run        model.MonitorRun
+	detection  model.MonitorItemDetection
+	monitorID  int
+	itemID     int64
+	occurredAt time.Time
 }
 
 type proxyGroupBandwidthDelta struct {
@@ -43,6 +55,15 @@ type proxyGroupBandwidthState struct {
 type FreeProxyCandidate struct {
 	ProxyURL string
 	Region   string
+}
+
+type PreindexProbe struct {
+	Region      string
+	ItemID      int64
+	StatusCode  int
+	DurationMS  int
+	Outcome     string
+	ProxySource string
 }
 
 func NewStore(connStr string, redisCache *cache.RedisCache) (*Store, error) {
@@ -71,9 +92,13 @@ func NewStore(connStr string, redisCache *cache.RedisCache) (*Store, error) {
 		trafficUsage:  make(map[int]proxyGroupBandwidthState),
 		trafficStop:   make(chan struct{}),
 		trafficDone:   make(chan struct{}),
+		telemetryCh:   make(chan telemetryEvent, 4096),
+		telemetryStop: make(chan struct{}),
+		telemetryDone: make(chan struct{}),
 	}
 
 	go store.bandwidthFlushLoop()
+	go store.telemetryFlushLoop()
 
 	return store, nil
 }
@@ -117,6 +142,137 @@ func (s *Store) BatchIsNew(monitorID int, itemIDs []int64) map[int64]bool {
 		}
 	}
 	return result
+}
+
+func (s *Store) ClaimMonitorItem(monitorID int, itemID int64, source string) bool {
+	if monitorID <= 0 || itemID <= 0 {
+		return false
+	}
+	if s.cache != nil {
+		claimed, err := s.cache.ClaimMonitorItem(monitorID, itemID, source)
+		if err == nil {
+			return claimed
+		}
+		log.Printf("redis monitor item claim failed for %d:%d: %v", monitorID, itemID, err)
+	}
+
+	if strings.TrimSpace(source) == "" {
+		source = "canonical"
+	}
+	var claimedItemID int64
+	err := s.db.QueryRow(`
+		INSERT INTO monitor_item_detections (
+			monitor_id, item_id, first_source, early_seen_at, canonical_seen_at, updated_at
+		)
+		SELECT
+			$1, $2, $3,
+			CASE WHEN $3 = 'discovery' THEN NOW() END,
+			CASE WHEN $3 <> 'discovery' THEN NOW() END,
+			NOW()
+		WHERE NOT EXISTS (
+			SELECT 1 FROM items WHERE monitor_id = $1 AND id = $2
+		)
+		ON CONFLICT (monitor_id, item_id) DO NOTHING
+		RETURNING item_id`, monitorID, itemID, source).Scan(&claimedItemID)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		log.Printf("db monitor item claim fallback failed for %d:%d: %v", monitorID, itemID, err)
+		var exists bool
+		if fallbackErr := s.db.QueryRow(
+			`SELECT EXISTS(SELECT 1 FROM items WHERE monitor_id = $1 AND id = $2)`,
+			monitorID,
+			itemID,
+		).Scan(&exists); fallbackErr == nil {
+			return !exists
+		}
+		return true
+	}
+	return claimedItemID == itemID
+}
+
+func (s *Store) LatestPreindexSeed(region string) (int64, error) {
+	var seed int64
+	err := s.db.QueryRow(`
+		SELECT GREATEST(
+			COALESCE((
+				SELECT MAX(item_id)
+				FROM item_preindex_samples
+				WHERE region = $1
+			), 0),
+			COALESCE((
+				SELECT MAX(mid.item_id)
+				FROM monitor_item_detections mid
+				JOIN monitors m ON m.id = mid.monitor_id
+				WHERE m.region = $1
+			), 0)
+		)`, region).Scan(&seed)
+	return seed, err
+}
+
+func (s *Store) LatestDetectedItemID(region string) (int64, error) {
+	var itemID int64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(MAX(mid.item_id), 0)
+		FROM monitor_item_detections mid
+		JOIN monitors m ON m.id = mid.monitor_id
+		WHERE m.region = $1`, region).Scan(&itemID)
+	return itemID, err
+}
+
+func (s *Store) RecordPreindexSample(region string, itemID int64, slug string, seenAt time.Time, proxySource string) error {
+	if region == "" || itemID <= 0 {
+		return nil
+	}
+	if seenAt.IsZero() {
+		seenAt = time.Now()
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO item_preindex_samples (
+			region, item_id, slug, first_seen_at, proxy_source, updated_at
+		)
+		VALUES ($1, $2, NULLIF($3, ''), $4, NULLIF($5, ''), NOW())
+		ON CONFLICT (region, item_id) DO UPDATE SET
+			first_seen_at = LEAST(item_preindex_samples.first_seen_at, EXCLUDED.first_seen_at),
+			slug = COALESCE(item_preindex_samples.slug, EXCLUDED.slug),
+			proxy_source = COALESCE(item_preindex_samples.proxy_source, EXCLUDED.proxy_source),
+			updated_at = NOW()`, region, itemID, slug, seenAt, proxySource)
+	return err
+}
+
+func (s *Store) RecordPreindexProbe(probe PreindexProbe) error {
+	if probe.Region == "" || probe.ItemID <= 0 || probe.Outcome == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO preindex_probe_runs (
+			region, item_id, status_code, duration_ms, outcome, proxy_source
+		)
+		VALUES ($1, $2, NULLIF($3, 0), NULLIF($4, 0), $5, NULLIF($6, ''))`,
+		probe.Region, probe.ItemID, probe.StatusCode, probe.DurationMS, probe.Outcome, probe.ProxySource)
+	return err
+}
+
+func (s *Store) PrunePreindexTelemetry(probeRetentionHours int, sampleRetentionDays int) {
+	if probeRetentionHours < 1 {
+		probeRetentionHours = 48
+	}
+	if sampleRetentionDays < 1 {
+		sampleRetentionDays = 14
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM preindex_probe_runs WHERE checked_at < NOW() - ($1::text || ' hours')::interval`,
+		probeRetentionHours,
+	); err != nil {
+		log.Printf("preindex probe cleanup failed: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM item_preindex_samples WHERE first_seen_at < NOW() - ($1::text || ' days')::interval`,
+		sampleRetentionDays,
+	); err != nil {
+		log.Printf("preindex sample cleanup failed: %v", err)
+	}
 }
 
 func (s *Store) GetUserRegion(userID int64) (string, bool) {
@@ -735,6 +891,8 @@ func (s *Store) attachBannedSellerIDs(monitors []model.Monitor) error {
 }
 
 func (s *Store) Close() error {
+	close(s.telemetryStop)
+	<-s.telemetryDone
 	close(s.trafficStop)
 	<-s.trafficDone
 	if s.cache != nil {
@@ -928,24 +1086,160 @@ func (s *Store) RecordMonitorRun(run model.MonitorRun) {
 	if run.MonitorID <= 0 || run.Status == "" {
 		return
 	}
-	_, err := s.db.Exec(`
-		INSERT INTO monitor_runs (
-			monitor_id, status, status_code, duration_ms, item_count,
-			new_item_count, error_message, proxy_source, region
-		)
-		VALUES ($1, $2, NULLIF($3, 0), NULLIF($4, 0), $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9)`,
-		run.MonitorID,
-		run.Status,
-		run.StatusCode,
-		run.DurationMS,
-		run.ItemCount,
-		run.NewItemCount,
-		run.ErrorMessage,
-		run.ProxySource,
-		run.Region,
-	)
+	if run.FetchSource == "" {
+		run.FetchSource = "canonical"
+	}
+	s.enqueueTelemetry(telemetryEvent{kind: "run", run: run})
+}
+
+func (s *Store) RecordItemDetection(detection model.MonitorItemDetection) {
+	if detection.MonitorID <= 0 || detection.ItemID <= 0 {
+		return
+	}
+	if detection.Source != "discovery" {
+		detection.Source = "canonical"
+	}
+	if detection.SeenAt.IsZero() {
+		detection.SeenAt = time.Now()
+	}
+	s.enqueueTelemetry(telemetryEvent{kind: "detection", detection: detection})
+}
+
+func (s *Store) RecordDetectionAlertQueued(monitorID int, itemID int64, occurredAt time.Time) {
+	s.recordDetectionTiming("alert_queued", monitorID, itemID, occurredAt)
+}
+
+func (s *Store) RecordDetectionAlertSent(monitorID int, itemID int64, occurredAt time.Time) {
+	s.recordDetectionTiming("alert_sent", monitorID, itemID, occurredAt)
+}
+
+func (s *Store) recordDetectionTiming(kind string, monitorID int, itemID int64, occurredAt time.Time) {
+	if monitorID <= 0 || itemID <= 0 {
+		return
+	}
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	s.enqueueTelemetry(telemetryEvent{kind: kind, monitorID: monitorID, itemID: itemID, occurredAt: occurredAt})
+}
+
+func (s *Store) enqueueTelemetry(event telemetryEvent) {
+	select {
+	case s.telemetryCh <- event:
+	default:
+		log.Printf("telemetry queue full, dropping %s event", event.kind)
+	}
+}
+
+func (s *Store) telemetryFlushLoop() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	defer close(s.telemetryDone)
+
+	batch := make([]telemetryEvent, 0, 100)
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		s.flushTelemetry(batch)
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case event := <-s.telemetryCh:
+			batch = append(batch, event)
+			if len(batch) >= 100 {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		case <-s.telemetryStop:
+			for {
+				select {
+				case event := <-s.telemetryCh:
+					batch = append(batch, event)
+				default:
+					flush()
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Store) flushTelemetry(events []telemetryEvent) {
+	tx, err := s.db.Begin()
 	if err != nil {
-		log.Printf("record monitor run for %d: %v", run.MonitorID, err)
+		log.Printf("telemetry batch begin failed: %v", err)
+		return
+	}
+	defer tx.Rollback()
+
+	for _, event := range events {
+		switch event.kind {
+		case "run":
+			run := event.run
+			_, err = tx.Exec(`
+				INSERT INTO monitor_runs (
+					monitor_id, status, status_code, duration_ms, item_count,
+					new_item_count, error_message, proxy_source, fetch_source, region
+				)
+				VALUES ($1, $2, NULLIF($3, 0), NULLIF($4, 0), $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9, $10)`,
+				run.MonitorID, run.Status, run.StatusCode, run.DurationMS, run.ItemCount,
+				run.NewItemCount, run.ErrorMessage, run.ProxySource, run.FetchSource, run.Region,
+			)
+		case "detection":
+			detection := event.detection
+			var earlySeenAt interface{}
+			var canonicalSeenAt interface{}
+			if detection.Source == "discovery" {
+				earlySeenAt = detection.SeenAt
+			} else {
+				canonicalSeenAt = detection.SeenAt
+			}
+			_, err = tx.Exec(`
+				INSERT INTO monitor_item_detections (
+					monitor_id, item_id, first_source, early_seen_at, canonical_seen_at, updated_at
+				)
+				VALUES ($1, $2, $3, $4, $5, NOW())
+				ON CONFLICT (monitor_id, item_id) DO UPDATE SET
+					early_seen_at = COALESCE(monitor_item_detections.early_seen_at, EXCLUDED.early_seen_at),
+					canonical_seen_at = COALESCE(monitor_item_detections.canonical_seen_at, EXCLUDED.canonical_seen_at),
+					updated_at = NOW()`,
+				detection.MonitorID, detection.ItemID, detection.Source, earlySeenAt, canonicalSeenAt,
+			)
+		case "alert_queued":
+			_, err = tx.Exec(`
+				UPDATE monitor_item_detections
+				SET alert_queued_at = COALESCE(alert_queued_at, $3), updated_at = NOW()
+				WHERE monitor_id = $1 AND item_id = $2`, event.monitorID, event.itemID, event.occurredAt)
+		case "alert_sent":
+			_, err = tx.Exec(`
+				UPDATE monitor_item_detections
+				SET alert_sent_at = COALESCE(alert_sent_at, $3), updated_at = NOW()
+				WHERE monitor_id = $1 AND item_id = $2`, event.monitorID, event.itemID, event.occurredAt)
+		}
+		if err != nil {
+			log.Printf("telemetry %s write failed: %v", event.kind, err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("telemetry batch commit failed: %v", err)
+	}
+}
+
+func (s *Store) PruneDetectionTelemetry(retentionDays int) {
+	if retentionDays < 1 {
+		retentionDays = 14
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM monitor_item_detections WHERE created_at < NOW() - ($1::text || ' days')::interval`,
+		retentionDays,
+	); err != nil {
+		log.Printf("detection telemetry cleanup failed: %v", err)
 	}
 }
 
