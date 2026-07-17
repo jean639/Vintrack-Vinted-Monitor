@@ -29,14 +29,14 @@ The current limit is intentionally conservative. Do not use this role for exhaus
 
 ## How the comparison works
 
-On a verified redirect, the scanner stores `(region, item_id, first_seen_at)`. The normal hybrid/canonical pipeline continues unchanged. When the exact sampled ID later appears in that monitor during the experiment window, the dashboard can calculate:
+On a verified redirect, the scanner stores `(region, item_id, first_seen_at)`. The normal hybrid/canonical pipeline continues unchanged. When the exact sampled ID later appears in a monitor during the experiment window, the stored telemetry can be evaluated internally for:
 
 - **Pre-index coverage:** sampled IDs that also reached this monitor;
 - **Pre-index wins:** matching samples seen before either catalog path;
 - **Avg pre-index lead:** elapsed time from verified redirect to first catalog detection;
 - **Probe health:** hit, miss, blocked, issue, and latency counts for the latest 500 regional probes.
 
-Pre-index evidence is accumulated from the regional experiment start for up to 14 days; it does not roll out with the hybrid feed's latest-500 window. The dashboard reports win rate plus average, median, and p95 winning lead. It requires at least 25 matched IDs before evaluating the Phase 3 thresholds: 60% wins, 5 seconds median lead, and 98% canonical success.
+Pre-index evidence is accumulated from the regional experiment start for up to 14 days. It is intentionally not shown in the end-user monitor-health dialog. Use it only for internal rollout decisions, and collect at least 25 matched IDs before evaluating the Phase 3 thresholds: 60% wins, 5 seconds median lead, and 98% canonical success.
 
 With the default 100-ID stride, coverage is expected to be sparse. A handful of matches is not enough to activate alerts; collect the evidence target and compare the lead distribution first.
 
