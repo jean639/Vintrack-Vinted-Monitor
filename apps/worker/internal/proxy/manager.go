@@ -159,7 +159,7 @@ func (m *Manager) ReplaceFromString(raw string) bool {
 	m.proxies = proxies
 	m.index = 0
 	m.version.Add(1)
-	log.Printf("Reloaded %d valid server proxies", len(proxies))
+	log.Printf("Reloaded %d valid proxies", len(proxies))
 	return true
 }
 

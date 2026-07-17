@@ -33,35 +33,74 @@ func main() {
 	log.Println("Vintrack Worker starting...")
 	_ = godotenv.Load()
 
-	// Initialize components
-	redisCache, store, proxyManager, freeProxyPools := initComponents()
-	defer redisCache.Close()
+	store := initStore()
 	defer store.Close()
-
-	engine := scraper.NewEngine(store, proxyManager, freeProxyPools)
-	mgr := scraper.NewManager(store, engine)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Initial sync
-	mgr.Sync(ctx)
-	go func() {
-		importFreeProxies(ctx, store)
-		checkFreeProxies(ctx, store)
-		refreshFreeProxies(store, freeProxyPools)
-	}()
-
-	// Handle signals for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	role := strings.ToLower(strings.TrimSpace(getEnv("WORKER_ROLE", "monitor")))
+	if role == "proxy-maintainer" {
+		log.Println("Worker role: proxy-maintainer")
+		runProxyMaintainer(ctx, cancel, sigChan, store)
+		return
+	}
+	if role == "id-scanner" {
+		log.Println("Worker role: id-scanner (shadow only)")
+		freeProxyPools := initFreeProxyPools(store)
+		runIDScannerWorker(ctx, cancel, sigChan, store, freeProxyPools)
+		return
+	}
+	if role != "monitor" {
+		log.Fatalf("Unknown WORKER_ROLE %q (expected monitor, proxy-maintainer, or id-scanner)", role)
+	}
+
+	log.Println("Worker role: monitor")
+	proxyManager := initServerProxyManager(store)
+	freeProxyPools := initFreeProxyPools(store)
+	engine := scraper.NewEngine(store, proxyManager, freeProxyPools)
+	defer engine.Close()
+	mgr := scraper.NewManager(store, engine)
+	runMonitorWorker(ctx, cancel, sigChan, store, proxyManager, freeProxyPools, mgr)
+}
+
+func runIDScannerWorker(ctx context.Context, cancel context.CancelFunc, sigChan <-chan os.Signal, store *database.Store, freeProxyPools *proxy.RegionPools) {
+	scanner := scraper.NewPreindexScanner(store, freeProxyPools)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scanner.Run(ctx)
+	}()
+
+	freeProxyRefreshTicker := time.NewTicker(30 * time.Second)
+	defer freeProxyRefreshTicker.Stop()
+
+	for {
+		select {
+		case <-sigChan:
+			log.Println("Shutdown signal received, stopping pre-index shadow scanner...")
+			cancel()
+			<-done
+			return
+		case <-freeProxyRefreshTicker.C:
+			refreshFreeProxies(store, freeProxyPools)
+		case <-done:
+			return
+		}
+	}
+}
+
+func runMonitorWorker(ctx context.Context, cancel context.CancelFunc, sigChan <-chan os.Signal, store *database.Store, proxyManager *proxy.Manager, freeProxyPools *proxy.RegionPools, mgr *scraper.Manager) {
+	mgr.Sync(ctx)
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	freeProxyHealthTicker := time.NewTicker(15 * time.Second)
-	defer freeProxyHealthTicker.Stop()
-	freeProxyImportTicker := time.NewTicker(5 * time.Minute)
-	defer freeProxyImportTicker.Stop()
+	freeProxyRefreshTicker := time.NewTicker(30 * time.Second)
+	defer freeProxyRefreshTicker.Stop()
 
 	log.Println("Worker running. Polling for monitor changes every 5s...")
 
@@ -75,20 +114,56 @@ func main() {
 			return
 		case <-ticker.C:
 			refreshServerProxies(store, proxyManager)
-			refreshFreeProxies(store, freeProxyPools)
 			mgr.Sync(ctx)
-		case <-freeProxyHealthTicker.C:
-			go checkFreeProxies(ctx, store)
-		case <-freeProxyImportTicker.C:
-			go importFreeProxies(ctx, store)
+		case <-freeProxyRefreshTicker.C:
+			refreshFreeProxies(store, freeProxyPools)
 		}
 	}
 }
 
-func initComponents() (*cache.RedisCache, *database.Store, *proxy.Manager, *proxy.RegionPools) {
+func runProxyMaintainer(ctx context.Context, cancel context.CancelFunc, sigChan <-chan os.Signal, store *database.Store) {
+	go func() {
+		importFreeProxies(ctx, store)
+		checkFreeProxies(ctx, store)
+		store.PruneDetectionTelemetry(settingInt(store, "DETECTION_RETENTION_DAYS", 14))
+		store.PrunePreindexTelemetry(
+			settingInt(store, "PREINDEX_PROBE_RETENTION_HOURS", 48),
+			settingInt(store, "PREINDEX_SAMPLE_RETENTION_DAYS", 14),
+		)
+	}()
+
+	healthTicker := time.NewTicker(15 * time.Second)
+	defer healthTicker.Stop()
+	importTicker := time.NewTicker(5 * time.Minute)
+	defer importTicker.Stop()
+	cleanupTicker := time.NewTicker(24 * time.Hour)
+	defer cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-sigChan:
+			log.Println("Shutdown signal received, stopping proxy maintainer...")
+			cancel()
+			return
+		case <-healthTicker.C:
+			go checkFreeProxies(ctx, store)
+		case <-importTicker.C:
+			go importFreeProxies(ctx, store)
+		case <-cleanupTicker.C:
+			go func() {
+				store.PruneDetectionTelemetry(settingInt(store, "DETECTION_RETENTION_DAYS", 14))
+				store.PrunePreindexTelemetry(
+					settingInt(store, "PREINDEX_PROBE_RETENTION_HOURS", 48),
+					settingInt(store, "PREINDEX_SAMPLE_RETENTION_DAYS", 14),
+				)
+			}()
+		}
+	}
+}
+
+func initStore() *database.Store {
 	dbURL := mustEnv("DATABASE_URL")
 	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
-	proxyFile := getEnv("PROXY_FILE", "proxies.txt")
 
 	redisCache, err := cache.NewRedisCache(redisAddr, os.Getenv("REDIS_PASSWORD"), 0)
 	if err != nil {
@@ -99,17 +174,24 @@ func initComponents() (*cache.RedisCache, *database.Store, *proxy.Manager, *prox
 	if err != nil {
 		log.Fatalf("PostgreSQL: %v", err)
 	}
+	return store
+}
 
+func initServerProxyManager(store *database.Store) *proxy.Manager {
+	proxyFile := getEnv("PROXY_FILE", "proxies.txt")
 	proxyManager, err := proxy.Load(proxyFile)
 	if err != nil {
 		log.Printf("Proxies: %v (continuing without)", err)
 		proxyManager = &proxy.Manager{}
 	}
 	refreshServerProxies(store, proxyManager)
+	return proxyManager
+}
+
+func initFreeProxyPools(store *database.Store) *proxy.RegionPools {
 	freeProxyPools := proxy.NewRegionPools()
 	refreshFreeProxies(store, freeProxyPools)
-
-	return redisCache, store, proxyManager, freeProxyPools
+	return freeProxyPools
 }
 
 func refreshServerProxies(store *database.Store, proxyManager *proxy.Manager) {

@@ -2,10 +2,13 @@ package telegram
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -120,8 +123,11 @@ func TestSendItemFallsBackToMessageWhenPhotoFails(t *testing.T) {
 func TestSendItemRetriesPhotoTimeout(t *testing.T) {
 	var calls int32
 	var paths []string
+	var pathsMu sync.Mutex
 	withTelegramServer(t, func(w http.ResponseWriter, r *http.Request) {
+		pathsMu.Lock()
 		paths = append(paths, r.URL.Path)
+		pathsMu.Unlock()
 		if r.URL.Path != "/bottest-token/sendPhoto" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -142,8 +148,22 @@ func TestSendItemRetriesPhotoTimeout(t *testing.T) {
 		ImageURL:  "https://example.test/image.jpg",
 	}, "monitor", "server")
 
-	if calls != 2 {
-		t.Fatalf("expected timeout retry, got %d calls: %v", calls, paths)
+	pathsMu.Lock()
+	gotPaths := append([]string(nil), paths...)
+	pathsMu.Unlock()
+	if gotCalls := atomic.LoadInt32(&calls); gotCalls != 2 {
+		t.Fatalf("expected timeout retry, got %d calls: %v", gotCalls, gotPaths)
+	}
+}
+
+func TestSafeTelegramRequestErrorRedactsEndpoint(t *testing.T) {
+	cause := fmt.Errorf("Post https://api.telegram.org/botsecret-token/sendPhoto: %w", errors.New("unexpected EOF"))
+	err := safeTelegramRequestError(cause)
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("safe error exposed token: %q", err.Error())
+	}
+	if err.Error() != "telegram request failed" {
+		t.Fatalf("safe error = %q", err.Error())
 	}
 }
 

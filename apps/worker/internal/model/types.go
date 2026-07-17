@@ -116,7 +116,15 @@ type MonitorRun struct {
 	NewItemCount int
 	ErrorMessage string
 	ProxySource  string
+	FetchSource  string
 	Region       string
+}
+
+type MonitorItemDetection struct {
+	MonitorID int
+	ItemID    int64
+	Source    string
+	SeenAt    time.Time
 }
 
 type MonitorEvent struct {

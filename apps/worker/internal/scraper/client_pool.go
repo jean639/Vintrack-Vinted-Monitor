@@ -1,34 +1,58 @@
 package scraper
 
 import (
+	"context"
+	"errors"
 	"log"
 	"sync"
+	"time"
 
 	"vintrack-worker/internal/proxy"
 )
 
+type clientState struct {
+	client        *Client
+	ewmaLatencyMS float64
+	failures      int
+	inFlight      int
+	cooldownUntil time.Time
+	replacing     bool
+}
+
 type ClientPool struct {
-	clients         []*Client
+	states          []*clientState
 	index           int
 	mu              sync.Mutex
 	pm              *proxy.Manager
 	domain          string
 	trafficRecorder func(txBytes int64, rxBytes int64)
+	requestTimeout  time.Duration
+	requireProxy    bool
 }
 
 func NewClientPool(pm *proxy.Manager, domain string, size int, trafficRecorder func(txBytes int64, rxBytes int64)) *ClientPool {
+	return NewClientPoolWithTimeout(pm, domain, size, trafficRecorder, 3*time.Second)
+}
+
+func NewClientPoolWithTimeout(pm *proxy.Manager, domain string, size int, trafficRecorder func(txBytes int64, rxBytes int64), requestTimeout time.Duration) *ClientPool {
 	if size < 1 {
 		size = 1
 	}
-	if size > pm.Count() {
-		size = pm.Count()
+	proxyCount := pm.Count()
+	if size > proxyCount {
+		size = proxyCount
+	}
+	if requestTimeout <= 0 {
+		requestTimeout = 3 * time.Second
 	}
 
 	pool := &ClientPool{
-		clients:         make([]*Client, 0, size),
+		states:          make([]*clientState, 0, size),
 		pm:              pm,
 		domain:          domain,
 		trafficRecorder: trafficRecorder,
+		requestTimeout:  requestTimeout,
+		requireProxy:    proxyCount > 0,
 	}
 
 	var wg sync.WaitGroup
@@ -37,74 +61,190 @@ func NewClientPool(pm *proxy.Manager, domain string, size int, trafficRecorder f
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c, err := NewClient(pm.Next(), trafficRecorder)
+			c, err := newPoolClient(pm, trafficRecorder, requestTimeout, pool.requireProxy)
 			if err != nil {
 				log.Printf("pool: client creation failed: %v", err)
 				return
 			}
 			mu.Lock()
-			pool.clients = append(pool.clients, c)
+			pool.states = append(pool.states, &clientState{client: c})
 			mu.Unlock()
 		}()
 	}
 	wg.Wait()
 
-	if len(pool.clients) == 0 {
-		c, err := NewClient(pm.Next(), trafficRecorder)
+	if len(pool.states) == 0 {
+		c, err := newPoolClient(pm, trafficRecorder, requestTimeout, pool.requireProxy)
 		if err == nil {
-			pool.clients = append(pool.clients, c)
+			pool.states = append(pool.states, &clientState{client: c})
 		}
 	}
 
 	return pool
 }
 
-func (p *ClientPool) Next() *Client {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.clients) == 0 {
-		return nil
+func newPoolClient(pm *proxy.Manager, trafficRecorder func(txBytes int64, rxBytes int64), requestTimeout time.Duration, requireProxy bool) (*Client, error) {
+	proxyURL := pm.Next()
+	if requireProxy && proxyURL == "" {
+		return nil, errors.New("proxy pool is empty")
 	}
-	c := p.clients[p.index]
-	p.index = (p.index + 1) % len(p.clients)
-	return c
+	return NewClientWithTimeout(proxyURL, trafficRecorder, requestTimeout)
 }
 
-func (p *ClientPool) RaceClients(n int) []*Client {
+func (p *ClientPool) Acquire(exclude *Client) *Client {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if n > len(p.clients) {
-		n = len(p.clients)
+
+	now := time.Now()
+	var best *clientState
+	bestScore := float64(0)
+	for _, state := range p.states {
+		if state.client == exclude || state.cooldownUntil.After(now) || state.replacing {
+			continue
+		}
+		latency := state.ewmaLatencyMS
+		if latency <= 0 {
+			latency = 750
+		}
+		score := latency + float64(state.failures*500) + float64(state.inFlight*1000)
+		if best == nil || score < bestScore {
+			best = state
+			bestScore = score
+		}
 	}
-	result := make([]*Client, n)
-	for i := 0; i < n; i++ {
-		result[i] = p.clients[(p.index+i)%len(p.clients)]
+	if best == nil {
+		return nil
 	}
-	p.index = (p.index + n) % len(p.clients)
-	return result
+	best.inFlight++
+	return best.client
+}
+
+// AcquireRoundRobin spreads low-rate background traffic over all available
+// sessions while still respecting health cooldowns. Latency-sensitive catalog
+// traffic should continue to use Acquire.
+func (p *ClientPool) AcquireRoundRobin() *Client {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(p.states) == 0 {
+		return nil
+	}
+	now := time.Now()
+	for offset := 0; offset < len(p.states); offset++ {
+		index := (p.index + offset) % len(p.states)
+		state := p.states[index]
+		if state.cooldownUntil.After(now) || state.replacing {
+			continue
+		}
+		state.inFlight++
+		p.index = (index + 1) % len(p.states)
+		return state.client
+	}
+	return nil
+}
+
+func (p *ClientPool) Report(client *Client, status int, latency time.Duration, err error) {
+	if client == nil {
+		return
+	}
+
+	p.mu.Lock()
+	state := p.findState(client)
+	if state == nil {
+		p.mu.Unlock()
+		return
+	}
+	if state.inFlight > 0 {
+		state.inFlight--
+	}
+
+	if errors.Is(err, context.Canceled) {
+		p.mu.Unlock()
+		return
+	}
+	if err == nil && status == 200 {
+		measured := float64(latency.Milliseconds())
+		if measured < 1 {
+			measured = 1
+		}
+		if state.ewmaLatencyMS == 0 {
+			state.ewmaLatencyMS = measured
+		} else {
+			state.ewmaLatencyMS = state.ewmaLatencyMS*0.75 + measured*0.25
+		}
+		state.failures = 0
+		state.cooldownUntil = time.Time{}
+		p.mu.Unlock()
+		return
+	}
+
+	state.failures++
+	shouldReplace := false
+	cooldown := 2 * time.Second
+	switch status {
+	case 401, 403:
+		cooldown = 30 * time.Second
+		client.ResetWarm(p.domain)
+		shouldReplace = state.failures >= 3
+	case 407:
+		cooldown = 5 * time.Minute
+		client.ResetWarm(p.domain)
+		shouldReplace = true
+	case 429:
+		cooldown = 10 * time.Second
+		client.ResetWarm(p.domain)
+	default:
+		if err != nil {
+			cooldown = 5 * time.Second
+			shouldReplace = state.failures >= 2
+		}
+	}
+	state.cooldownUntil = time.Now().Add(cooldown)
+	p.mu.Unlock()
+	if shouldReplace {
+		p.Replace(client)
+	}
 }
 
 func (p *ClientPool) Replace(bad *Client) {
-	go func() {
-		c, err := NewClient(p.pm.Next(), p.trafficRecorder)
+	p.mu.Lock()
+	state := p.findState(bad)
+	if state == nil || state.replacing {
+		p.mu.Unlock()
+		return
+	}
+	state.replacing = true
+	p.mu.Unlock()
+
+	go func(target *clientState) {
+		c, err := newPoolClient(p.pm, p.trafficRecorder, p.requestTimeout, p.requireProxy)
+		p.mu.Lock()
+		defer p.mu.Unlock()
 		if err != nil {
+			target.replacing = false
 			log.Printf("pool: replace failed: %v", err)
 			return
 		}
+		target.client = c
+		target.ewmaLatencyMS = 0
+		target.failures = 0
+		target.inFlight = 0
+		target.cooldownUntil = time.Time{}
+		target.replacing = false
+	}(state)
+}
 
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		for i, existing := range p.clients {
-			if existing == bad {
-				p.clients[i] = c
-				return
-			}
+func (p *ClientPool) findState(client *Client) *clientState {
+	for _, state := range p.states {
+		if state.client == client {
+			return state
 		}
-	}()
+	}
+	return nil
 }
 
 func (p *ClientPool) Size() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(p.clients)
+	return len(p.states)
 }

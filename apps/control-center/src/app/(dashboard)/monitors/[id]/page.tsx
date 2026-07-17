@@ -105,6 +105,7 @@ export default async function MonitorPage({
         SELECT status, duration_ms, item_count, error_message, checked_at
         FROM monitor_runs
         WHERE monitor_id = ${monitor.id}
+          AND fetch_source = 'canonical'
         ORDER BY checked_at DESC
         LIMIT 100
     `;

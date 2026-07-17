@@ -107,7 +107,10 @@ Built for resellers who need speed. Open-sourced for the community.
 
 ### Real-Time Monitoring
 
-Create unlimited monitors with custom search queries. Each monitor polls the Vinted API independently with configurable intervals (default: 1.5s). Results are deduplicated via Redis — you'll never see the same item twice.
+Create unlimited monitors with custom search queries. Each monitor keeps its canonical Vinted search and can also join an optional query-free discovery feed that applies the same catalog filters and matches keywords locally. Catalog requests use health-scored proxy sessions and delayed hedging; Redis atomically deduplicates both paths.
+
+See [Worker speed and hybrid discovery](docs/worker-speed.md) for rollout, proxy capacity, metrics, and tuning controls.
+The optional bounded ID experiment is documented in [Pre-index shadow scanner](docs/preindex-shadow.md).
 
 ### Advanced Filters
 

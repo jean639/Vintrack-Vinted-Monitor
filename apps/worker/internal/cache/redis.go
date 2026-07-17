@@ -126,6 +126,24 @@ func (r *RedisCache) BatchMarkAsSeen(monitorID int, itemIDs []int64) error {
 	})
 }
 
+func (r *RedisCache) ClaimMonitorItem(monitorID int, itemID int64, source string) (bool, error) {
+	key := fmt.Sprintf("item:seen:%d:%d", monitorID, itemID)
+	if strings.TrimSpace(source) == "" {
+		source = "canonical"
+	}
+
+	var claimed bool
+	err := r.writeWithRetry(func() error {
+		ok, err := r.client.SetNX(r.ctx, key, source, 30*24*time.Hour).Result()
+		claimed = ok
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return claimed, nil
+}
+
 func (r *RedisCache) ClaimUserItemAlert(userID string, itemID int64) (bool, error) {
 	key := fmt.Sprintf("item:alerted:%s:%d", userID, itemID)
 	var claimed bool

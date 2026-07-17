@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,29 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 )
 
-const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+type clientFingerprint struct {
+	name    string
+	version string
+	profile profiles.ClientProfile
+}
+
+func configuredClientFingerprint() clientFingerprint {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TLS_PROFILE"))) {
+	case "chrome_131":
+		return clientFingerprint{name: "chrome_131", version: "131", profile: profiles.Chrome_131}
+	case "chrome_133":
+		return clientFingerprint{name: "chrome_133", version: "133", profile: profiles.Chrome_133}
+	case "chrome_146":
+		return clientFingerprint{name: "chrome_146", version: "146", profile: profiles.Chrome_146}
+	default:
+		return clientFingerprint{name: "chrome_144", version: "144", profile: profiles.Chrome_144}
+	}
+}
+
+func configuredChromeUA() string {
+	fingerprint := configuredClientFingerprint()
+	return fmt.Sprintf("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36", fingerprint.version)
+}
 
 func acceptLanguageForDomain(domain string) string {
 	switch {
@@ -49,20 +72,21 @@ func hostFromURL(rawURL string, fallback string) string {
 
 func newWarmupHeaders(domain string) http.Header {
 	return http.Header{
-		"User-Agent":      {chromeUA},
+		"User-Agent":      {configuredChromeUA()},
 		"Accept":          {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
 		"Accept-Language": {acceptLanguageForDomain(domain)},
 	}
 }
 
 func newAPIHeaders(domain string) http.Header {
+	fingerprint := configuredClientFingerprint()
 	return http.Header{
-		"User-Agent":         {chromeUA},
+		"User-Agent":         {configuredChromeUA()},
 		"Accept":             {"application/json, text/plain, */*"},
 		"Accept-Language":    {acceptLanguageForDomain(domain)},
 		"Cache-Control":      {"no-cache"},
 		"Pragma":             {"no-cache"},
-		"Sec-Ch-Ua":          {`"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`},
+		"Sec-Ch-Ua":          {fmt.Sprintf(`"Google Chrome";v="%s", "Chromium";v="%s", "Not_A Brand";v="24"`, fingerprint.version, fingerprint.version)},
 		"Sec-Ch-Ua-Mobile":   {"?0"},
 		"Sec-Ch-Ua-Platform": {`"macOS"`},
 		"Sec-Fetch-Dest":     {"empty"},
@@ -95,7 +119,7 @@ func NewClientWithTimeout(proxyURL string, trafficRecorder func(txBytes int64, r
 	timeoutMs := max(1, int(requestTimeout.Milliseconds()))
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutMilliseconds(timeoutMs),
-		tls_client.WithClientProfile(profiles.Chrome_131),
+		tls_client.WithClientProfile(configuredClientFingerprint().profile),
 		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
 		tls_client.WithBandwidthTracker(),
@@ -116,7 +140,7 @@ func NewClientWithTimeout(proxyURL string, trafficRecorder func(txBytes int64, r
 func NewSellerClient(proxyURL string, trafficRecorder func(txBytes int64, rxBytes int64)) (*Client, error) {
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(10),
-		tls_client.WithClientProfile(profiles.Chrome_131),
+		tls_client.WithClientProfile(configuredClientFingerprint().profile),
 		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
 		tls_client.WithBandwidthTracker(),

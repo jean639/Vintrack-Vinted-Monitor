@@ -36,32 +36,32 @@ model Session {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  role          String    @default("free") @db.VarChar(20)
-  monitor_onboarding_status String @default("pending") @db.VarChar(20)
-  dedupe_monitor_alerts Boolean @default(false)
-  accounts      Account[]
-  sessions      Session[]
-  
-  monitors      monitors[]
-  proxy_groups  proxy_groups[]
-  seller_bans   seller_bans[]
-  telegram_connections telegram_connections[]
+  id                        String    @id @default(cuid())
+  name                      String?
+  email                     String?   @unique
+  emailVerified             DateTime?
+  image                     String?
+  role                      String    @default("free") @db.VarChar(20)
+  monitor_onboarding_status String    @default("pending") @db.VarChar(20)
+  dedupe_monitor_alerts     Boolean   @default(false)
+  accounts                  Account[]
+  sessions                  Session[]
+
+  monitors               monitors[]
+  proxy_groups           proxy_groups[]
+  seller_bans            seller_bans[]
+  telegram_connections   telegram_connections[]
   telegram_connect_codes telegram_connect_codes[]
-  vinted_session vinted_sessions?
-  audit_events audit_events[]
-  alert_events alert_events[]
+  vinted_session         vinted_sessions?
+  audit_events           audit_events[]
+  alert_events           alert_events[]
 }
 
 model monitor_limits {
-  scope       String   @id @db.VarChar(255)
+  scope        String   @id @db.VarChar(255)
   active_limit Int?
-  created_at  DateTime @default(now()) @db.Timestamp(6)
-  updated_at  DateTime @updatedAt @db.Timestamp(6)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  updated_at   DateTime @updatedAt @db.Timestamp(6)
 }
 
 model app_settings {
@@ -79,85 +79,85 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-
 model monitors {
-  id         Int       @id @default(autoincrement())
-  
-  userId     String    
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id Int @id @default(autoincrement())
 
-  name       String    @db.VarChar(255)
-  query      String    @db.VarChar(255)
-  anti_keywords String? @db.VarChar(1000)
-  query_delay_ms Int    @default(1500)
-  price_min  Int?
-  price_max  Int?
-  size_id    String?   @db.VarChar(50)
-  catalog_ids String?  @db.VarChar(500)
-  brand_ids  String?   @db.VarChar(500)
-  color_ids  String?   @db.VarChar(500)
-  status_ids String?   @db.VarChar(500)
-  region     String    @default("de") @db.VarChar(10)
-  allowed_countries String? @db.VarChar(500)
-  status     String?   @default("active") @db.VarChar(50)
-  created_at DateTime? @default(now()) @db.Timestamp(6)
-  demo_expires_at DateTime? @db.Timestamp(6)
-  items      items[]
-  discord_webhook String?
-  webhook_active  Boolean  @default(true)
-  telegram_active  Boolean  @default(false)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  proxy_group_id Int?
-  proxy_source   String    @default("server") @db.VarChar(20)
-  proxy_group    proxy_groups? @relation(fields: [proxy_group_id], references: [id], onDelete: SetNull)
-  monitor_runs   monitor_runs[]
-  monitor_events monitor_events[]
-  alert_events   alert_events[]
+  name              String    @db.VarChar(255)
+  query             String    @db.VarChar(255)
+  anti_keywords     String?   @db.VarChar(1000)
+  query_delay_ms    Int       @default(1500)
+  price_min         Int?
+  price_max         Int?
+  size_id           String?   @db.VarChar(50)
+  catalog_ids       String?   @db.VarChar(500)
+  brand_ids         String?   @db.VarChar(500)
+  color_ids         String?   @db.VarChar(500)
+  status_ids        String?   @db.VarChar(500)
+  region            String    @default("de") @db.VarChar(10)
+  allowed_countries String?   @db.VarChar(500)
+  status            String?   @default("active") @db.VarChar(50)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  demo_expires_at   DateTime? @db.Timestamp(6)
+  items             items[]
+  discord_webhook   String?
+  webhook_active    Boolean   @default(true)
+  telegram_active   Boolean   @default(false)
+
+  proxy_group_id  Int?
+  proxy_source    String                    @default("server") @db.VarChar(20)
+  proxy_group     proxy_groups?             @relation(fields: [proxy_group_id], references: [id], onDelete: SetNull)
+  monitor_runs    monitor_runs[]
+  monitor_events  monitor_events[]
+  alert_events    alert_events[]
+  item_detections monitor_item_detections[]
 }
 
 model free_proxies {
-  id                  Int       @id @default(autoincrement())
-  proxy_url           String    @unique @db.VarChar(500)
-  protocol            String    @db.VarChar(20)
-  host                String    @db.VarChar(255)
-  port                Int
-  source              String    @default("manual") @db.VarChar(50)
-  status              String    @default("active") @db.VarChar(30)
-  success_count       Int       @default(0)
-  failure_count       Int       @default(0)
-  last_checked_at     DateTime? @db.Timestamp(6)
-  last_success_at     DateTime? @db.Timestamp(6)
-  last_failure_at     DateTime? @db.Timestamp(6)
-  quarantined_until   DateTime? @db.Timestamp(6)
-  last_error          String?   @db.Text
-  created_at          DateTime  @default(now()) @db.Timestamp(6)
-  updated_at          DateTime  @updatedAt @db.Timestamp(6)
-  health              free_proxy_health[]
+  id                Int                 @id @default(autoincrement())
+  proxy_url         String              @unique @db.VarChar(500)
+  protocol          String              @db.VarChar(20)
+  host              String              @db.VarChar(255)
+  port              Int
+  source            String              @default("manual") @db.VarChar(50)
+  status            String              @default("active") @db.VarChar(30)
+  success_count     Int                 @default(0)
+  failure_count     Int                 @default(0)
+  last_checked_at   DateTime?           @db.Timestamp(6)
+  last_success_at   DateTime?           @db.Timestamp(6)
+  last_failure_at   DateTime?           @db.Timestamp(6)
+  quarantined_until DateTime?           @db.Timestamp(6)
+  last_error        String?             @db.Text
+  created_at        DateTime            @default(now()) @db.Timestamp(6)
+  updated_at        DateTime            @updatedAt @db.Timestamp(6)
+  health            free_proxy_health[]
 
   @@index([status, quarantined_until])
   @@index([source])
 }
 
 model free_proxy_health {
-  id                  Int       @id @default(autoincrement())
-  proxy_id            Int
-  proxy               free_proxies @relation(fields: [proxy_id], references: [id], onDelete: Cascade)
-  region              String    @db.VarChar(10)
-  status              String    @default("pending") @db.VarChar(30)
-  success_streak      Int       @default(0)
-  failure_streak      Int       @default(0)
-  success_count       Int       @default(0)
-  failure_count       Int       @default(0)
-  latency_ms          Int?
-  last_status_code    Int?
-  last_error          String?   @db.Text
-  last_checked_at     DateTime? @db.Timestamp(6)
-  last_success_at     DateTime? @db.Timestamp(6)
-  last_failure_at     DateTime? @db.Timestamp(6)
-  next_check_at       DateTime? @db.Timestamp(6)
-  score               Int       @default(0)
-  created_at          DateTime  @default(now()) @db.Timestamp(6)
-  updated_at          DateTime  @updatedAt @db.Timestamp(6)
+  id               Int          @id @default(autoincrement())
+  proxy_id         Int
+  proxy            free_proxies @relation(fields: [proxy_id], references: [id], onDelete: Cascade)
+  region           String       @db.VarChar(10)
+  status           String       @default("pending") @db.VarChar(30)
+  success_streak   Int          @default(0)
+  failure_streak   Int          @default(0)
+  success_count    Int          @default(0)
+  failure_count    Int          @default(0)
+  latency_ms       Int?
+  last_status_code Int?
+  last_error       String?      @db.Text
+  last_checked_at  DateTime?    @db.Timestamp(6)
+  last_success_at  DateTime?    @db.Timestamp(6)
+  last_failure_at  DateTime?    @db.Timestamp(6)
+  next_check_at    DateTime?    @db.Timestamp(6)
+  score            Int          @default(0)
+  created_at       DateTime     @default(now()) @db.Timestamp(6)
+  updated_at       DateTime     @updatedAt @db.Timestamp(6)
 
   @@unique([proxy_id, region])
   @@index([region, status, next_check_at])
@@ -165,33 +165,78 @@ model free_proxy_health {
 }
 
 model monitor_runs {
-  id              BigInt   @id @default(autoincrement())
-  monitor_id      Int
-  monitor         monitors @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
-  status          String   @db.VarChar(50)
-  status_code     Int?
-  duration_ms     Int?
-  item_count      Int      @default(0)
-  new_item_count  Int      @default(0)
-  error_message   String?  @db.Text
-  proxy_source    String?  @db.VarChar(255)
-  region          String   @db.VarChar(10)
-  checked_at      DateTime @default(now()) @db.Timestamp(6)
+  id             BigInt   @id @default(autoincrement())
+  monitor_id     Int
+  monitor        monitors @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  status         String   @db.VarChar(50)
+  status_code    Int?
+  duration_ms    Int?
+  item_count     Int      @default(0)
+  new_item_count Int      @default(0)
+  error_message  String?  @db.Text
+  proxy_source   String?  @db.VarChar(255)
+  fetch_source   String   @default("canonical") @db.VarChar(20)
+  region         String   @db.VarChar(10)
+  checked_at     DateTime @default(now()) @db.Timestamp(6)
 
   @@index([monitor_id, checked_at])
+  @@index([monitor_id, fetch_source, checked_at])
   @@index([checked_at, monitor_id])
   @@index([status])
 }
 
+model monitor_item_detections {
+  monitor_id        Int
+  monitor           monitors  @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  item_id           BigInt
+  first_source      String    @db.VarChar(20)
+  early_seen_at     DateTime? @db.Timestamp(6)
+  canonical_seen_at DateTime? @db.Timestamp(6)
+  alert_queued_at   DateTime? @db.Timestamp(6)
+  alert_sent_at     DateTime? @db.Timestamp(6)
+  created_at        DateTime  @default(now()) @db.Timestamp(6)
+  updated_at        DateTime  @updatedAt @db.Timestamp(6)
+
+  @@id([monitor_id, item_id])
+  @@index([monitor_id, created_at])
+}
+
+model item_preindex_samples {
+  region        String   @db.VarChar(10)
+  item_id       BigInt
+  slug          String?  @db.VarChar(500)
+  first_seen_at DateTime @db.Timestamp(6)
+  proxy_source  String?  @db.VarChar(255)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @updatedAt @db.Timestamp(6)
+
+  @@id([region, item_id])
+  @@index([region, first_seen_at])
+}
+
+model preindex_probe_runs {
+  id           BigInt   @id @default(autoincrement())
+  region       String   @db.VarChar(10)
+  item_id      BigInt
+  status_code  Int?
+  duration_ms  Int?
+  outcome      String   @db.VarChar(30)
+  proxy_source String?  @db.VarChar(255)
+  checked_at   DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([region, checked_at])
+  @@index([outcome, checked_at])
+}
+
 model monitor_events {
-  id          BigInt   @id @default(autoincrement())
-  monitor_id  Int
-  monitor     monitors @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
-  event_type  String   @db.VarChar(100)
-  severity    String   @default("info") @db.VarChar(20)
-  message     String   @db.Text
-  metadata    Json?
-  created_at  DateTime @default(now()) @db.Timestamp(6)
+  id         BigInt   @id @default(autoincrement())
+  monitor_id Int
+  monitor    monitors @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  event_type String   @db.VarChar(100)
+  severity   String   @default("info") @db.VarChar(20)
+  message    String   @db.Text
+  metadata   Json?
+  created_at DateTime @default(now()) @db.Timestamp(6)
 
   @@index([monitor_id, created_at])
   @@index([event_type])
@@ -213,17 +258,17 @@ model audit_events {
 }
 
 model alert_events {
-  id             BigInt   @id @default(autoincrement())
+  id             BigInt    @id @default(autoincrement())
   userId         String?
-  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   monitor_id     Int?
   monitor        monitors? @relation(fields: [monitor_id], references: [id], onDelete: SetNull)
   item_id        BigInt?
-  channel        String   @db.VarChar(50)
-  status         String   @db.VarChar(50)
-  failure_reason String?  @db.Text
+  channel        String    @db.VarChar(50)
+  status         String    @db.VarChar(50)
+  failure_reason String?   @db.Text
   metadata       Json?
-  created_at     DateTime @default(now()) @db.Timestamp(6)
+  created_at     DateTime  @default(now()) @db.Timestamp(6)
 
   @@index([userId, created_at])
   @@index([monitor_id, created_at])
@@ -232,9 +277,9 @@ model alert_events {
 }
 
 model telegram_connections {
-  id         Int      @id @default(autoincrement())
-  userId     String   @unique
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     Int    @id @default(autoincrement())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   chat_id    String
   chat_type  String?  @db.VarChar(50)
@@ -245,10 +290,10 @@ model telegram_connections {
 }
 
 model telegram_connect_codes {
-  id         Int       @id @default(autoincrement())
-  code       String    @unique @db.VarChar(32)
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     Int    @id @default(autoincrement())
+  code   String @unique @db.VarChar(32)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   expires_at DateTime  @db.Timestamp(6)
   used_at    DateTime? @db.Timestamp(6)
@@ -256,24 +301,24 @@ model telegram_connect_codes {
 }
 
 model items {
-  id           BigInt
-  monitor_id   Int
-  title        String?   @db.VarChar(500)
-  brand        String?   @db.VarChar(100)
-  price        String?   @db.VarChar(50)
-  total_price  String?   @db.VarChar(50)
-  size         String?   @db.VarChar(100)
-  condition    String?   @db.VarChar(100)
-  location     String?
-  rating       String?   @db.VarChar(50)
-  seller_id    BigInt?
-  seller_login String?   @db.VarChar(255)
+  id                 BigInt
+  monitor_id         Int
+  title              String?   @db.VarChar(500)
+  brand              String?   @db.VarChar(100)
+  price              String?   @db.VarChar(50)
+  total_price        String?   @db.VarChar(50)
+  size               String?   @db.VarChar(100)
+  condition          String?   @db.VarChar(100)
+  location           String?
+  rating             String?   @db.VarChar(50)
+  seller_id          BigInt?
+  seller_login       String?   @db.VarChar(255)
   seller_profile_url String?
-  url          String?
-  image_url    String?
-  extra_images String[]  @default([])
-  found_at     DateTime? @default(now()) @db.Timestamp(6)
-  monitors     monitors  @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+  url                String?
+  image_url          String?
+  extra_images       String[]  @default([])
+  found_at           DateTime? @default(now()) @db.Timestamp(6)
+  monitors           monitors  @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
 
   @@id([id, monitor_id])
   @@index([monitor_id, found_at])
@@ -294,46 +339,46 @@ model seller_bans {
 }
 
 model proxy_groups {
-  id                  Int       @id @default(autoincrement())
-  
-  userId              String
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id Int @id @default(autoincrement())
 
-  name                String    @db.VarChar(100)
-  proxies             String    @db.Text
-  bandwidth_rx_bytes  BigInt    @default(0)
-  bandwidth_tx_bytes  BigInt    @default(0)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name                  String     @db.VarChar(100)
+  proxies               String     @db.Text
+  bandwidth_rx_bytes    BigInt     @default(0)
+  bandwidth_tx_bytes    BigInt     @default(0)
   bandwidth_limit_bytes BigInt?
-  bandwidth_reset_at  DateTime? @db.Timestamp(6)
-  created_at          DateTime? @default(now()) @db.Timestamp(6)
-  monitors            monitors[]
+  bandwidth_reset_at    DateTime?  @db.Timestamp(6)
+  created_at            DateTime?  @default(now()) @db.Timestamp(6)
+  monitors              monitors[]
 }
 
 model vinted_sessions {
-  id                        Int      @id @default(autoincrement())
-  userId                    String   @unique @map("user_id")
-  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  vinted_user_id            BigInt   @default(0)
-  vinted_name               String   @default("")
-  access_token_ciphertext   String   @db.Text
-  refresh_token_ciphertext  String?  @db.Text
-  cookie_header_ciphertext  String?  @db.Text
-  csrf_token_ciphertext     String?  @db.Text
-  anon_id_ciphertext        String?  @db.Text
-  user_agent                String?  @db.Text
-  phone_number_ciphertext   String?  @db.Text
-  browser_linked            Boolean  @default(false)
-  domain                    String   @db.VarChar(255)
-  status                    String   @default("active") @db.VarChar(50)
-  linked_at                 DateTime? @db.Timestamp(6)
-  last_check                DateTime? @db.Timestamp(6)
-  warmed_at                 DateTime? @db.Timestamp(6)
-  last_browser_sync_at      DateTime? @db.Timestamp(6)
-  last_refresh_at           DateTime? @db.Timestamp(6)
-  last_valid_at             DateTime? @db.Timestamp(6)
-  invalid_reason            String?  @db.Text
-  created_at                DateTime @default(now()) @db.Timestamp(6)
-  updated_at                DateTime @updatedAt @db.Timestamp(6)
+  id                       Int       @id @default(autoincrement())
+  userId                   String    @unique @map("user_id")
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vinted_user_id           BigInt    @default(0)
+  vinted_name              String    @default("")
+  access_token_ciphertext  String    @db.Text
+  refresh_token_ciphertext String?   @db.Text
+  cookie_header_ciphertext String?   @db.Text
+  csrf_token_ciphertext    String?   @db.Text
+  anon_id_ciphertext       String?   @db.Text
+  user_agent               String?   @db.Text
+  phone_number_ciphertext  String?   @db.Text
+  browser_linked           Boolean   @default(false)
+  domain                   String    @db.VarChar(255)
+  status                   String    @default("active") @db.VarChar(50)
+  linked_at                DateTime? @db.Timestamp(6)
+  last_check               DateTime? @db.Timestamp(6)
+  warmed_at                DateTime? @db.Timestamp(6)
+  last_browser_sync_at     DateTime? @db.Timestamp(6)
+  last_refresh_at          DateTime? @db.Timestamp(6)
+  last_valid_at            DateTime? @db.Timestamp(6)
+  invalid_reason           String?   @db.Text
+  created_at               DateTime  @default(now()) @db.Timestamp(6)
+  updated_at               DateTime  @updatedAt @db.Timestamp(6)
 
   @@index([status])
   @@index([last_check])
