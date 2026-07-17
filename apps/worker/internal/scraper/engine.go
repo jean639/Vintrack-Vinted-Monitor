@@ -189,7 +189,7 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	domain := model.RegionDomain(m.Region)
 
 	if e.fetcher.RequiresNetwork() && pm.Count() == 0 {
-		log.Printf("[%d] ❌ ERROR: no valid proxies available (source: %s) — skipping monitor", m.ID, proxySource)
+		log.Printf("[%d] ❌ ERROR: no valid proxies available (source: %s)", m.ID, proxySource)
 		e.db.UpdateMonitorHealth(model.MonitorHealth{
 			MonitorID:       m.ID,
 			ConsecutiveErrs: -1,
@@ -210,22 +210,26 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			Message:   "No valid proxies available for monitor",
 		})
 		if proxySource == "free" {
-			e.db.SetMonitorStatus(m.ID, "paused")
 			e.db.RecordMonitorEvent(model.MonitorEvent{
 				MonitorID: m.ID,
 				EventType: "free_proxy_pool_degraded",
 				Severity:  "warning",
-				Message:   fmt.Sprintf("Free proxy pool for region %s is below the active quality threshold; monitor was paused", m.Region),
+				Message:   fmt.Sprintf("Free proxy pool for region %s is empty; monitor is waiting for recovery", m.Region),
 			})
+			if !waitForProxyManager(ctx, pm, 15*time.Second) {
+				return
+			}
+			proxyKey = fmt.Sprintf("free:%s:%d", m.Region, e.FreeProxyRegionVersion(m.Region))
+			log.Printf("[%d] free proxy pool recovered with %d proxies", m.ID, pm.Count())
+		} else {
+			if m.WebhookActive && m.DiscordWebhook.String != "" {
+				discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, -1)
+			}
+			if m.TelegramActive && m.TelegramChatID.String != "" {
+				telegram.SendAutoStop(m.TelegramChatID.String, m.Name, -1)
+			}
 			return
 		}
-		if m.WebhookActive && m.DiscordWebhook.String != "" {
-			discord.SendAutoStopWebhook(m.DiscordWebhook.String, m.Name, -1)
-		}
-		if m.TelegramActive && m.TelegramChatID.String != "" {
-			telegram.SendAutoStop(m.TelegramChatID.String, m.Name, -1)
-		}
-		return
 	}
 
 	var pool *ClientPool
@@ -298,6 +302,23 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 			log.Printf("[%d] stopped gracefully", m.ID)
 			return
 		default:
+		}
+		if proxySource == "free" && pm.Count() == 0 {
+			log.Printf("[%d] free proxy pool became empty; waiting for recovery", m.ID)
+			reportHealth("free proxy pool is waiting for recovery")
+			e.db.RecordMonitorEvent(model.MonitorEvent{
+				MonitorID: m.ID,
+				EventType: "free_proxy_pool_degraded",
+				Severity:  "warning",
+				Message:   fmt.Sprintf("Free proxy pool for region %s became empty; monitor is waiting for recovery", m.Region),
+			})
+			if !waitForProxyManager(ctx, pm, 15*time.Second) {
+				return
+			}
+			proxyKey = fmt.Sprintf("free:%s:%d", m.Region, e.FreeProxyRegionVersion(m.Region))
+			pool = e.GetOrCreatePool(pm, domain, proxyKey, trafficRecorder, proxySource)
+			consecutiveErrors = 0
+			log.Printf("[%d] free proxy pool recovered with %d proxies", m.ID, pm.Count())
 		}
 
 		checks++
@@ -515,6 +536,28 @@ func (e *Engine) MonitorTask(ctx context.Context, m model.Monitor) {
 	}
 }
 
+func waitForProxyManager(ctx context.Context, manager *proxy.Manager, interval time.Duration) bool {
+	if manager.Count() > 0 {
+		return true
+	}
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			if manager.Count() > 0 {
+				return true
+			}
+		}
+	}
+}
+
 func (e *Engine) handleDetectedItem(ctx context.Context, monitor model.Monitor, vintedItem model.VintedItem, source string, proxySource string, enricher *SellerEnricher) bool {
 	if !e.db.ClaimMonitorItem(monitor.ID, vintedItem.ID, source) {
 		return false
@@ -522,11 +565,12 @@ func (e *Engine) handleDetectedItem(ctx context.Context, monitor model.Monitor, 
 	item := e.buildItems(monitor, []model.VintedItem{vintedItem})[0]
 	log.Printf("[%d] NEW via %s: %s (%s) [%s]", monitor.ID, source, item.Title, item.Price, item.Size)
 	strictCountryGate := hasCountryFilter(monitor.AllowedCountries)
+	publishNow, alertAfterEnrich := detectedItemAlertPlan(monitor, strictCountryGate)
 	e.enqueueItem(enrichmentJob{
 		ctx: ctx, item: item, vintedItem: vintedItem, monitor: monitor, proxySource: proxySource,
 		enricher: enricher, publishUpdate: !strictCountryGate,
-		requireCountryMatch: strictCountryGate, alertAfterEnrich: strictCountryGate,
-	}, !strictCountryGate)
+		requireCountryMatch: strictCountryGate, alertAfterEnrich: alertAfterEnrich,
+	}, publishNow)
 	return true
 }
 

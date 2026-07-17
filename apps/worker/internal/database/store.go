@@ -320,9 +320,6 @@ func (s *Store) GetActiveFreeProxyRegions() ([]string, error) {
 		}
 		regions = append(regions, region)
 	}
-	if len(regions) == 0 {
-		regions = append(regions, "de")
-	}
 	return regions, rows.Err()
 }
 
@@ -412,10 +409,16 @@ func (s *Store) UpsertFreeProxy(proxyURL string, protocol string, host string, p
 
 func (s *Store) EnsureFreeProxyHealthRows(regions []string, limit int) error {
 	if len(regions) == 0 {
-		return nil
+		_, err := s.db.Exec(`DELETE FROM free_proxy_health`)
+		return err
 	}
 	if limit <= 0 {
 		limit = 1000
+	}
+	if _, err := s.db.Exec(`
+		DELETE FROM free_proxy_health
+		WHERE NOT (region = ANY($1))`, pq.Array(regions)); err != nil {
+		return err
 	}
 	if _, err := s.db.Exec(`
 		DELETE FROM free_proxy_health fph
@@ -446,9 +449,10 @@ func (s *Store) EnsureFreeProxyHealthRows(regions []string, limit int) error {
 				  END,
 				  CASE WHEN fp.source = 'iplocate:' || $1 THEN 0 ELSE 1 END,
 				  CASE fp.protocol
-					WHEN 'socks4' THEN 0
+					WHEN 'socks5' THEN 0
 					WHEN 'http' THEN 1
-					WHEN 'socks5' THEN 2
+					WHEN 'https' THEN 2
+					WHEN 'socks4' THEN 3
 					ELSE 3
 				  END,
 				  fp.last_success_at DESC NULLS LAST,
@@ -491,7 +495,7 @@ func (s *Store) GetFreeProxiesDueForCheck(regions []string, limit int) ([]FreePr
 		ORDER BY
 		  CASE
 			WHEN fph.status = 'pending' AND fph.success_streak > 0 THEN 0
-			WHEN fph.status = 'pending' THEN 1
+			WHEN fph.status = 'cooldown' THEN 1
 			WHEN fph.status = 'active' THEN 2
 			ELSE 3
 		  END,
@@ -520,8 +524,12 @@ func (s *Store) RecordFreeProxySuccess(proxyURL string, region string, latencyMs
 		return
 	}
 	if _, err := s.db.Exec(`
+		WITH updated_health AS (
 		UPDATE free_proxy_health fph
-		SET status = CASE WHEN fph.success_streak + 1 >= 2 THEN 'active' ELSE 'pending' END,
+		SET status = CASE
+				WHEN fph.status = 'active' OR fph.success_streak + 1 >= 2 THEN 'active'
+				ELSE 'pending'
+			END,
 			success_streak = fph.success_streak + 1,
 			failure_streak = 0,
 			success_count = fph.success_count + 1,
@@ -531,7 +539,7 @@ func (s *Store) RecordFreeProxySuccess(proxyURL string, region string, latencyMs
 			last_success_at = NOW(),
 			last_error = NULL,
 			next_check_at = CASE
-				WHEN fph.success_streak + 1 >= 2 THEN NOW() + INTERVAL '10 minutes'
+				WHEN fph.status = 'active' OR fph.success_streak + 1 >= 2 THEN NOW() + INTERVAL '10 minutes'
 				ELSE NOW() + INTERVAL '30 seconds'
 			END,
 			score = LEAST(100, 50 + ((fph.success_streak + 1) * 10) - GREATEST(0, $3 - 1000) / 100),
@@ -539,11 +547,10 @@ func (s *Store) RecordFreeProxySuccess(proxyURL string, region string, latencyMs
 		FROM free_proxies fp
 		WHERE fp.id = fph.proxy_id
 		  AND fp.proxy_url = $1
-		  AND fph.region = $2`, proxyURL, region, latencyMs); err != nil {
-		log.Printf("free proxy success update failed: %v", err)
-	}
-	if _, err := s.db.Exec(`
-		UPDATE free_proxies
+		  AND fph.region = $2
+		RETURNING fph.proxy_id
+		)
+		UPDATE free_proxies fp
 		SET status = 'active',
 			success_count = success_count + 1,
 			failure_count = 0,
@@ -551,8 +558,8 @@ func (s *Store) RecordFreeProxySuccess(proxyURL string, region string, latencyMs
 			last_success_at = NOW(),
 			last_error = NULL,
 			updated_at = NOW()
-		WHERE proxy_url = $1`, proxyURL); err != nil {
-		log.Printf("free proxy aggregate success update failed: %v", err)
+		WHERE fp.id IN (SELECT proxy_id FROM updated_health)`, proxyURL, region, latencyMs); err != nil {
+		log.Printf("free proxy success update failed: %v", err)
 	}
 }
 
@@ -570,6 +577,7 @@ func (s *Store) RecordFreeProxyFailure(proxyURL string, region string, statusCod
 		message = message[:1000]
 	}
 	if _, err := s.db.Exec(`
+		WITH updated_health AS (
 		UPDATE free_proxy_health fph
 		SET failure_streak = fph.failure_streak + 1,
 			success_streak = 0,
@@ -581,6 +589,7 @@ func (s *Store) RecordFreeProxyFailure(proxyURL string, region string, statusCod
 			status = CASE
 				WHEN fph.status = 'pending' AND fph.success_streak = 0 THEN 'dead'
 				WHEN fph.status = 'cooldown' AND fph.failure_streak + 1 >= $5 THEN 'dead'
+				WHEN fph.status = 'active' AND fph.failure_streak + 1 < $5 THEN 'active'
 				WHEN fph.status = 'active' THEN 'cooldown'
 				WHEN fph.failure_streak + 1 >= $5 THEN 'cooldown'
 				ELSE 'cooldown'
@@ -588,6 +597,7 @@ func (s *Store) RecordFreeProxyFailure(proxyURL string, region string, statusCod
 			next_check_at = CASE
 				WHEN fph.status = 'pending' AND fph.success_streak = 0 THEN NULL
 				WHEN fph.status = 'cooldown' AND fph.failure_streak + 1 >= $5 THEN NULL
+				WHEN fph.status = 'active' AND fph.failure_streak + 1 < $5 THEN NOW() + INTERVAL '1 minute'
 				ELSE NOW() + ($6::text || ' minutes')::interval
 			END,
 			score = CASE
@@ -598,18 +608,17 @@ func (s *Store) RecordFreeProxyFailure(proxyURL string, region string, statusCod
 		FROM free_proxies fp
 		WHERE fp.id = fph.proxy_id
 		  AND fp.proxy_url = $1
-		  AND fph.region = $2`, proxyURL, region, statusCode, message, failureThreshold, quarantineMinutes); err != nil {
-		log.Printf("free proxy failure update failed: %v", err)
-	}
-	if _, err := s.db.Exec(`
-		UPDATE free_proxies
+		  AND fph.region = $2
+		RETURNING fph.proxy_id
+		)
+		UPDATE free_proxies fp
 		SET failure_count = failure_count + 1,
 			last_checked_at = NOW(),
 			last_failure_at = NOW(),
-			last_error = $2,
+			last_error = $4,
 			updated_at = NOW()
-		WHERE proxy_url = $1`, proxyURL, message); err != nil {
-		log.Printf("free proxy aggregate failure update failed: %v", err)
+		WHERE fp.id IN (SELECT proxy_id FROM updated_health)`, proxyURL, region, statusCode, message, failureThreshold, quarantineMinutes); err != nil {
+		log.Printf("free proxy failure update failed: %v", err)
 	}
 }
 

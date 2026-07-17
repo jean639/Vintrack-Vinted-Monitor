@@ -211,10 +211,9 @@ func refreshFreeProxies(store *database.Store, freeProxyPools *proxy.RegionPools
 		log.Printf("free proxy region refresh failed: %v", err)
 		return
 	}
+	freeProxyPools.Retain(regions)
 	if !settingBool(store, "free_proxy_enabled", false) {
-		for _, region := range regions {
-			freeProxyPools.Replace(region, "")
-		}
+		freeProxyPools.Retain(nil)
 		return
 	}
 	for _, region := range regions {
@@ -223,8 +222,7 @@ func refreshFreeProxies(store *database.Store, freeProxyPools *proxy.RegionPools
 			log.Printf("free proxy active count failed for %s: %v", region, err)
 			continue
 		}
-		minActive := settingInt(store, "free_proxy_min_active_per_region", 25)
-		if activeCount < minActive {
+		if activeCount == 0 {
 			freeProxyPools.Replace(region, "")
 			continue
 		}
@@ -477,7 +475,13 @@ func freeProxyRegions(store *database.Store) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	starterRegions := strings.Split(settingString(store, "free_proxy_starter_regions", "de,fr,it,es,nl,be,at"), ",")
+	starterRegionValue := "de,fr,it,es,nl,be,at"
+	if value, ok, settingErr := store.GetSettingValue("free_proxy_starter_regions"); settingErr != nil {
+		return nil, settingErr
+	} else if ok {
+		starterRegionValue = value
+	}
+	starterRegions := strings.Split(starterRegionValue, ",")
 	seen := make(map[string]bool)
 	regions := make([]string, 0, len(activeRegions)+len(starterRegions))
 	for _, region := range append(starterRegions, activeRegions...) {
@@ -487,9 +491,6 @@ func freeProxyRegions(store *database.Store) ([]string, error) {
 		}
 		seen[region] = true
 		regions = append(regions, region)
-	}
-	if len(regions) == 0 {
-		regions = append(regions, "de")
 	}
 	return regions, nil
 }

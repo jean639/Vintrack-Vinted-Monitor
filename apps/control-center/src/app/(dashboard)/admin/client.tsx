@@ -503,7 +503,6 @@ export function AdminClient({
             );
 
             if (selected.has(regionCode)) {
-                if (selected.size === 1) return current;
                 selected.delete(regionCode);
             } else {
                 selected.add(regionCode);
@@ -1293,7 +1292,7 @@ export function AdminClient({
                             iconClassName="bg-emerald-500/10 text-emerald-600"
                         />
                         <OverviewMetric
-                            label="Checks 24h"
+                            label="Canonical checks 24h"
                             value={checks24h}
                             detail={`${formatSuccessRate(successRate24h)} successful`}
                             icon={Gauge}
@@ -1359,7 +1358,7 @@ export function AdminClient({
                                 </div>
                                 <div className="border-border/60 rounded-lg border px-4 py-3">
                                     <p className="text-muted-foreground text-[11px] font-medium tracking-widest uppercase">
-                                        Checks 24h
+                                        Canonical checks 24h
                                     </p>
                                     <p className="mt-1 text-2xl font-semibold">
                                         {checks24h}
@@ -2655,10 +2654,11 @@ export function AdminClient({
                                                     starterRegionSet.has(
                                                         region.code,
                                                     );
-                                                const health =
-                                                    freeProxyHealthByRegion.get(
-                                                        region.code,
-                                                    );
+                                                const health = selected
+                                                    ? freeProxyHealthByRegion.get(
+                                                          region.code,
+                                                      )
+                                                    : undefined;
                                                 return (
                                                     <button
                                                         key={region.code}
@@ -3430,7 +3430,7 @@ export function AdminClient({
                                 <Card className="py-0">
                                     <CardHeader className="pt-3 pb-2">
                                         <CardDescription>
-                                            Checks 24h
+                                            Canonical checks 24h
                                         </CardDescription>
                                         <CardTitle className="text-2xl">
                                             {selected.metrics.checks24h}

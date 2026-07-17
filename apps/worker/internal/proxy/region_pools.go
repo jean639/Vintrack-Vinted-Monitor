@@ -33,6 +33,30 @@ func (p *RegionPools) Replace(region string, raw string) bool {
 	return p.Manager(region).ReplaceFromString(raw)
 }
 
+// Retain removes pools that are no longer configured. Managers are emptied
+// before removal so existing references cannot keep using a stale region.
+func (p *RegionPools) Retain(regions []string) {
+	desired := make(map[string]bool, len(regions))
+	for _, region := range regions {
+		desired[region] = true
+	}
+
+	p.mu.Lock()
+	removed := make([]*Manager, 0)
+	for region, manager := range p.pools {
+		if desired[region] {
+			continue
+		}
+		removed = append(removed, manager)
+		delete(p.pools, region)
+	}
+	p.mu.Unlock()
+
+	for _, manager := range removed {
+		manager.ReplaceFromString("")
+	}
+}
+
 func (p *RegionPools) Version(region string) uint64 {
 	return p.Manager(region).Version()
 }

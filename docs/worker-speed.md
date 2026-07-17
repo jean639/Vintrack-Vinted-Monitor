@@ -51,7 +51,9 @@ Client selection favors low-latency, successful, idle sessions. HTTP 401/403/407
 
 ## Alert semantics
 
-Dashboard/SSE publishing, Discord, and Telegram use separate bounded worker queues, so a slow external channel cannot stall later items. Monitors without a seller-country filter alert immediately from catalog data and enrich seller details afterward. A configured seller-country filter remains strict: seller enrichment and the country check complete before the item is saved or alerted.
+Dashboard/SSE publishing, Discord, and Telegram use separate bounded worker queues, so a slow external channel cannot stall later items. Without a seller-country filter, the dashboard publishes immediately from catalog data while Discord and Telegram wait for seller enrichment so their alerts include region and rating. A configured seller-country filter remains strict: seller enrichment and the country check complete before the item is published, saved, or alerted.
+
+Operational check counts and success rates use canonical monitor runs only. Discovery runs remain separate telemetry so shadow or free-discovery failures cannot make the primary monitor health look worse than it is.
 
 ## Process isolation
 

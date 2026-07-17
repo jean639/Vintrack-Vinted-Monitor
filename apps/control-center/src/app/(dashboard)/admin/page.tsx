@@ -99,6 +99,7 @@ async function loadAdminUserMetrics(userIds: string[]) {
             LEFT JOIN monitor_runs r
                 ON r.monitor_id = m.id
                 AND r.checked_at >= NOW() - INTERVAL '24 hours'
+                AND r.fetch_source = 'canonical'
             WHERE m."userId" IN (${Prisma.join(userIds)})
             GROUP BY m."userId"
         `.catch((error) => {
@@ -113,6 +114,7 @@ async function loadAdminUserMetrics(userIds: string[]) {
             INNER JOIN monitor_runs r ON r.monitor_id = m.id
             WHERE m."userId" IN (${Prisma.join(userIds)})
               AND r.checked_at >= NOW() - INTERVAL '24 hours'
+              AND r.fetch_source = 'canonical'
               AND r.error_message IS NOT NULL
             ORDER BY m."userId", r.checked_at DESC
         `.catch((error) => {
@@ -173,7 +175,7 @@ const getCachedAdminUserMetrics = unstable_cache(
                 ] as [string, CachedAdminUserMetrics],
         );
     },
-    ["admin-user-metrics-v2"],
+    ["admin-user-metrics-v3"],
     { revalidate: 30 },
 );
 
