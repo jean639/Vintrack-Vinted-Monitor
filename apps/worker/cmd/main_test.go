@@ -99,6 +99,101 @@ func TestInterleaveFreeProxyImportCandidatesKeepsFirstSourceAttribution(t *testi
 	}
 }
 
+func TestSelectFreeProxyImportCandidatesHonorsRemainingPoolCapacity(t *testing.T) {
+	sources := [][]freeProxyImportCandidate{
+		{
+			{ProxyURL: "http://existing-a:80", Source: "iplocate:de"},
+			{ProxyURL: "http://new-a:80", Source: "iplocate:de"},
+			{ProxyURL: "http://new-b:80", Source: "iplocate:de"},
+		},
+		{
+			{ProxyURL: "http://existing-b:80", Source: "iplocate"},
+			{ProxyURL: "http://new-c:80", Source: "iplocate"},
+		},
+	}
+	existing := map[string]string{
+		"http://existing-a:80": "http://existing-a:80",
+		"http://existing-b:80": "http://existing-b:80",
+	}
+
+	got, newCount := selectFreeProxyImportCandidates(sources, existing, 3)
+	want := []database.FreeProxyRecord{
+		{ProxyURL: "http://existing-a:80", Source: "iplocate:de"},
+		{ProxyURL: "http://existing-b:80", Source: "iplocate"},
+		{ProxyURL: "http://new-a:80", Source: "iplocate:de"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selectFreeProxyImportCandidates() = %#v, want %#v", got, want)
+	}
+	if newCount != 1 {
+		t.Fatalf("selectFreeProxyImportCandidates() new count = %d, want 1", newCount)
+	}
+	if len(existing) != 3 {
+		t.Fatalf("pool size after selection = %d, want 3", len(existing))
+	}
+}
+
+func TestSelectFreeProxyImportCandidatesDoesNotGrowOversizedPool(t *testing.T) {
+	sources := [][]freeProxyImportCandidate{{
+		{ProxyURL: "http://new:80", Source: "iplocate"},
+		{ProxyURL: "http://existing-a:80", Source: "iplocate"},
+		{ProxyURL: "http://existing-b:80", Source: "iplocate"},
+		{ProxyURL: "http://existing-c:80", Source: "iplocate"},
+	}}
+	existing := map[string]string{
+		"http://existing-a:80": "http://existing-a:80",
+		"http://existing-b:80": "http://existing-b:80",
+		"http://existing-c:80": "http://existing-c:80",
+		"http://existing-d:80": "http://existing-d:80",
+	}
+
+	got, newCount := selectFreeProxyImportCandidates(sources, existing, 3)
+
+	if len(got) != 3 {
+		t.Fatalf("selected candidate count = %d, want 3", len(got))
+	}
+	if newCount != 0 {
+		t.Fatalf("new candidate count = %d, want 0", newCount)
+	}
+	if _, selected := existing["http://new:80"]; selected {
+		t.Fatal("oversized pool unexpectedly selected a new proxy")
+	}
+}
+
+func TestSelectFreeProxyImportCandidatesReusesStoredURLVariant(t *testing.T) {
+	sources := [][]freeProxyImportCandidate{{
+		{ProxyURL: "http://existing:80", Source: "iplocate"},
+	}}
+	existing := map[string]string{
+		"http://existing:80": "http://existing:80/",
+	}
+
+	got, newCount := selectFreeProxyImportCandidates(sources, existing, 1)
+
+	if len(got) != 1 || got[0].ProxyURL != "http://existing:80/" {
+		t.Fatalf("selected candidates = %#v, want stored URL variant", got)
+	}
+	if newCount != 0 {
+		t.Fatalf("new candidate count = %d, want 0", newCount)
+	}
+}
+
+func TestCanonicalFreeProxyURLRemovesOnlyEmptyRootPath(t *testing.T) {
+	tests := map[string]string{
+		"http://127.0.0.1:8080":         "http://127.0.0.1:8080",
+		"http://127.0.0.1:8080/":        "http://127.0.0.1:8080",
+		"socks5://user:pass@host:1080/": "socks5://user:pass@host:1080",
+		"http://127.0.0.1:8080/path":    "http://127.0.0.1:8080/path",
+	}
+
+	for rawURL, want := range tests {
+		if got := canonicalFreeProxyURL(rawURL); got != want {
+			t.Errorf("canonicalFreeProxyURL(%q) = %q, want %q", rawURL, got, want)
+		}
+	}
+}
+
 func TestIPLocateCountryFromURL(t *testing.T) {
 	tests := map[string]string{
 		"https://raw.githubusercontent.com/iplocate/free-proxy-list/main/countries/DE/proxies.txt": "de",
