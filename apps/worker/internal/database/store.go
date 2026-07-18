@@ -57,6 +57,14 @@ type FreeProxyCandidate struct {
 	Region   string
 }
 
+type FreeProxyRecord struct {
+	ProxyURL string
+	Protocol string
+	Host     string
+	Port     int
+	Source   string
+}
+
 type PreindexProbe struct {
 	Region      string
 	ItemID      int64
@@ -360,63 +368,140 @@ func (s *Store) GetActiveFreeProxies(region string, limit int) ([]string, error)
 	return proxies, rows.Err()
 }
 
-func (s *Store) UpsertFreeProxy(proxyURL string, protocol string, host string, port int, source string) error {
-	_, err := s.db.Exec(`
-		INSERT INTO free_proxies (
-			proxy_url, protocol, host, port, source, status, failure_count, last_error, quarantined_until, updated_at
-		)
-		VALUES ($1, $2, $3, $4, $5, 'pending', 0, NULL, NULL, NOW())
-		ON CONFLICT (proxy_url) DO UPDATE
-		SET protocol = EXCLUDED.protocol,
-			host = EXCLUDED.host,
-			port = EXCLUDED.port,
-			source = EXCLUDED.source,
-			status = CASE
-				WHEN free_proxies.status = 'disabled'
-				  AND (EXCLUDED.source LIKE 'iplocate%' OR EXCLUDED.source = 'proxyscrape')
-				  AND (
-					free_proxies.last_error LIKE 'invalid config:%'
-					OR free_proxies.last_checked_at IS NULL
-					OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours'
-				  )
-				THEN 'pending'
-				ELSE free_proxies.status
-			END,
-			last_error = CASE
-				WHEN free_proxies.status = 'disabled'
-				  AND (EXCLUDED.source LIKE 'iplocate%' OR EXCLUDED.source = 'proxyscrape')
-				  AND (
-					free_proxies.last_error LIKE 'invalid config:%'
-					OR free_proxies.last_checked_at IS NULL
-					OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours'
-				  )
-				THEN NULL
-				ELSE free_proxies.last_error
-			END,
-			updated_at = NOW()`,
-		proxyURL, protocol, host, port, source)
+func (s *Store) GetFreeProxyURLSet() (map[string]struct{}, error) {
+	rows, err := s.db.Query(`SELECT proxy_url FROM free_proxies`)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	defer rows.Close()
+
+	proxyURLs := make(map[string]struct{})
+	for rows.Next() {
+		var proxyURL string
+		if err := rows.Scan(&proxyURL); err != nil {
+			return nil, err
+		}
+		proxyURLs[proxyURL] = struct{}{}
+	}
+	return proxyURLs, rows.Err()
+}
+
+func (s *Store) UpsertFreeProxies(proxies []FreeProxyRecord) (int, error) {
+	const batchSize = 500
+	processed := 0
+
+	for offset := 0; offset < len(proxies); offset += batchSize {
+		end := min(offset+batchSize, len(proxies))
+		batch := proxies[offset:end]
+		args := make([]any, 0, len(batch)*5)
+		proxyURLs := make([]string, 0, len(batch))
+		var query strings.Builder
+		query.WriteString(`
+			INSERT INTO free_proxies (
+				proxy_url, protocol, host, port, source, status, failure_count, last_error, quarantined_until, updated_at
+			)
+			VALUES `)
+
+		for index, proxy := range batch {
+			if index > 0 {
+				query.WriteString(", ")
+			}
+			placeholder := index*5 + 1
+			fmt.Fprintf(
+				&query,
+				"($%d, $%d, $%d, $%d, $%d, 'pending', 0, NULL, NULL, NOW())",
+				placeholder,
+				placeholder+1,
+				placeholder+2,
+				placeholder+3,
+				placeholder+4,
+			)
+			args = append(args, proxy.ProxyURL, proxy.Protocol, proxy.Host, proxy.Port, proxy.Source)
+			proxyURLs = append(proxyURLs, proxy.ProxyURL)
+		}
+
+		query.WriteString(`
+			ON CONFLICT (proxy_url) DO UPDATE
+			SET protocol = EXCLUDED.protocol,
+				host = EXCLUDED.host,
+				port = EXCLUDED.port,
+				source = EXCLUDED.source,
+				status = CASE
+					WHEN free_proxies.status = 'disabled'
+					  AND (EXCLUDED.source LIKE 'iplocate%' OR EXCLUDED.source = 'proxyscrape')
+					  AND (
+						free_proxies.last_error LIKE 'invalid config:%'
+						OR free_proxies.last_checked_at IS NULL
+						OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours'
+					  )
+					THEN 'pending'
+					ELSE free_proxies.status
+				END,
+				last_error = CASE
+					WHEN free_proxies.status = 'disabled'
+					  AND (EXCLUDED.source LIKE 'iplocate%' OR EXCLUDED.source = 'proxyscrape')
+					  AND (
+						free_proxies.last_error LIKE 'invalid config:%'
+						OR free_proxies.last_checked_at IS NULL
+						OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours'
+					  )
+					THEN NULL
+					ELSE free_proxies.last_error
+				END,
+				updated_at = NOW()`)
+
+		tx, err := s.db.Begin()
+		if err != nil {
+			return processed, err
+		}
+		result, err := tx.Exec(query.String(), args...)
+		if err != nil {
+			_ = tx.Rollback()
+			return processed, err
+		}
+		if _, err := tx.Exec(`
+			UPDATE free_proxy_health fph
+			SET status = 'pending',
+				failure_streak = 0,
+				last_error = NULL,
+				next_check_at = NOW(),
+				updated_at = NOW()
+			FROM free_proxies fp
+			WHERE fp.id = fph.proxy_id
+			  AND fp.proxy_url = ANY($1)
+			  AND (fp.source LIKE 'iplocate%' OR fp.source = 'proxyscrape')
+			  AND (
+				(fph.status IN ('dead', 'cooldown') AND fph.last_error LIKE 'invalid config:%')
+				OR (
+					fph.status = 'dead'
+					AND (fph.last_checked_at IS NULL OR fph.last_checked_at < NOW() - INTERVAL '6 hours')
+				)
+			  )`, pq.Array(proxyURLs)); err != nil {
+			_ = tx.Rollback()
+			return processed, err
+		}
+		if err := tx.Commit(); err != nil {
+			return processed, err
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return processed, err
+		}
+		processed += int(rowsAffected)
 	}
 
-	_, err = s.db.Exec(`
-		UPDATE free_proxy_health fph
-		SET status = 'pending',
-			failure_streak = 0,
-			last_error = NULL,
-			next_check_at = NOW(),
-			updated_at = NOW()
-		FROM free_proxies fp
-		WHERE fp.id = fph.proxy_id
-		  AND fp.proxy_url = $1
-		  AND (fp.source LIKE 'iplocate%' OR fp.source = 'proxyscrape')
-		  AND (
-			(fph.status IN ('dead', 'cooldown') AND fph.last_error LIKE 'invalid config:%')
-			OR (
-				fph.status = 'dead'
-				AND (fph.last_checked_at IS NULL OR fph.last_checked_at < NOW() - INTERVAL '6 hours')
-			)
-		  )`, proxyURL)
+	return processed, nil
+}
+
+func (s *Store) UpsertFreeProxy(proxyURL string, protocol string, host string, port int, source string) error {
+	_, err := s.UpsertFreeProxies([]FreeProxyRecord{{
+		ProxyURL: proxyURL,
+		Protocol: protocol,
+		Host:     host,
+		Port:     port,
+		Source:   source,
+	}})
 	return err
 }
 

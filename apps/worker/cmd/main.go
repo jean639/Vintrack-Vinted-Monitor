@@ -428,15 +428,83 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 		sourceCandidates = append(sourceCandidates, candidates)
 	}
 
-	processed := 0
-	for _, candidate := range interleaveFreeProxyImportCandidates(sourceCandidates, maxImport) {
-		if err := store.UpsertFreeProxy(candidate.ProxyURL, candidate.Protocol, candidate.Host, candidate.Port, candidate.Source); err == nil {
-			processed++
+	storedProxyURLs, err := store.GetFreeProxyURLSet()
+	if err != nil {
+		log.Printf("free proxy import existing pool load failed: %v", err)
+		return
+	}
+	existingProxyURLs := make(map[string]string, len(storedProxyURLs))
+	for storedProxyURL := range storedProxyURLs {
+		canonicalProxyURL := canonicalFreeProxyURL(storedProxyURL)
+		currentStoredURL, exists := existingProxyURLs[canonicalProxyURL]
+		if !exists || (storedProxyURL == canonicalProxyURL && currentStoredURL != canonicalProxyURL) {
+			existingProxyURLs[canonicalProxyURL] = storedProxyURL
 		}
 	}
-	if processed > 0 {
-		log.Printf("free proxy import refreshed %d candidates from %d available sources", processed, len(sourceCandidates))
+	selectedCandidates, newCandidates := selectFreeProxyImportCandidates(
+		sourceCandidates,
+		existingProxyURLs,
+		maxImport,
+	)
+
+	processed, err := store.UpsertFreeProxies(selectedCandidates)
+	if err != nil {
+		log.Printf("free proxy batch import failed after %d candidates: %v", processed, err)
+		return
 	}
+	if processed > 0 {
+		log.Printf(
+			"free proxy import refreshed %d candidates (%d new) from %d available sources",
+			processed,
+			newCandidates,
+			len(sourceCandidates),
+		)
+	}
+}
+
+func selectFreeProxyImportCandidates(
+	sources [][]freeProxyImportCandidate,
+	existingProxyURLs map[string]string,
+	maxPoolSize int,
+) ([]database.FreeProxyRecord, int) {
+	if maxPoolSize <= 0 {
+		return nil, 0
+	}
+
+	remainingCapacity := max(0, maxPoolSize-len(existingProxyURLs))
+	scanLimit := maxPoolSize + min(len(existingProxyURLs), maxPoolSize)
+	orderedCandidates := interleaveFreeProxyImportCandidates(sources, scanLimit)
+	selectedCandidates := make([]database.FreeProxyRecord, 0, maxPoolSize)
+	refreshedExisting := 0
+	newCandidates := 0
+
+	for _, candidate := range orderedCandidates {
+		storedProxyURL, exists := existingProxyURLs[candidate.ProxyURL]
+		proxyURL := candidate.ProxyURL
+		if exists {
+			if refreshedExisting >= maxPoolSize {
+				continue
+			}
+			refreshedExisting++
+			proxyURL = storedProxyURL
+		} else {
+			if newCandidates >= remainingCapacity {
+				continue
+			}
+			newCandidates++
+			existingProxyURLs[candidate.ProxyURL] = candidate.ProxyURL
+		}
+
+		selectedCandidates = append(selectedCandidates, database.FreeProxyRecord{
+			ProxyURL: proxyURL,
+			Protocol: candidate.Protocol,
+			Host:     candidate.Host,
+			Port:     candidate.Port,
+			Source:   candidate.Source,
+		})
+	}
+
+	return selectedCandidates, newCandidates
 }
 
 func interleaveFreeProxyImportCandidates(sources [][]freeProxyImportCandidate, limit int) []freeProxyImportCandidate {
@@ -512,7 +580,18 @@ func normalizeFreeProxyLine(line string, defaultScheme string) (string, string, 
 	if scheme != "http" && scheme != "https" && scheme != "socks4" && scheme != "socks5" {
 		return "", "", "", 0, false
 	}
-	return parsed.String(), scheme, parsed.Hostname(), port, true
+	return canonicalFreeProxyURL(parsed.String()), scheme, parsed.Hostname(), port, true
+}
+
+func canonicalFreeProxyURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if parsed.Path == "/" && parsed.RawQuery == "" && parsed.Fragment == "" {
+		parsed.Path = ""
+	}
+	return parsed.String()
 }
 
 func freeProxyRegions(store *database.Store) ([]string, error) {
