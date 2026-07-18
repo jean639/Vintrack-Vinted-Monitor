@@ -134,8 +134,8 @@ type FreeProxyRegionRow = {
     pending_count: bigint;
     cooldown_count: bigint;
     dead_count: bigint;
-    success_count: bigint;
-    failure_count: bigint;
+    recent_success_count: bigint;
+    recent_check_count: bigint;
     median_latency_ms: number | null;
     last_checked_at: Date | null;
 };
@@ -528,8 +528,14 @@ export async function getFreeProxyAdminState() {
                 COUNT(*) FILTER (WHERE status = 'pending' AND success_streak = 0)::bigint AS pending_count,
                 COUNT(*) FILTER (WHERE status = 'cooldown')::bigint AS cooldown_count,
                 COUNT(*) FILTER (WHERE status = 'dead')::bigint AS dead_count,
-                COALESCE(SUM(success_count), 0)::bigint AS success_count,
-                COALESCE(SUM(failure_count), 0)::bigint AS failure_count,
+                COUNT(*) FILTER (
+                    WHERE last_checked_at >= NOW() - INTERVAL '24 hours'
+                      AND last_status_code = 200
+                      AND last_error IS NULL
+                )::bigint AS recent_success_count,
+                COUNT(*) FILTER (
+                    WHERE last_checked_at >= NOW() - INTERVAL '24 hours'
+                )::bigint AS recent_check_count,
                 percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)
                     FILTER (WHERE latency_ms IS NOT NULL) AS median_latency_ms,
                 MAX(last_checked_at) AS last_checked_at
@@ -587,9 +593,8 @@ export async function getFreeProxyAdminState() {
             ),
         },
         regions: regionRows.map((row) => {
-            const successCount = Number(row.success_count);
-            const failureCount = Number(row.failure_count);
-            const totalChecks = successCount + failureCount;
+            const recentSuccessCount = Number(row.recent_success_count);
+            const recentCheckCount = Number(row.recent_check_count);
 
             return {
                 region: row.region,
@@ -599,8 +604,10 @@ export async function getFreeProxyAdminState() {
                 cooldown: Number(row.cooldown_count),
                 dead: Number(row.dead_count),
                 successRate:
-                    totalChecks > 0
-                        ? Math.round((successCount / totalChecks) * 100)
+                    recentCheckCount > 0
+                        ? Math.round(
+                              (recentSuccessCount / recentCheckCount) * 100,
+                          )
                         : null,
                 medianLatencyMs:
                     row.median_latency_ms === null

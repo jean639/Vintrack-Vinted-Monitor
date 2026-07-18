@@ -28,6 +28,14 @@ var freeProxyCheckRunning atomic.Bool
 
 const proxyScrapeFallbackURL = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
 
+type freeProxyImportCandidate struct {
+	ProxyURL string
+	Protocol string
+	Host     string
+	Port     int
+	Source   string
+}
+
 func main() {
 	log.SetFlags(log.Ltime)
 	log.Println("Vintrack Worker starting...")
@@ -387,18 +395,13 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 		importURL = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt"
 	}
 
-	processed := 0
 	maxImport := settingInt(store, "free_proxy_max_pool_size", 5000)
 	importURLs := freeProxyImportURLs(store, importURL)
 	if len(importURLs) == 0 {
 		return
 	}
-	perSourceLimit := (maxImport + len(importURLs) - 1) / len(importURLs)
-	seenProxies := make(map[string]bool, maxImport)
+	sourceCandidates := make([][]freeProxyImportCandidate, 0, len(importURLs))
 	for _, sourceURL := range importURLs {
-		if processed >= maxImport {
-			break
-		}
 		body, err := fetchFreeProxyList(ctx, sourceURL)
 		if err != nil {
 			log.Printf("free proxy import skipped %s: %v", sourceURL, err)
@@ -406,25 +409,67 @@ func importFreeProxies(ctx context.Context, store *database.Store) {
 		}
 		source := freeProxySource(store, sourceURL)
 		defaultScheme := defaultSchemeForImportURL(sourceURL)
-		sourceAdded := 0
+		candidates := make([]freeProxyImportCandidate, 0)
+		seenSourceProxies := make(map[string]bool)
 		for _, line := range strings.Split(string(body), "\n") {
-			if processed >= maxImport || sourceAdded >= perSourceLimit {
-				break
-			}
 			proxyURL, protocol, host, port, ok := normalizeFreeProxyLine(line, defaultScheme)
-			if !ok || seenProxies[proxyURL] {
+			if !ok || seenSourceProxies[proxyURL] {
 				continue
 			}
-			if err := store.UpsertFreeProxy(proxyURL, protocol, host, port, source); err == nil {
-				seenProxies[proxyURL] = true
-				processed++
-				sourceAdded++
-			}
+			seenSourceProxies[proxyURL] = true
+			candidates = append(candidates, freeProxyImportCandidate{
+				ProxyURL: proxyURL,
+				Protocol: protocol,
+				Host:     host,
+				Port:     port,
+				Source:   source,
+			})
+		}
+		sourceCandidates = append(sourceCandidates, candidates)
+	}
+
+	processed := 0
+	for _, candidate := range interleaveFreeProxyImportCandidates(sourceCandidates, maxImport) {
+		if err := store.UpsertFreeProxy(candidate.ProxyURL, candidate.Protocol, candidate.Host, candidate.Port, candidate.Source); err == nil {
+			processed++
 		}
 	}
 	if processed > 0 {
-		log.Printf("free proxy import refreshed %d candidates from %d sources", processed, len(importURLs))
+		log.Printf("free proxy import refreshed %d candidates from %d available sources", processed, len(sourceCandidates))
 	}
+}
+
+func interleaveFreeProxyImportCandidates(sources [][]freeProxyImportCandidate, limit int) []freeProxyImportCandidate {
+	if limit <= 0 || len(sources) == 0 {
+		return nil
+	}
+
+	indices := make([]int, len(sources))
+	seen := make(map[string]bool, limit)
+	candidates := make([]freeProxyImportCandidate, 0, limit)
+	for len(candidates) < limit {
+		progressed := false
+		for sourceIndex, source := range sources {
+			for indices[sourceIndex] < len(source) {
+				candidate := source[indices[sourceIndex]]
+				indices[sourceIndex]++
+				if seen[candidate.ProxyURL] {
+					continue
+				}
+				seen[candidate.ProxyURL] = true
+				candidates = append(candidates, candidate)
+				progressed = true
+				break
+			}
+			if len(candidates) >= limit {
+				break
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	return candidates
 }
 
 func fetchFreeProxyList(ctx context.Context, importURL string) ([]byte, error) {

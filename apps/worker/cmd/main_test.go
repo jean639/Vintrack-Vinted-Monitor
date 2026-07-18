@@ -50,6 +50,55 @@ func TestInterleaveFreeProxyCandidates(t *testing.T) {
 	}
 }
 
+func TestInterleaveFreeProxyImportCandidatesRedistributesUnusedQuota(t *testing.T) {
+	sources := [][]freeProxyImportCandidate{
+		{
+			{ProxyURL: "http://country-1:80", Source: "iplocate:de"},
+		},
+		{
+			{ProxyURL: "http://global-1:80", Source: "iplocate"},
+			{ProxyURL: "http://global-2:80", Source: "iplocate"},
+			{ProxyURL: "http://global-3:80", Source: "iplocate"},
+		},
+	}
+
+	got := interleaveFreeProxyImportCandidates(sources, 4)
+	want := []freeProxyImportCandidate{
+		{ProxyURL: "http://country-1:80", Source: "iplocate:de"},
+		{ProxyURL: "http://global-1:80", Source: "iplocate"},
+		{ProxyURL: "http://global-2:80", Source: "iplocate"},
+		{ProxyURL: "http://global-3:80", Source: "iplocate"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("interleaveFreeProxyImportCandidates() = %#v, want %#v", got, want)
+	}
+}
+
+func TestInterleaveFreeProxyImportCandidatesKeepsFirstSourceAttribution(t *testing.T) {
+	sources := [][]freeProxyImportCandidate{
+		{
+			{ProxyURL: "http://shared:80", Source: "iplocate:de"},
+			{ProxyURL: "http://country-2:80", Source: "iplocate:de"},
+		},
+		{
+			{ProxyURL: "http://shared:80", Source: "iplocate"},
+			{ProxyURL: "http://global-2:80", Source: "iplocate"},
+		},
+	}
+
+	got := interleaveFreeProxyImportCandidates(sources, 3)
+	want := []freeProxyImportCandidate{
+		{ProxyURL: "http://shared:80", Source: "iplocate:de"},
+		{ProxyURL: "http://global-2:80", Source: "iplocate"},
+		{ProxyURL: "http://country-2:80", Source: "iplocate:de"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("interleaveFreeProxyImportCandidates() = %#v, want %#v", got, want)
+	}
+}
+
 func TestIPLocateCountryFromURL(t *testing.T) {
 	tests := map[string]string{
 		"https://raw.githubusercontent.com/iplocate/free-proxy-list/main/countries/DE/proxies.txt": "de",
