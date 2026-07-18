@@ -373,15 +373,23 @@ func (s *Store) UpsertFreeProxy(proxyURL string, protocol string, host string, p
 			source = EXCLUDED.source,
 			status = CASE
 				WHEN free_proxies.status = 'disabled'
-				  AND EXCLUDED.source LIKE 'iplocate%'
-				  AND (free_proxies.last_checked_at IS NULL OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours')
+				  AND (EXCLUDED.source LIKE 'iplocate%' OR EXCLUDED.source = 'proxyscrape')
+				  AND (
+					free_proxies.last_error LIKE 'invalid config:%'
+					OR free_proxies.last_checked_at IS NULL
+					OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours'
+				  )
 				THEN 'pending'
 				ELSE free_proxies.status
 			END,
 			last_error = CASE
 				WHEN free_proxies.status = 'disabled'
-				  AND EXCLUDED.source LIKE 'iplocate%'
-				  AND (free_proxies.last_checked_at IS NULL OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours')
+				  AND (EXCLUDED.source LIKE 'iplocate%' OR EXCLUDED.source = 'proxyscrape')
+				  AND (
+					free_proxies.last_error LIKE 'invalid config:%'
+					OR free_proxies.last_checked_at IS NULL
+					OR free_proxies.last_checked_at < NOW() - INTERVAL '6 hours'
+				  )
 				THEN NULL
 				ELSE free_proxies.last_error
 			END,
@@ -401,9 +409,14 @@ func (s *Store) UpsertFreeProxy(proxyURL string, protocol string, host string, p
 		FROM free_proxies fp
 		WHERE fp.id = fph.proxy_id
 		  AND fp.proxy_url = $1
-		  AND fp.status = 'pending'
-		  AND fph.status = 'dead'
-		  AND (fph.last_checked_at IS NULL OR fph.last_checked_at < NOW() - INTERVAL '6 hours')`, proxyURL)
+		  AND (fp.source LIKE 'iplocate%' OR fp.source = 'proxyscrape')
+		  AND (
+			(fph.status IN ('dead', 'cooldown') AND fph.last_error LIKE 'invalid config:%')
+			OR (
+				fph.status = 'dead'
+				AND (fph.last_checked_at IS NULL OR fph.last_checked_at < NOW() - INTERVAL '6 hours')
+			)
+		  )`, proxyURL)
 	return err
 }
 
@@ -445,7 +458,10 @@ func (s *Store) EnsureFreeProxyHealthRows(regions []string, limit int) error {
 				  CASE
 					WHEN current_health.status = 'active' THEN 0
 					WHEN current_health.status = 'pending' AND current_health.success_streak > 0 THEN 1
-					ELSE 2
+					WHEN current_health.status = 'cooldown' THEN 2
+					WHEN current_health.status = 'pending' THEN 3
+					WHEN current_health.id IS NULL THEN 4
+					ELSE 5
 				  END,
 				  CASE WHEN fp.source = 'iplocate:' || $1 THEN 0 ELSE 1 END,
 				  CASE fp.protocol

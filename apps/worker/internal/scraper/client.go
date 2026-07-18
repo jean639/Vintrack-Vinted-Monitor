@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	http "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
+	"golang.org/x/net/proxy"
 )
 
 type clientFingerprint struct {
@@ -126,7 +128,7 @@ func NewClientWithTimeout(proxyURL string, trafficRecorder func(txBytes int64, r
 	}
 
 	if proxyURL != "" {
-		options = append(options, tls_client.WithProxyUrl(proxyURL))
+		options = append(options, proxyClientOptions(proxyURL)...)
 	}
 
 	httpClient, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
@@ -147,7 +149,7 @@ func NewSellerClient(proxyURL string, trafficRecorder func(txBytes int64, rxByte
 	}
 
 	if proxyURL != "" {
-		options = append(options, tls_client.WithProxyUrl(proxyURL))
+		options = append(options, proxyClientOptions(proxyURL)...)
 	}
 
 	httpClient, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
@@ -156,6 +158,62 @@ func NewSellerClient(proxyURL string, trafficRecorder func(txBytes int64, rxByte
 	}
 
 	return &Client{HttpClient: httpClient, ProxyURL: proxyURL, trafficRecorder: trafficRecorder, warmed: make(map[string]bool)}, nil
+}
+
+func proxyClientOptions(proxyURL string) []tls_client.HttpClientOption {
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return []tls_client.HttpClientOption{tls_client.WithProxyUrl(proxyURL)}
+	}
+	if parsed.Scheme == "socks5" || parsed.Scheme == "socks5h" {
+		return []tls_client.HttpClientOption{
+			tls_client.WithProxyDialerFactory(contextAwareSOCKS5Dialer(proxyURL)),
+		}
+	}
+	return []tls_client.HttpClientOption{tls_client.WithProxyUrl(proxyURL)}
+}
+
+func contextAwareSOCKS5Dialer(proxyURL string) tls_client.ProxyDialerFactory {
+	return func(_ string, timeout time.Duration, localAddr *net.TCPAddr, _ http.Header, _ tls_client.Logger) (proxy.ContextDialer, error) {
+		parsed, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, err
+		}
+		if parsed.Host == "" {
+			return nil, fmt.Errorf("invalid SOCKS5 proxy URL %q", proxyURL)
+		}
+
+		var auth *proxy.Auth
+		if parsed.User != nil {
+			password, _ := parsed.User.Password()
+			auth = &proxy.Auth{User: parsed.User.Username(), Password: password}
+		}
+
+		forward := &net.Dialer{Timeout: timeout, LocalAddr: localAddr}
+		dialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, forward)
+		if err != nil {
+			return nil, err
+		}
+		contextDialer, ok := dialer.(proxy.ContextDialer)
+		if !ok {
+			return nil, fmt.Errorf("SOCKS5 dialer for %q does not support contexts", proxyURL)
+		}
+		return timeoutProxyDialer{dialer: contextDialer, timeout: timeout}, nil
+	}
+}
+
+type timeoutProxyDialer struct {
+	dialer  proxy.ContextDialer
+	timeout time.Duration
+}
+
+func (d timeoutProxyDialer) DialContext(ctx context.Context, network string, address string) (net.Conn, error) {
+	if d.timeout <= 0 {
+		return d.dialer.DialContext(ctx, network, address)
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	return d.dialer.DialContext(dialCtx, network, address)
 }
 
 func (c *Client) ProxyLabel() string {

@@ -2922,7 +2922,7 @@ export function AdminClient({
                                                 {region.successRate === null
                                                     ? "n/a"
                                                     : `${region.successRate}%`}{" "}
-                                                ok
+                                                24h ok
                                             </div>
                                             <div className="text-muted-foreground">
                                                 {region.medianLatencyMs === null
