@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
     Activity,
@@ -50,6 +50,7 @@ import {
     setRoleActiveMonitorLimit,
     setUserRole,
     setUserActiveMonitorLimit,
+    getAdminActiveMonitors,
     getAdminLogs,
     getFreeProxyAdminState,
     getAdminUserDetails,
@@ -409,6 +410,12 @@ export function AdminClient({
     const [adminLogs, setAdminLogs] = useState<AdminLogRow[]>(logs);
     const [logsLoaded, setLogsLoaded] = useState(logs.length > 0);
     const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+    const [activeMonitorsLoaded, setActiveMonitorsLoaded] = useState(false);
+    const [isLoadingActiveMonitors, setIsLoadingActiveMonitors] =
+        useState(false);
+    const [activeMonitorsLoadFailed, setActiveMonitorsLoadFailed] =
+        useState(false);
+    const activeMonitorsRequestRef = useRef<Promise<void> | null>(null);
     const [activeTab, setActiveTab] = useState<AdminTab>(
         normalizeTab(initialTab),
     );
@@ -534,11 +541,48 @@ export function AdminClient({
             .finally(() => setIsLoadingLogs(false));
     };
 
+    const loadActiveMonitors = () => {
+        if (activeMonitorsLoaded || activeMonitorsRequestRef.current) return;
+
+        setIsLoadingActiveMonitors(true);
+        setActiveMonitorsLoadFailed(false);
+
+        const request = getAdminActiveMonitors()
+            .then((monitors) => {
+                const monitorsByUser = new Map<string, ActiveMonitor[]>();
+
+                for (const { userId, ...monitor } of monitors) {
+                    const current = monitorsByUser.get(userId) ?? [];
+                    current.push(monitor);
+                    monitorsByUser.set(userId, current);
+                }
+
+                setUsers((currentUsers) =>
+                    currentUsers.map((user) => ({
+                        ...user,
+                        activeMonitors: monitorsByUser.get(user.id) ?? [],
+                    })),
+                );
+                setActiveMonitorsLoaded(true);
+            })
+            .catch(() => {
+                setActiveMonitorsLoadFailed(true);
+                toast.error("Failed to load running monitors");
+            })
+            .finally(() => {
+                activeMonitorsRequestRef.current = null;
+                setIsLoadingActiveMonitors(false);
+            });
+
+        activeMonitorsRequestRef.current = request;
+    };
+
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const tab = normalizeTab(params.get("tab"));
         setActiveTab(tab);
         if (tab === "logs") loadAdminLogs();
+        if (tab === "monitors") loadActiveMonitors();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -549,6 +593,7 @@ export function AdminClient({
         window.history.replaceState(null, "", url.toString());
 
         if (tab === "logs") loadAdminLogs();
+        if (tab === "monitors") loadActiveMonitors();
     };
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -1604,11 +1649,11 @@ export function AdminClient({
                                     </Badge>
                                 </div>
                                 <p className="text-muted-foreground mt-1 text-xs">
-                                    {activeMonitorMembers.length} member
-                                    {activeMonitorMembers.length === 1
-                                        ? ""
-                                        : "s"}{" "}
-                                    currently have active monitors.
+                                    {activeMonitorsLoaded
+                                        ? `${activeMonitorMembers.length} member${activeMonitorMembers.length === 1 ? "" : "s"} currently have active monitors.`
+                                        : activeMonitorsLoadFailed
+                                          ? "Running monitor details are currently unavailable."
+                                          : "Loading running monitor details..."}
                                 </p>
                             </div>
                             <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
@@ -1647,7 +1692,39 @@ export function AdminClient({
                             </div>
                         </div>
 
-                        {filteredActiveMonitorMembers.length > 0 ? (
+                        {!activeMonitorsLoaded ? (
+                            <div className="px-5 py-14 text-center">
+                                <div className="bg-muted text-muted-foreground mx-auto flex h-11 w-11 items-center justify-center rounded-full">
+                                    {activeMonitorsLoadFailed ? (
+                                        <AlertTriangle className="h-5 w-5" />
+                                    ) : (
+                                        <Activity className="h-5 w-5 animate-pulse" />
+                                    )}
+                                </div>
+                                <p className="text-foreground mt-3 text-sm font-medium">
+                                    {activeMonitorsLoadFailed
+                                        ? "Running monitors could not be loaded"
+                                        : "Loading running monitors"}
+                                </p>
+                                <p className="text-muted-foreground mt-1 text-xs">
+                                    {activeMonitorsLoadFailed
+                                        ? "The rest of the admin panel remains available."
+                                        : "Monitor details load separately to keep the admin panel fast."}
+                                </p>
+                                {activeMonitorsLoadFailed ? (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-4"
+                                        onClick={loadActiveMonitors}
+                                        disabled={isLoadingActiveMonitors}
+                                    >
+                                        Retry
+                                    </Button>
+                                ) : null}
+                            </div>
+                        ) : filteredActiveMonitorMembers.length > 0 ? (
                             <div className="divide-border/60 divide-y">
                                 {filteredActiveMonitorMembers.map(
                                     ({ user, monitors }) => {
@@ -1902,7 +1979,8 @@ export function AdminClient({
                             </div>
                         )}
 
-                        {normalizedMonitorQuery &&
+                        {activeMonitorsLoaded &&
+                        normalizedMonitorQuery &&
                         filteredActiveMonitorMembers.length > 0 ? (
                             <div className="border-border/60 text-muted-foreground border-t px-5 py-3 text-xs">
                                 Showing {filteredActiveMonitorCount} running

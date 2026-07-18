@@ -2,6 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { monitorStatusTelegramText, sendTelegramMessage } from "@/lib/telegram";
 import { getTelegramConnection } from "@/lib/telegram-connection";
@@ -36,6 +37,7 @@ const DEFAULT_FREE_PROXY_QUARANTINE_MINUTES = 30;
 const DEFAULT_FREE_PROXY_MIN_ACTIVE_PER_REGION = 25;
 const DEFAULT_FREE_PROXY_TARGET_ACTIVE_PER_REGION = 50;
 const DEFAULT_FREE_PROXY_MAX_LATENCY_MS = 2500;
+const FREE_PROXY_WRITE_BATCH_SIZE = 500;
 const VALID_PROXY_SCHEMES = ["http", "https", "socks4", "socks5"];
 const FREE_PROXY_SOURCE_URLS: Record<string, string> = {
     iplocate_all:
@@ -147,6 +149,22 @@ type ParsedProxy = {
     port: number;
 };
 
+function canonicalProxyUrl(value: string | URL) {
+    let url: URL;
+    try {
+        url = typeof value === "string" ? new URL(value) : value;
+    } catch {
+        return String(value);
+    }
+    const serialized = url.toString();
+
+    if (url.pathname === "/" && !url.search && !url.hash) {
+        return serialized.slice(0, -1);
+    }
+
+    return serialized;
+}
+
 async function requireAdmin() {
     const session = await auth();
     if (!session?.user?.id) throw new Error("Unauthorized");
@@ -215,7 +233,7 @@ function parseProxyLine(
         }
 
         return {
-            proxyUrl: url.toString(),
+            proxyUrl: canonicalProxyUrl(url),
             protocol,
             host: url.hostname,
             port,
@@ -353,33 +371,50 @@ async function upsertFreeProxies(proxies: ParsedProxy[], source: string) {
     const unique = Array.from(
         new Map(proxies.map((proxy) => [proxy.proxyUrl, proxy])).values(),
     );
+    let affectedCount = 0;
 
-    for (const proxy of unique) {
-        await db.free_proxies.upsert({
-            where: { proxy_url: proxy.proxyUrl },
-            create: {
-                proxy_url: proxy.proxyUrl,
-                protocol: proxy.protocol,
-                host: proxy.host,
-                port: proxy.port,
+    for (
+        let offset = 0;
+        offset < unique.length;
+        offset += FREE_PROXY_WRITE_BATCH_SIZE
+    ) {
+        const batch = unique.slice(
+            offset,
+            offset + FREE_PROXY_WRITE_BATCH_SIZE,
+        );
+        const values = batch.map(
+            (proxy) => Prisma.sql`(
+                ${proxy.proxyUrl},
+                ${proxy.protocol},
+                ${proxy.host},
+                ${proxy.port},
+                ${source},
+                'pending'
+            )`,
+        );
+
+        affectedCount += await db.$executeRaw`
+            INSERT INTO free_proxies (
+                proxy_url,
+                protocol,
+                host,
+                port,
                 source,
-                status: "pending",
-                failure_count: 0,
-                last_error: null,
-                quarantined_until: null,
-            },
-            update: {
-                protocol: proxy.protocol,
-                host: proxy.host,
-                port: proxy.port,
-                source,
-                last_error: null,
-                quarantined_until: null,
-            },
-        });
+                status
+            )
+            VALUES ${Prisma.join(values)}
+            ON CONFLICT (proxy_url) DO UPDATE
+            SET protocol = EXCLUDED.protocol,
+                host = EXCLUDED.host,
+                port = EXCLUDED.port,
+                source = EXCLUDED.source,
+                last_error = NULL,
+                quarantined_until = NULL,
+                updated_at = NOW()
+        `;
     }
 
-    return unique.length;
+    return affectedCount;
 }
 
 function sourceLabelForImport(source: string, importUrl: string) {
@@ -780,22 +815,43 @@ export async function importFreeProxiesNow() {
     await requireAdmin();
 
     const settings = await getFreeProxySettings();
+    const existingProxyRows = await db.free_proxies.findMany({
+        select: { proxy_url: true },
+    });
+    const existingProxyUrls = new Set(
+        existingProxyRows.map((proxy) => canonicalProxyUrl(proxy.proxy_url)),
+    );
+    const remainingCapacity = Math.max(
+        0,
+        settings.maxPoolSize - existingProxyUrls.size,
+    );
+
+    if (remainingCapacity === 0) {
+        return {
+            success: true,
+            addedCount: 0,
+            skippedCount: 0,
+            limitReached: true,
+        };
+    }
+
     let skippedCount = 0;
     let fetchedCount = 0;
     let addedCount = 0;
     const importUrls = freeProxyImportUrls(settings);
     const perSourceLimit = Math.ceil(
-        settings.maxPoolSize / Math.max(1, importUrls.length),
+        remainingCapacity / Math.max(1, importUrls.length),
     );
     const seenProxyUrls = new Set<string>();
 
     for (const importUrl of importUrls) {
-        if (seenProxyUrls.size >= settings.maxPoolSize) break;
+        if (seenProxyUrls.size >= remainingCapacity) break;
         let response: Response;
         try {
             response = await fetch(importUrl, {
                 headers: { Accept: "text/plain,*/*" },
                 cache: "no-store",
+                signal: AbortSignal.timeout(15_000),
             });
         } catch (error) {
             console.error("[admin] failed to import free proxies", error);
@@ -813,7 +869,7 @@ export async function importFreeProxiesNow() {
         );
         for (const line of text.split("\n")) {
             if (
-                seenProxyUrls.size >= settings.maxPoolSize ||
+                seenProxyUrls.size >= remainingCapacity ||
                 sourceProxies.length >= perSourceLimit
             ) {
                 break;
@@ -821,7 +877,12 @@ export async function importFreeProxiesNow() {
             if (!line.trim()) continue;
             const proxy = parseProxyLine(line, defaultScheme);
             if (proxy) {
-                if (seenProxyUrls.has(proxy.proxyUrl)) continue;
+                if (
+                    existingProxyUrls.has(proxy.proxyUrl) ||
+                    seenProxyUrls.has(proxy.proxyUrl)
+                ) {
+                    continue;
+                }
                 seenProxyUrls.add(proxy.proxyUrl);
                 sourceProxies.push(proxy);
             } else {
@@ -844,7 +905,8 @@ export async function importFreeProxiesNow() {
         success: true,
         addedCount,
         skippedCount,
-        limitReached: seenProxyUrls.size >= settings.maxPoolSize,
+        limitReached:
+            existingProxyUrls.size + addedCount >= settings.maxPoolSize,
     };
 }
 
@@ -900,6 +962,45 @@ export async function getUsers() {
     });
 
     return users;
+}
+
+export async function getAdminActiveMonitors() {
+    await requireAdmin();
+
+    const monitors = await db.monitors.findMany({
+        where: { status: "active" },
+        orderBy: { created_at: "desc" },
+        select: {
+            id: true,
+            userId: true,
+            name: true,
+            query: true,
+            query_delay_ms: true,
+            status: true,
+            region: true,
+            created_at: true,
+            price_min: true,
+            price_max: true,
+            discord_webhook: true,
+            webhook_active: true,
+            telegram_active: true,
+            proxy_group: {
+                select: {
+                    name: true,
+                },
+            },
+            _count: {
+                select: {
+                    items: true,
+                },
+            },
+        },
+    });
+
+    return monitors.map(({ discord_webhook, ...monitor }) => ({
+        ...monitor,
+        discord_configured: Boolean(discord_webhook),
+    }));
 }
 
 export async function getAdminUserDetails(userId: string) {
